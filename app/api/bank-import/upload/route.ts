@@ -1,6 +1,7 @@
+export const runtime = "edge";
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import crypto from "crypto";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -13,8 +14,12 @@ function norm(s: string) {
   return (s || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function makeHash(input: string) {
-  return crypto.createHash("sha256").update(input).digest("hex");
+async function sha256Hex(input: string) {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 /**
@@ -37,16 +42,20 @@ export async function POST(req: Request) {
     const supabaseAdmin = getSupabaseAdmin();
     if (!supabaseAdmin) {
       return NextResponse.json(
-        { error: "Supabase env vars faltantes (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)." },
+        {
+          error:
+            "Supabase env vars faltantes (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY).",
+        },
         { status: 500 }
       );
     }
+
     const body = await req.json();
 
     const client_id = Number(body.client_id);
     const condominio_id = Number(body.condominio_id);
     const filename = String(body.filename || "").trim();
-    const uploaded_by = String(body.uploaded_by || "").trim(); // ✅ UUID
+    const uploaded_by = String(body.uploaded_by || "").trim(); // UUID
     const rows = Array.isArray(body.rows) ? body.rows : [];
 
     if (!client_id || !condominio_id) {
@@ -70,8 +79,8 @@ export async function POST(req: Request) {
           client_id,
           condominio_id,
           filename,
-          uploaded_by, // ✅ uuid
-          uploaded_at: new Date().toISOString(), // ✅ requerido por tu tabla
+          uploaded_by,
+          uploaded_at: new Date().toISOString(),
           status: "STAGING",
         },
       ])
@@ -85,7 +94,9 @@ export async function POST(req: Request) {
     const import_id = Number(imp.id);
 
     // 2) Insertar transacciones (incluye hash NOT NULL)
-    const txInserts = rows.map((r: any, i: number) => {
+    const txInserts = [];
+    for (let i = 0; i < rows.length; i += 1) {
+      const r: any = rows[i];
       const fecha = r.fecha ?? null;
       const monto = Number(r.monto);
       const referencia = r.referencia ?? null;
@@ -102,7 +113,7 @@ export async function POST(req: Request) {
         descripcion ?? "",
       ].join("|");
 
-      return {
+      txInserts.push({
         import_id,
         client_id,
         condominio_id,
@@ -110,9 +121,9 @@ export async function POST(req: Request) {
         monto,
         referencia,
         descripcion,
-        hash: makeHash(raw), // ✅ requerido por tu tabla
-      };
-    });
+        hash: await sha256Hex(raw),
+      });
+    }
 
     const { data: txs, error: txErr } = await supabaseAdmin
       .from("bank_transactions")
