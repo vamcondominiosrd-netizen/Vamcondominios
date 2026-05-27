@@ -1,0 +1,674 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { supabase } from "@/app/lib/supabaseClient";
+
+type Proveedor = { id: number; nombre_proveedor: string };
+type Categoria = { id: number; nombre_categoria: string };
+
+type Gasto = {
+  id: number;
+  condominio: string;
+  fecha: string;
+  concepto: string;
+  detalle_gasto: string;
+  monto: number;
+  itbis: number;
+  total: number;
+  no_factura: string;
+  ncf: string;
+  metodo_pago: string;
+  cuenta_banco: string;
+  factura_url: string;
+  estado: string;
+  categoria_id?: number;
+  proveedor_id?: number;
+  catalogo_proveedores?: { nombre_proveedor: string };
+  catalogo_categoria_gastos?: { nombre_categoria: string };
+};
+
+export default function GastosPage() {
+  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [gastos, setGastos] = useState<Gasto[]>([]);
+  const [guardando, setGuardando] = useState(false);
+  const [editandoId, setEditandoId] = useState<number | null>(null);
+
+  const [condominioId, setCondominioId] = useState("");
+  const [condominioNombre, setCondominioNombre] = useState("");
+
+  const [fecha, setFecha] = useState("");
+  const [categoriaId, setCategoriaId] = useState("");
+  const [proveedorId, setProveedorId] = useState("");
+  const [concepto, setConcepto] = useState("");
+  const [detalleGasto, setDetalleGasto] = useState("");
+  const [monto, setMonto] = useState("");
+  const [itbis, setItbis] = useState("");
+  const [noFactura, setNoFactura] = useState("");
+  const [ncf, setNcf] = useState("");
+  const [metodoPago, setMetodoPago] = useState("");
+  const [cuentaBanco, setCuentaBanco] = useState("");
+  const [facturaArchivo, setFacturaArchivo] = useState<File | null>(null);
+  const [facturaActualUrl, setFacturaActualUrl] = useState("");
+
+  useEffect(() => {
+    const id = localStorage.getItem("condominio_id") || "";
+    const nombre = localStorage.getItem("condominio_nombre") || "";
+
+    setCondominioId(id);
+    setCondominioNombre(nombre);
+
+    cargarCatalogos();
+    cargarGastos(nombre);
+  }, []);
+
+  async function cargarCatalogos() {
+    const { data: proveedoresData } = await supabase
+      .from("catalogo_proveedores")
+      .select("id, nombre_proveedor")
+      .eq("estado", "activo")
+      .order("nombre_proveedor", { ascending: true });
+
+    const { data: categoriasData } = await supabase
+      .from("catalogo_categoria_gastos")
+      .select("id, nombre_categoria")
+      .eq("estado", "activo")
+      .order("nombre_categoria", { ascending: true });
+
+    setProveedores(proveedoresData || []);
+    setCategorias(categoriasData || []);
+  }
+
+  async function cargarGastos(nombreCondominio: string) {
+    const { data, error } = await supabase
+      .from("gastos")
+      .select(`
+        id,
+        condominio,
+        fecha,
+        concepto,
+        detalle_gasto,
+        monto,
+        itbis,
+        total,
+        no_factura,
+        ncf,
+        metodo_pago,
+        cuenta_banco,
+        factura_url,
+        estado,
+        categoria_id,
+        proveedor_id,
+        catalogo_proveedores(nombre_proveedor),
+        catalogo_categoria_gastos(nombre_categoria)
+      `)
+      .eq("condominio", nombreCondominio)
+      .order("fecha", { ascending: false });
+
+    if (error) {
+      alert("Error cargando gastos: " + error.message);
+      return;
+    }
+
+    setGastos((data as Gasto[]) || []);
+  }
+
+  async function subirFactura() {
+    if (!facturaArchivo) return facturaActualUrl || "";
+
+    const extension = facturaArchivo.name.split(".").pop();
+
+    const nombreArchivo = `${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(2)}.${extension}`;
+
+    const rutaArchivo = `${condominioId || "general"}/${nombreArchivo}`;
+
+    const { error } = await supabase.storage
+      .from("facturas-gastos")
+      .upload(rutaArchivo, facturaArchivo);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const { data } = supabase.storage
+      .from("facturas-gastos")
+      .getPublicUrl(rutaArchivo);
+
+    return data.publicUrl;
+  }
+
+  function limpiarFormulario() {
+    setEditandoId(null);
+    setFecha("");
+    setCategoriaId("");
+    setProveedorId("");
+    setConcepto("");
+    setDetalleGasto("");
+    setMonto("");
+    setItbis("");
+    setNoFactura("");
+    setNcf("");
+    setMetodoPago("");
+    setCuentaBanco("");
+    setFacturaArchivo(null);
+    setFacturaActualUrl("");
+
+    const inputFile = document.getElementById(
+      "facturaGasto"
+    ) as HTMLInputElement | null;
+
+    if (inputFile) inputFile.value = "";
+  }
+
+  function editarGasto(g: Gasto) {
+    setEditandoId(g.id);
+    setFecha(g.fecha || "");
+    setCategoriaId(g.categoria_id ? String(g.categoria_id) : "");
+    setProveedorId(g.proveedor_id ? String(g.proveedor_id) : "");
+    setConcepto(g.concepto || "");
+    setDetalleGasto(g.detalle_gasto || "");
+    setMonto(String(g.monto || 0));
+    setItbis(String(g.itbis || 0));
+    setNoFactura(g.no_factura || "");
+    setNcf(g.ncf || "");
+    setMetodoPago(g.metodo_pago || "");
+    setCuentaBanco(g.cuenta_banco || "");
+    setFacturaActualUrl(g.factura_url || "");
+    setFacturaArchivo(null);
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function borrarGasto(g: Gasto) {
+    const confirmar = confirm(
+      `¿Seguro que desea borrar el gasto "${g.concepto}" por RD$ ${Number(
+        g.total || 0
+      ).toLocaleString("es-DO", { minimumFractionDigits: 2 })}?`
+    );
+
+    if (!confirmar) return;
+
+    const { error } = await supabase
+      .from("gastos")
+      .delete()
+      .eq("id", g.id)
+      .eq("condominio", condominioNombre);
+
+    if (error) {
+      alert("Error borrando gasto: " + error.message);
+      return;
+    }
+
+    alert("Gasto borrado correctamente.");
+    cargarGastos(condominioNombre);
+  }
+
+  async function guardarGasto(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (
+      !condominioNombre ||
+      !fecha ||
+      !categoriaId ||
+      !proveedorId ||
+      !concepto ||
+      !monto
+    ) {
+      alert("Debe completar fecha, categoría, proveedor, concepto y monto.");
+      return;
+    }
+
+    try {
+      setGuardando(true);
+
+      const montoNumero = Number(monto || 0);
+      const itbisNumero = Number(itbis || 0);
+      const totalNumero = montoNumero + itbisNumero;
+
+      const facturaUrl = await subirFactura();
+
+      const registro: any = {
+        condominio: condominioNombre,
+        fecha,
+        categoria_id: Number(categoriaId),
+        proveedor_id: Number(proveedorId),
+        concepto,
+        detalle_gasto: detalleGasto,
+        monto: montoNumero,
+        itbis: itbisNumero,
+        total: totalNumero,
+        no_factura: noFactura,
+        ncf,
+        metodo_pago: metodoPago,
+        cuenta_banco: cuentaBanco,
+        factura_url: facturaUrl,
+        estado: "registrado",
+      };
+
+      if (condominioId) {
+        registro.condominio_id = Number(condominioId);
+      }
+
+      if (editandoId) {
+        const { error } = await supabase
+          .from("gastos")
+          .update(registro)
+          .eq("id", editandoId)
+          .eq("condominio", condominioNombre);
+
+        setGuardando(false);
+
+        if (error) {
+          alert("Error modificando gasto: " + error.message);
+          return;
+        }
+
+        alert("Gasto modificado correctamente.");
+      } else {
+        const { error } = await supabase.from("gastos").insert([registro]);
+
+        setGuardando(false);
+
+        if (error) {
+          alert("Error guardando gasto: " + error.message);
+          return;
+        }
+
+        alert("Gasto registrado correctamente.");
+      }
+
+      limpiarFormulario();
+      cargarGastos(condominioNombre);
+    } catch (err: any) {
+      setGuardando(false);
+      alert("Error subiendo factura: " + err.message);
+    }
+  }
+
+  const totalGastos = gastos.reduce((sum, g) => sum + Number(g.total || 0), 0);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold">Gastos Profesionales</h1>
+        <p className="text-slate-500">
+          Registro de gastos del condominio activo.
+        </p>
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm border">
+        <p className="text-xs uppercase tracking-wide text-slate-500">
+          Condominio activo
+        </p>
+        <p className="font-bold text-slate-800 mt-1">
+          {condominioNombre || "No seleccionado"}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <p className="text-sm text-slate-500">Total registros</p>
+          <h2 className="text-2xl font-bold">{gastos.length}</h2>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <p className="text-sm text-slate-500">Monto total gastos</p>
+          <h2 className="text-2xl font-bold text-red-700">
+            RD$
+            {totalGastos.toLocaleString("es-DO", {
+              minimumFractionDigits: 2,
+            })}
+          </h2>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <p className="text-sm text-slate-500">Modo</p>
+          <h2 className="text-2xl font-bold text-blue-700">
+            {editandoId ? "Editando" : "Nuevo"}
+          </h2>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-6 shadow-sm">
+        <h2 className="text-xl font-bold mb-4">
+          {editandoId ? "Modificar gasto" : "Registrar gasto"}
+        </h2>
+
+        <form
+          onSubmit={guardarGasto}
+          className="grid grid-cols-1 md:grid-cols-2 gap-4"
+        >
+          <div className="md:col-span-2 bg-slate-50 border rounded-lg px-3 py-3">
+            <label className="block text-sm font-semibold mb-1">
+              Condominio
+            </label>
+            <p className="font-semibold text-slate-800">
+              {condominioNombre || "No seleccionado"}
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">Fecha *</label>
+            <input
+              type="date"
+              value={fecha}
+              onChange={(e) => setFecha(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Categoría *
+            </label>
+            <select
+              value={categoriaId}
+              onChange={(e) => setCategoriaId(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+            >
+              <option value="">Seleccione categoría</option>
+              {categorias.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre_categoria}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Proveedor *
+            </label>
+            <select
+              value={proveedorId}
+              onChange={(e) => setProveedorId(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+            >
+              <option value="">Seleccione proveedor</option>
+              {proveedores.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nombre_proveedor}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Concepto *
+            </label>
+            <input
+              type="text"
+              value={concepto}
+              onChange={(e) => setConcepto(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+              placeholder="Ej. Reparación bomba de agua"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Monto RD$ *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              value={monto}
+              onChange={(e) => setMonto(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+              placeholder="0.00"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              ITBIS RD$
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              value={itbis}
+              onChange={(e) => setItbis(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+              placeholder="0.00"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Total RD$
+            </label>
+            <input
+              type="text"
+              value={`RD$${(
+                Number(monto || 0) + Number(itbis || 0)
+              ).toLocaleString("es-DO", { minimumFractionDigits: 2 })}`}
+              readOnly
+              className="border rounded-lg px-3 py-2 w-full bg-slate-100"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              No. Factura
+            </label>
+            <input
+              type="text"
+              value={noFactura}
+              onChange={(e) => setNoFactura(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+              placeholder="Número de factura"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">NCF</label>
+            <input
+              type="text"
+              value={ncf}
+              onChange={(e) => setNcf(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+              placeholder="NCF"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Método de pago
+            </label>
+            <select
+              value={metodoPago}
+              onChange={(e) => setMetodoPago(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+            >
+              <option value="">Seleccione método</option>
+              <option value="Efectivo">Efectivo</option>
+              <option value="Transferencia">Transferencia</option>
+              <option value="Cheque">Cheque</option>
+              <option value="Depósito">Depósito</option>
+              <option value="Tarjeta">Tarjeta</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Cuenta banco
+            </label>
+            <input
+              type="text"
+              value={cuentaBanco}
+              onChange={(e) => setCuentaBanco(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+              placeholder="Cuenta utilizada para el pago"
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-sm font-semibold mb-1">
+              Subir factura
+            </label>
+            <input
+              id="facturaGasto"
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+              onChange={(e) => setFacturaArchivo(e.target.files?.[0] || null)}
+              className="border rounded-lg px-3 py-2 w-full bg-white"
+            />
+
+            {facturaActualUrl && (
+              <p className="text-sm mt-2">
+                Factura actual:{" "}
+                <a
+                  href={facturaActualUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 underline"
+                >
+                  Ver factura
+                </a>
+              </p>
+            )}
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-sm font-semibold mb-1">
+              Detalle del gasto
+            </label>
+            <textarea
+              value={detalleGasto}
+              onChange={(e) => setDetalleGasto(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+              rows={3}
+              placeholder="Describa el detalle del gasto"
+            />
+          </div>
+
+          <div className="md:col-span-2 flex gap-2">
+            <button
+              type="submit"
+              disabled={guardando}
+              className="bg-blue-700 text-white px-5 py-2 rounded-lg hover:bg-blue-800 disabled:opacity-50"
+            >
+              {guardando
+                ? "Guardando..."
+                : editandoId
+                ? "Guardar cambios"
+                : "Guardar gasto"}
+            </button>
+
+            {editandoId && (
+              <button
+                type="button"
+                onClick={limpiarFormulario}
+                className="bg-slate-500 text-white px-5 py-2 rounded-lg hover:bg-slate-600"
+              >
+                Cancelar
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+
+      <div className="bg-white rounded-2xl p-6 shadow-sm">
+        <h2 className="text-xl font-bold mb-4">Últimos gastos registrados</h2>
+
+        <div className="overflow-auto border rounded-lg">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="p-2 border">Fecha</th>
+                <th className="p-2 border">Categoría</th>
+                <th className="p-2 border">Proveedor</th>
+                <th className="p-2 border">Concepto</th>
+                <th className="p-2 border">Monto</th>
+                <th className="p-2 border">ITBIS</th>
+                <th className="p-2 border">Total</th>
+                <th className="p-2 border">Factura</th>
+                <th className="p-2 border">Estado</th>
+                <th className="p-2 border">Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {gastos.map((g) => (
+                <tr key={g.id}>
+                  <td className="p-2 border">{g.fecha}</td>
+                  <td className="p-2 border">
+                    {g.catalogo_categoria_gastos?.nombre_categoria}
+                  </td>
+                  <td className="p-2 border">
+                    {g.catalogo_proveedores?.nombre_proveedor}
+                  </td>
+                  <td className="p-2 border">{g.concepto}</td>
+                  <td className="p-2 border text-right">
+                    RD$
+                    {Number(g.monto).toLocaleString("es-DO", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </td>
+                  <td className="p-2 border text-right">
+                    RD$
+                    {Number(g.itbis || 0).toLocaleString("es-DO", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </td>
+                  <td className="p-2 border text-right font-bold">
+                    RD$
+                    {Number(g.total).toLocaleString("es-DO", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </td>
+                  <td className="p-2 border text-center">
+                    {g.factura_url ? (
+                      <a
+                        href={g.factura_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="bg-slate-900 text-white px-3 py-1 rounded-lg"
+                      >
+                        Ver factura
+                      </a>
+                    ) : (
+                      <span className="text-slate-400">Sin factura</span>
+                    )}
+                  </td>
+                  <td className="p-2 border text-green-700 font-semibold">
+                    {g.estado}
+                  </td>
+                  <td className="p-2 border text-center">
+                    <div className="flex gap-2 justify-center">
+                      <button
+                        onClick={() => editarGasto(g)}
+                        className="bg-blue-600 text-white px-3 py-1 rounded-lg"
+                      >
+                        Editar
+                      </button>
+
+                      <button
+                        onClick={() => borrarGasto(g)}
+                        className="bg-red-600 text-white px-3 py-1 rounded-lg"
+                      >
+                        Borrar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+              {gastos.length === 0 && (
+                <tr>
+                  <td className="p-4 border text-center" colSpan={10}>
+                    No hay gastos registrados para este condominio.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
