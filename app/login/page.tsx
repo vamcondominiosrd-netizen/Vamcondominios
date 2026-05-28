@@ -120,9 +120,11 @@ export default function LoginPage() {
             </div>
           ) : (
             <div className="flex justify-center mb-4">
-              <div className="h-24 w-24 rounded-xl border bg-slate-100 flex items-center justify-center text-slate-400 text-sm">
-                Logo
-              </div>
+              <img
+                src="/logo.jpg"
+                alt="Logo"
+                className="h-24 w-24 object-contain rounded-xl border bg-white p-2"
+              />
             </div>
           )}
 

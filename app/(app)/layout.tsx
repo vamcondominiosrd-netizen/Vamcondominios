@@ -437,9 +437,11 @@ export default function AppLayout({
 
           ) : (
 
-            <div className="h-14 w-14 rounded-2xl bg-amber-500 flex items-center justify-center">
-              <Building2 className="h-7 w-7 text-slate-950" />
-            </div>
+            <img
+              src="/logo.jpg"
+              alt="Logo"
+              className="h-14 w-14 object-contain rounded-2xl border border-slate-700 bg-white p-2"
+            />
 
           )}
 
