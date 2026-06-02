@@ -4,14 +4,6 @@ import { useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/app/lib/supabaseClient";
 
-type Unidad = {
-  id: number;
-  condominio_id: number;
-  codigo: string;
-  propietario_nombre: string;
-  activa: boolean;
-};
-
 type AliasRow = {
   condominio_id: number;
   condominio: string;
@@ -19,6 +11,7 @@ type AliasRow = {
   no_apartamento: string;
   propietario: string;
   descripcion_banco: string;
+  periodo_pago: string;
   estado: string;
 };
 
@@ -30,8 +23,17 @@ type AliasGuardado = {
   no_apartamento: string;
   propietario: string;
   descripcion_banco: string;
+  periodo_pago: string;
   estado: string;
   created_at: string;
+};
+
+type Unidad = {
+  id: number;
+  condominio_id: number;
+  codigo: string;
+  propietario_nombre: string;
+  activa: boolean;
 };
 
 function obtenerValor(row: any, posiblesNombres: string[]) {
@@ -72,12 +74,18 @@ export default function ImportarCuentasBancoPropietariosPage() {
 
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("Todos");
+  const [periodoPago, setPeriodoPago] = useState(
+    new Date().toISOString().slice(0, 7)
+  );
 
   const [editandoId, setEditandoId] = useState<number | null>(null);
   const [editUnidadId, setEditUnidadId] = useState("");
   const [editNoApartamento, setEditNoApartamento] = useState("");
   const [editPropietario, setEditPropietario] = useState("");
   const [editDescripcionBanco, setEditDescripcionBanco] = useState("");
+  const [editPeriodoPago, setEditPeriodoPago] = useState(
+    new Date().toISOString().slice(0, 7)
+  );
   const [editEstado, setEditEstado] = useState("Activo");
 
   useEffect(() => {
@@ -119,7 +127,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
     const { data, error } = await supabase
       .from("apartamento_banco_alias")
       .select(
-        "id, condominio_id, condominio, unidad_id, no_apartamento, propietario, descripcion_banco, estado, created_at"
+        "id, condominio_id, condominio, unidad_id, no_apartamento, propietario, descripcion_banco, periodo_pago, estado, created_at"
       )
       .eq("condominio_id", Number(id))
       .order("created_at", { ascending: false });
@@ -177,6 +185,11 @@ export default function ImportarCuentasBancoPropietariosPage() {
       return;
     }
 
+    if (!periodoPago) {
+      alert("Debe seleccionar el mes de pago antes de cargar el archivo.");
+      return;
+    }
+
     if (unidades.length === 0) {
       alert("No hay apartamentos cargados para este condominio.");
       return;
@@ -202,10 +215,8 @@ export default function ImportarCuentasBancoPropietariosPage() {
               "Apartamento",
               "Unidad",
               "No Unidad",
-              "Codigo",
               "Código",
-              "Apto",
-              "Apt",
+              "Codigo",
             ]) || ""
           ).trim();
 
@@ -215,13 +226,21 @@ export default function ImportarCuentasBancoPropietariosPage() {
               "Descripción Banco",
               "Descripcion",
               "Descripción",
-              "Alias Banco",
               "Banco",
+              "Alias Banco",
               "Concepto Banco",
               "Referencia Banco",
-              "Referencia",
-              "Detalle",
-              "Concepto",
+            ]) || ""
+          ).trim();
+
+          const periodoArchivo = String(
+            obtenerValor(r, [
+              "Periodo",
+              "Período",
+              "Mes",
+              "Mes Pago",
+              "Periodo Pago",
+              "Período Pago",
             ]) || ""
           ).trim();
 
@@ -230,14 +249,17 @@ export default function ImportarCuentasBancoPropietariosPage() {
           return {
             condominio_id: Number(condominioId),
             condominio: condominioNombre,
+
             unidad_id: unidad?.id || null,
             no_apartamento: noApartamento,
             propietario: unidad?.propietario_nombre || "",
+
             descripcion_banco: descripcionBanco,
+            periodo_pago: periodoArchivo || periodoPago,
             estado: unidad ? "Activo" : "Pendiente",
           };
         })
-        .filter((r) => r.descripcion_banco);
+        .filter((r) => r.no_apartamento && r.descripcion_banco);
 
       setRows(mapped);
     };
@@ -256,7 +278,9 @@ export default function ImportarCuentasBancoPropietariosPage() {
       return;
     }
 
-    const registrosValidos = rows.filter((r) => r.descripcion_banco);
+    const registrosValidos = rows.filter(
+      (r) => r.no_apartamento && r.descripcion_banco && r.periodo_pago
+    );
 
     if (registrosValidos.length === 0) {
       alert("No hay registros válidos para importar.");
@@ -264,7 +288,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
     }
 
     const confirmar = confirm(
-      `Se importarán ${registrosValidos.length} cuentas banco propietarios para ${condominioNombre}. ¿Desea continuar?`
+      `Se importarán ${registrosValidos.length} cuentas banco propietarios para ${condominioNombre}, período ${periodoPago}. ¿Desea continuar?`
     );
 
     if (!confirmar) return;
@@ -294,6 +318,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
     setEditNoApartamento(item.no_apartamento || "");
     setEditPropietario(item.propietario || "");
     setEditDescripcionBanco(item.descripcion_banco || "");
+    setEditPeriodoPago(item.periodo_pago || periodoPago);
     setEditEstado(item.estado || "Activo");
 
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -305,6 +330,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
     setEditNoApartamento("");
     setEditPropietario("");
     setEditDescripcionBanco("");
+    setEditPeriodoPago(periodoPago);
     setEditEstado("Activo");
   }
 
@@ -316,8 +342,18 @@ export default function ImportarCuentasBancoPropietariosPage() {
       return;
     }
 
+    if (!editNoApartamento.trim()) {
+      alert("Debe seleccionar o indicar el apartamento.");
+      return;
+    }
+
     if (!editDescripcionBanco.trim()) {
       alert("Debe indicar la descripción banco.");
+      return;
+    }
+
+    if (!editPeriodoPago) {
+      alert("Debe indicar el mes de pago.");
       return;
     }
 
@@ -326,6 +362,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
       no_apartamento: editNoApartamento.trim(),
       propietario: editPropietario.trim(),
       descripcion_banco: editDescripcionBanco.trim(),
+      periodo_pago: editPeriodoPago,
       estado: editUnidadId ? editEstado : "Pendiente",
     };
 
@@ -369,7 +406,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
 
   async function eliminarAlias(item: AliasGuardado) {
     const confirmar = confirm(
-      `¿Seguro que desea eliminar la referencia bancaria "${item.descripcion_banco}" del apartamento ${item.no_apartamento || "sin asignar"}?`
+      `¿Seguro que desea eliminar la cuenta bancaria "${item.descripcion_banco}" del apartamento ${item.no_apartamento}?`
     );
 
     if (!confirmar) return;
@@ -395,65 +432,21 @@ export default function ImportarCuentasBancoPropietariosPage() {
   const aliasFiltrados = aliasGuardados.filter((item) => {
     const texto = `${item.no_apartamento || ""} ${item.propietario || ""} ${
       item.descripcion_banco || ""
-    } ${item.estado || ""}`
+    } ${item.periodo_pago || ""} ${item.estado || ""}`
       .toLowerCase()
       .trim();
 
     const coincideBusqueda = texto.includes(busqueda.toLowerCase().trim());
 
-    const estadoReal =
-      item.estado === "Pendiente" || !item.unidad_id
-        ? "Pendiente"
-        : item.estado || "Activo";
-
     const coincideEstado =
-      filtroEstado === "Todos" ? true : estadoReal === filtroEstado;
+      filtroEstado === "Todos" ? true : item.estado === filtroEstado;
 
     return coincideBusqueda && coincideEstado;
   });
 
-  function exportarExcel() {
-    if (aliasFiltrados.length === 0) {
-      alert("No hay información para exportar.");
-      return;
-    }
-
-    const data = aliasFiltrados.map((item) => {
-      const estadoReal =
-        item.estado === "Pendiente" || !item.unidad_id
-          ? "Pendiente"
-          : item.estado || "Activo";
-
-      return {
-        Condominio: item.condominio || condominioNombre,
-        "No. Apartamento": item.no_apartamento || "",
-        Propietario: item.propietario || "",
-        "Descripción Banco": item.descripcion_banco || "",
-        Estado: estadoReal,
-        "Unidad ID": item.unidad_id || "",
-        "Fecha Registro": item.created_at
-          ? new Date(item.created_at).toLocaleDateString("es-DO")
-          : "",
-      };
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const workbook = XLSX.utils.book_new();
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Alias Banco");
-
-    const nombreArchivo = `apartamento-banco-alias-${
-      condominioNombre || "condominio"
-    }.xlsx`
-      .replace(/\s+/g, "-")
-      .toLowerCase();
-
-    XLSX.writeFile(workbook, nombreArchivo);
-  }
-
   const totalGuardados = aliasGuardados.length;
   const totalActivos = aliasGuardados.filter(
-    (item) => item.estado === "Activo" && item.unidad_id
+    (item) => item.estado === "Activo"
   ).length;
   const totalPendientes = aliasGuardados.filter(
     (item) => item.estado === "Pendiente" || !item.unidad_id
@@ -474,8 +467,9 @@ export default function ImportarCuentasBancoPropietariosPage() {
         </h1>
 
         <p className="text-slate-500 mt-2">
-          Este módulo registra los alias bancarios que permiten relacionar la
-          descripción del banco con el apartamento y el propietario.
+          Sube el archivo Excel con las cuentas, referencias o descripciones que
+          aparecen en el banco para identificar automáticamente a qué apartamento
+          o propietario pertenece cada pago.
         </p>
       </div>
 
@@ -507,8 +501,20 @@ export default function ImportarCuentasBancoPropietariosPage() {
       {editandoId && registroEditando && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-3xl p-6">
           <h2 className="text-xl font-black text-yellow-900 mb-4">
-            Actualizar alias banco propietario
+            Actualizar cuenta banco propietario
           </h2>
+
+          <div className="bg-white border rounded-2xl p-4 mb-5">
+            <p className="text-sm text-slate-500">Registro seleccionado</p>
+            <p className="font-bold text-slate-900">
+              {registroEditando.descripcion_banco || "-"}
+            </p>
+
+            <p className="text-sm text-slate-500 mt-1">
+              Estado actual:{" "}
+              <span className="font-bold">{registroEditando.estado}</span>
+            </p>
+          </div>
 
           <form
             onSubmit={guardarActualizacionAlias}
@@ -516,7 +522,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
           >
             <div>
               <label className="block text-sm font-semibold mb-1">
-                Apartamento correcto
+                Apartamento correcto *
               </label>
 
               <select
@@ -567,7 +573,22 @@ export default function ImportarCuentasBancoPropietariosPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold mb-1">Estado</label>
+              <label className="block text-sm font-semibold mb-1">
+                Mes de pago *
+              </label>
+
+              <input
+                type="month"
+                value={editPeriodoPago}
+                onChange={(e) => setEditPeriodoPago(e.target.value)}
+                className="border rounded-xl px-4 py-3 w-full"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold mb-1">
+                Estado
+              </label>
 
               <select
                 value={editEstado}
@@ -583,7 +604,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
 
             <div className="md:col-span-2">
               <label className="block text-sm font-semibold mb-1">
-                Descripción / alias banco *
+                Descripción banco *
               </label>
 
               <textarea
@@ -591,7 +612,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
                 onChange={(e) => setEditDescripcionBanco(e.target.value)}
                 className="border rounded-xl px-4 py-3 w-full"
                 rows={3}
-                placeholder="Texto que aparece en la descripción del banco"
+                placeholder="Texto o referencia que aparece en el banco"
               />
             </div>
 
@@ -616,20 +637,37 @@ export default function ImportarCuentasBancoPropietariosPage() {
       )}
 
       <div className="border rounded-2xl p-5 bg-white shadow-sm">
-        <label className="block text-sm font-semibold mb-2">
-          Seleccionar archivo Excel o CSV
-        </label>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <div>
+            <label className="block text-sm font-semibold mb-2">
+              Mes de pago de la importación
+            </label>
 
-        <input
-          type="file"
-          accept=".xlsx,.xls,.csv"
-          onChange={handleFile}
-          className="block w-full border rounded-xl px-4 py-3"
-        />
+            <input
+              type="month"
+              value={periodoPago}
+              onChange={(e) => setPeriodoPago(e.target.value)}
+              className="border rounded-xl px-4 py-3 w-full"
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-sm font-semibold mb-2">
+              Seleccionar archivo Excel o CSV
+            </label>
+
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleFile}
+              className="block w-full border rounded-xl px-4 py-3"
+            />
+          </div>
+        </div>
 
         <p className="text-xs text-slate-500 mt-2">
           Columnas esperadas: No Apartamento y Descripción Banco. También acepta
-          Apartamento, Unidad, Código, Alias Banco, Referencia o Concepto.
+          Apartamento, Unidad, Código, Descripción, Banco o Alias Banco.
         </p>
       </div>
 
@@ -641,12 +679,12 @@ export default function ImportarCuentasBancoPropietariosPage() {
             </h2>
 
             <p className="text-sm text-blue-700 mt-1">
-              Revisa estos alias antes de importarlos. Los registros sin
-              apartamento encontrado quedarán como Pendiente.
+              Revisa estos datos antes de importarlos. Los registros sin
+              propietario se guardarán como Pendiente para ser actualizados.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-white rounded-2xl p-5 shadow-sm border">
               <p className="text-sm text-slate-500">Registros leídos</p>
               <h2 className="text-3xl font-black">{rows.length}</h2>
@@ -665,7 +703,21 @@ export default function ImportarCuentasBancoPropietariosPage() {
                 {totalSinUnidad}
               </h2>
             </div>
+
+            <div className="bg-white rounded-2xl p-5 shadow-sm border">
+              <p className="text-sm text-slate-500">Mes de pago</p>
+              <h2 className="text-2xl font-black text-blue-700">
+                {periodoPago}
+              </h2>
+            </div>
           </div>
+
+          {totalSinUnidad > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-2xl p-4">
+              Hay {totalSinUnidad} cuentas cuyo apartamento no fue encontrado en
+              la tabla de unidades. Se importarán como Pendiente.
+            </div>
+          )}
 
           <div className="flex items-center justify-between bg-white rounded-2xl border shadow-sm p-5">
             <h2 className="text-lg font-bold">
@@ -688,6 +740,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
               <thead className="bg-slate-100">
                 <tr>
                   <th className="p-3 border text-left">Condominio</th>
+                  <th className="p-3 border text-left">Mes pago</th>
                   <th className="p-3 border text-left">No Apartamento</th>
                   <th className="p-3 border text-left">Propietario</th>
                   <th className="p-3 border text-left">Descripción Banco</th>
@@ -703,7 +756,11 @@ export default function ImportarCuentasBancoPropietariosPage() {
                     </td>
 
                     <td className="p-3 border font-bold">
-                      {r.no_apartamento || "-"}
+                      {r.periodo_pago}
+                    </td>
+
+                    <td className="p-3 border font-bold">
+                      {r.no_apartamento}
                     </td>
 
                     <td className="p-3 border">
@@ -739,16 +796,16 @@ export default function ImportarCuentasBancoPropietariosPage() {
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
             <h2 className="text-xl font-black">
-              Alias banco propietarios cargados
+              Cuentas banco propietarios cargadas
             </h2>
 
             <p className="text-sm text-slate-500">
-              Estos registros se usan para identificar automáticamente los pagos
-              importados desde archivo_banco.
+              Aquí puedes revisar cuáles cuentas ya tienen apartamento asignado
+              y cuáles están pendientes de actualizar.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 w-full md:w-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full md:w-auto">
             <div>
               <label className="block text-sm font-semibold mb-1">Estado</label>
 
@@ -783,26 +840,17 @@ export default function ImportarCuentasBancoPropietariosPage() {
                 Actualizar
               </button>
             </div>
-
-            <div className="flex items-end">
-              <button
-                onClick={exportarExcel}
-                className="bg-green-700 hover:bg-green-800 text-white px-5 py-3 rounded-xl font-bold w-full"
-              >
-                Exportar Excel
-              </button>
-            </div>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
           <div className="bg-slate-50 rounded-2xl p-5 border">
-            <p className="text-sm text-slate-500">Total cargados</p>
+            <p className="text-sm text-slate-500">Total cargadas</p>
             <h2 className="text-3xl font-black">{totalGuardados}</h2>
           </div>
 
           <div className="bg-slate-50 rounded-2xl p-5 border">
-            <p className="text-sm text-slate-500">Activos</p>
+            <p className="text-sm text-slate-500">Activas</p>
             <h2 className="text-3xl font-black text-green-700">
               {totalActivos}
             </h2>
@@ -816,7 +864,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
           </div>
 
           <div className="bg-slate-50 rounded-2xl p-5 border">
-            <p className="text-sm text-slate-500">Inactivos</p>
+            <p className="text-sm text-slate-500">Inactivas</p>
             <h2 className="text-3xl font-black text-red-700">
               {totalInactivos}
             </h2>
@@ -824,12 +872,13 @@ export default function ImportarCuentasBancoPropietariosPage() {
         </div>
 
         {cargandoAlias ? (
-          <div>Cargando alias banco propietarios...</div>
+          <div>Cargando cuentas banco propietarios...</div>
         ) : (
           <div className="overflow-auto border rounded-2xl bg-white">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100">
                 <tr>
+                  <th className="p-3 border text-left">Mes pago</th>
                   <th className="p-3 border text-left">No Apartamento</th>
                   <th className="p-3 border text-left">Propietario</th>
                   <th className="p-3 border text-left">Descripción Banco</th>
@@ -840,11 +889,14 @@ export default function ImportarCuentasBancoPropietariosPage() {
 
               <tbody>
                 {aliasFiltrados.map((item) => {
-                  const estaPendiente =
-                    item.estado === "Pendiente" || !item.unidad_id;
+                  const estaPendiente = item.estado === "Pendiente" || !item.unidad_id;
 
                   return (
                     <tr key={item.id} className="hover:bg-slate-50">
+                      <td className="p-3 border font-bold">
+                        {item.periodo_pago || "-"}
+                      </td>
+
                       <td className="p-3 border font-black">
                         {item.no_apartamento || "-"}
                       </td>
@@ -871,9 +923,7 @@ export default function ImportarCuentasBancoPropietariosPage() {
                               : "bg-red-100 text-red-700"
                           }`}
                         >
-                          {estaPendiente
-                            ? "Pendiente"
-                            : item.estado || "Activo"}
+                          {estaPendiente ? "Pendiente" : item.estado || "Activo"}
                         </span>
                       </td>
 
@@ -918,9 +968,9 @@ export default function ImportarCuentasBancoPropietariosPage() {
                   <tr>
                     <td
                       className="p-6 border text-center text-slate-500"
-                      colSpan={5}
+                      colSpan={6}
                     >
-                      No hay alias banco propietarios cargados para esta
+                      No hay cuentas banco propietarios cargadas para esta
                       consulta.
                     </td>
                   </tr>

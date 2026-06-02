@@ -293,7 +293,7 @@ export default function GastosPage() {
     if (!archivo) return;
 
     const extension = archivo.name.split(".").pop();
-    const nombreArchivo = `${condominioId || "general"}/${g.id}-${Date.now()}.${extension}`;
+    const nombreArchivo = `${condominioId}/${g.id}-${Date.now()}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from("cheques-gastos")
@@ -328,14 +328,7 @@ export default function GastosPage() {
   async function guardarGasto(e: React.FormEvent) {
     e.preventDefault();
 
-    if (
-      !condominioNombre ||
-      !fecha ||
-      !categoriaId ||
-      !proveedorId ||
-      !concepto ||
-      !monto
-    ) {
+    if (!condominioNombre || !fecha || !categoriaId || !proveedorId || !concepto || !monto) {
       alert("Debe completar fecha, categoría, proveedor, concepto y monto.");
       return;
     }
@@ -439,10 +432,7 @@ export default function GastosPage() {
         <div className="bg-white rounded-2xl p-5 shadow-sm">
           <p className="text-sm text-slate-500">Monto total gastos</p>
           <h2 className="text-2xl font-bold text-red-700">
-            RD$
-            {totalGastos.toLocaleString("es-DO", {
-              minimumFractionDigits: 2,
-            })}
+            RD${totalGastos.toLocaleString("es-DO", { minimumFractionDigits: 2 })}
           </h2>
         </div>
 
@@ -459,106 +449,46 @@ export default function GastosPage() {
           {editandoId ? "Modificar gasto" : "Registrar gasto"}
         </h2>
 
-        <form
-          onSubmit={guardarGasto}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
+        <form onSubmit={guardarGasto} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="md:col-span-2 bg-slate-50 border rounded-lg px-3 py-3">
-            <label className="block text-sm font-semibold mb-1">
-              Condominio
-            </label>
+            <label className="block text-sm font-semibold mb-1">Condominio</label>
             <p className="font-semibold text-slate-800">{condominioNombre}</p>
           </div>
 
-          <input
-            type="date"
-            value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          />
+          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="border rounded-lg px-3 py-2 w-full" />
 
-          <select
-            value={categoriaId}
-            onChange={(e) => setCategoriaId(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          >
+          <select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)} className="border rounded-lg px-3 py-2 w-full">
             <option value="">Seleccione categoría</option>
             {categorias.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nombre_categoria}
-              </option>
+              <option key={c.id} value={c.id}>{c.nombre_categoria}</option>
             ))}
           </select>
 
-          <select
-            value={proveedorId}
-            onChange={(e) => setProveedorId(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          >
+          <select value={proveedorId} onChange={(e) => setProveedorId(e.target.value)} className="border rounded-lg px-3 py-2 w-full">
             <option value="">Seleccione proveedor</option>
             {proveedores.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre_proveedor}
-              </option>
+              <option key={p.id} value={p.id}>{p.nombre_proveedor}</option>
             ))}
           </select>
 
-          <input
-            type="text"
-            value={concepto}
-            onChange={(e) => setConcepto(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Concepto"
-          />
+          <input type="text" value={concepto} onChange={(e) => setConcepto(e.target.value)} className="border rounded-lg px-3 py-2 w-full" placeholder="Concepto" />
 
-          <input
-            type="number"
-            step="0.01"
-            value={monto}
-            onChange={(e) => setMonto(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Monto RD$"
-          />
+          <input type="number" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} className="border rounded-lg px-3 py-2 w-full" placeholder="Monto RD$" />
 
-          <input
-            type="number"
-            step="0.01"
-            value={itbis}
-            onChange={(e) => setItbis(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="ITBIS RD$"
-          />
+          <input type="number" step="0.01" value={itbis} onChange={(e) => setItbis(e.target.value)} className="border rounded-lg px-3 py-2 w-full" placeholder="ITBIS RD$" />
 
           <input
             type="text"
-            value={`RD$${(
-              Number(monto || 0) + Number(itbis || 0)
-            ).toLocaleString("es-DO", { minimumFractionDigits: 2 })}`}
+            value={`RD$${(Number(monto || 0) + Number(itbis || 0)).toLocaleString("es-DO", { minimumFractionDigits: 2 })}`}
             readOnly
             className="border rounded-lg px-3 py-2 w-full bg-slate-100"
           />
 
-          <input
-            type="text"
-            value={noFactura}
-            onChange={(e) => setNoFactura(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="No. Factura"
-          />
+          <input type="text" value={noFactura} onChange={(e) => setNoFactura(e.target.value)} className="border rounded-lg px-3 py-2 w-full" placeholder="No. Factura" />
 
-          <input
-            type="text"
-            value={ncf}
-            onChange={(e) => setNcf(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="NCF"
-          />
+          <input type="text" value={ncf} onChange={(e) => setNcf(e.target.value)} className="border rounded-lg px-3 py-2 w-full" placeholder="NCF" />
 
-          <select
-            value={metodoPago}
-            onChange={(e) => setMetodoPago(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          >
+          <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} className="border rounded-lg px-3 py-2 w-full">
             <option value="">Seleccione método</option>
             <option value="Efectivo">Efectivo</option>
             <option value="Transferencia">Transferencia</option>
@@ -568,13 +498,7 @@ export default function GastosPage() {
             <option value="Otro">Otro</option>
           </select>
 
-          <input
-            type="text"
-            value={cuentaBanco}
-            onChange={(e) => setCuentaBanco(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Cuenta banco"
-          />
+          <input type="text" value={cuentaBanco} onChange={(e) => setCuentaBanco(e.target.value)} className="border rounded-lg px-3 py-2 w-full" placeholder="Cuenta banco" />
 
           <div className="md:col-span-2">
             <input
@@ -588,12 +512,7 @@ export default function GastosPage() {
             {facturaActualUrl && (
               <p className="text-sm mt-2">
                 Factura actual:{" "}
-                <a
-                  href={facturaActualUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 underline"
-                >
+                <a href={facturaActualUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
                   Ver factura
                 </a>
               </p>
@@ -609,24 +528,12 @@ export default function GastosPage() {
           />
 
           <div className="md:col-span-2 flex gap-2">
-            <button
-              type="submit"
-              disabled={guardando}
-              className="bg-blue-700 text-white px-5 py-2 rounded-lg hover:bg-blue-800 disabled:opacity-50"
-            >
-              {guardando
-                ? "Guardando..."
-                : editandoId
-                ? "Guardar cambios"
-                : "Guardar gasto"}
+            <button type="submit" disabled={guardando} className="bg-blue-700 text-white px-5 py-2 rounded-lg hover:bg-blue-800 disabled:opacity-50">
+              {guardando ? "Guardando..." : editandoId ? "Guardar cambios" : "Guardar gasto"}
             </button>
 
             {editandoId && (
-              <button
-                type="button"
-                onClick={limpiarFormulario}
-                className="bg-slate-500 text-white px-5 py-2 rounded-lg hover:bg-slate-600"
-              >
+              <button type="button" onClick={limpiarFormulario} className="bg-slate-500 text-white px-5 py-2 rounded-lg hover:bg-slate-600">
                 Cancelar
               </button>
             )}
@@ -656,110 +563,64 @@ export default function GastosPage() {
               {gastos.map((g) => (
                 <tr key={g.id}>
                   <td className="p-2 border">{g.fecha}</td>
-
-                  <td className="p-2 border">
-                    {g.catalogo_proveedores?.nombre_proveedor || "-"}
-                  </td>
-
+                  <td className="p-2 border">{g.catalogo_proveedores?.nombre_proveedor}</td>
                   <td className="p-2 border">{g.concepto}</td>
-
                   <td className="p-2 border text-right font-bold">
-                    RD$
-                    {Number(g.total).toLocaleString("es-DO", {
-                      minimumFractionDigits: 2,
-                    })}
+                    RD${Number(g.total).toLocaleString("es-DO", { minimumFractionDigits: 2 })}
                   </td>
-
-                  <td className="p-2 border text-center font-semibold">
-                    {g.estado}
-                  </td>
-
+                  <td className="p-2 border text-center font-semibold">{g.estado}</td>
                   <td className="p-2 border text-center">
                     {g.factura_url ? (
-                      <a
-                        href={g.factura_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-slate-900 text-white px-3 py-1 rounded-lg"
-                      >
+                      <a href={g.factura_url} target="_blank" rel="noopener noreferrer" className="bg-slate-900 text-white px-3 py-1 rounded-lg">
                         Factura
                       </a>
                     ) : (
-                      <span className="text-slate-400">Sin factura</span>
+                      "Sin factura"
                     )}
                   </td>
-
                   <td className="p-2 border text-center">
                     {g.cheque_url ? (
-                      <a
-                        href={g.cheque_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-green-700 text-white px-3 py-1 rounded-lg"
-                      >
-                        Ver cheque
+                      <a href={g.cheque_url} target="_blank" rel="noopener noreferrer" className="bg-green-700 text-white px-3 py-1 rounded-lg">
+                        Cheque
                       </a>
-                    ) : g.aprobado_presidente ? (
-                      <label className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-lg text-xs cursor-pointer inline-block">
-                        Subir cheque
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png,.webp"
-                          className="hidden"
-                          onChange={(e) => {
-                            const archivo = e.target.files?.[0];
-                            if (archivo) subirCheque(g, archivo);
-                            e.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
                     ) : (
-                      <span className="text-xs text-slate-400">
-                        Pendiente aprobación
-                      </span>
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png,.webp"
+                        onChange={(e) => {
+                          const archivo = e.target.files?.[0];
+                          if (archivo) subirCheque(g, archivo);
+                        }}
+                        className="text-xs w-40"
+                        disabled={!g.aprobado_presidente}
+                      />
                     )}
                   </td>
-
                   <td className="p-2 border text-center">
                     <div className="flex flex-wrap gap-2 justify-center">
                       {!g.aprobado_tesorero && (
-                        <button
-                          onClick={() => aprobarTesorero(g)}
-                          className="bg-yellow-600 text-white px-3 py-1 rounded-lg text-xs"
-                        >
+                        <button onClick={() => aprobarTesorero(g)} className="bg-yellow-600 text-white px-3 py-1 rounded-lg text-xs">
                           Tesorero
                         </button>
                       )}
 
                       {g.aprobado_tesorero && !g.aprobado_presidente && (
-                        <button
-                          onClick={() => aprobarPresidente(g)}
-                          className="bg-blue-700 text-white px-3 py-1 rounded-lg text-xs"
-                        >
+                        <button onClick={() => aprobarPresidente(g)} className="bg-blue-700 text-white px-3 py-1 rounded-lg text-xs">
                           Presidente
                         </button>
                       )}
 
                       {g.aprobado_presidente && !g.pagado && (
-                        <button
-                          onClick={() => marcarPagado(g)}
-                          className="bg-green-700 text-white px-3 py-1 rounded-lg text-xs"
-                        >
+                        <button onClick={() => marcarPagado(g)} className="bg-green-700 text-white px-3 py-1 rounded-lg text-xs">
                           Pagado
                         </button>
                       )}
 
-                      <button
-                        onClick={() => editarGasto(g)}
-                        className="bg-slate-700 text-white px-3 py-1 rounded-lg text-xs"
-                      >
+                      <button onClick={() => editarGasto(g)} className="bg-slate-700 text-white px-3 py-1 rounded-lg text-xs">
                         Editar
                       </button>
 
-                      <button
-                        onClick={() => borrarGasto(g)}
-                        className="bg-red-700 text-white px-3 py-1 rounded-lg text-xs"
-                      >
+                      <button onClick={() => borrarGasto(g)} className="bg-red-700 text-white px-3 py-1 rounded-lg text-xs">
                         Borrar
                       </button>
                     </div>

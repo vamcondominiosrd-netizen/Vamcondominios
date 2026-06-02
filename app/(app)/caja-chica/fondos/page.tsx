@@ -18,24 +18,36 @@ export default function FondosCajaChicaPage() {
   const [fondos, setFondos] = useState<FondoCaja[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [condominio, setCondominio] = useState("");
+  const [condominioId, setCondominioId] = useState("");
+  const [condominioNombre, setCondominioNombre] = useState("");
+
   const [fecha, setFecha] = useState("");
   const [tipo, setTipo] = useState("fondo_inicial");
   const [monto, setMonto] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [responsable, setResponsable] = useState("");
-  const [filtroCondominio, setFiltroCondominio] = useState("");
 
   useEffect(() => {
-    cargarFondos();
+    const id = localStorage.getItem("condominio_id") || "";
+    const nombre = localStorage.getItem("condominio_nombre") || "";
+
+    setCondominioId(id);
+    setCondominioNombre(nombre);
+
+    if (nombre) {
+      cargarFondos(nombre);
+    }
   }, []);
 
-  async function cargarFondos() {
+  async function cargarFondos(nombreCondominio: string) {
     setLoading(true);
 
     const { data, error } = await supabase
       .from("caja_chica_fondos")
-      .select("id, condominio, fecha, tipo, monto, descripcion, responsable, created_at")
+      .select(
+        "id, condominio, fecha, tipo, monto, descripcion, responsable, created_at"
+      )
+      .ilike("condominio", `%${nombreCondominio}%`)
       .order("fecha", { ascending: false });
 
     setLoading(false);
@@ -51,14 +63,19 @@ export default function FondosCajaChicaPage() {
   async function guardarFondo(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!condominio || !fecha || !tipo || !monto) {
-      alert("Debe completar condominio, fecha, tipo y monto.");
+    if (!condominioNombre) {
+      alert("No se encontró el condominio activo. Debe iniciar sesión nuevamente.");
+      return;
+    }
+
+    if (!fecha || !tipo || !monto) {
+      alert("Debe completar fecha, tipo y monto.");
       return;
     }
 
     const { error } = await supabase.from("caja_chica_fondos").insert([
       {
-        condominio,
+        condominio: condominioNombre,
         fecha,
         tipo,
         monto: Number(monto),
@@ -74,21 +91,16 @@ export default function FondosCajaChicaPage() {
 
     alert("Movimiento de caja chica registrado correctamente.");
 
-    setCondominio("");
     setFecha("");
     setTipo("fondo_inicial");
     setMonto("");
     setDescripcion("");
     setResponsable("");
 
-    cargarFondos();
+    cargarFondos(condominioNombre);
   }
 
-  const fondosFiltrados = fondos.filter((f) =>
-    (f.condominio || "").toLowerCase().includes(filtroCondominio.toLowerCase())
-  );
-
-  const totalFondos = fondosFiltrados.reduce(
+  const totalFondos = fondos.reduce(
     (sum, f) => sum + Number(f.monto || 0),
     0
   );
@@ -98,11 +110,19 @@ export default function FondosCajaChicaPage() {
       <div>
         <h1 className="text-3xl font-bold">Fondos de Caja Chica</h1>
         <p className="text-slate-500">
-          Registro de fondo inicial y reposiciones de caja chica por condominio.
+          Registro de fondo inicial y reposiciones de caja chica del condominio
+          activo.
         </p>
       </div>
 
-      <div className="bg-white rounded-2xl p-5 shadow-sm">
+      <div className="bg-white rounded-2xl p-5 shadow-sm border">
+        <p className="text-sm text-slate-500">Condominio activo</p>
+        <h2 className="text-lg font-bold text-slate-900">
+          {condominioNombre || "No identificado"}
+        </h2>
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm border">
         <p className="text-sm text-slate-500">Total fondos / reposiciones</p>
         <h2 className="text-2xl font-bold text-green-700">
           RD$
@@ -112,7 +132,7 @@ export default function FondosCajaChicaPage() {
         </h2>
       </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
+      <div className="bg-white rounded-2xl p-6 shadow-sm border">
         <h2 className="text-xl font-bold mb-4">Registrar fondo o reposición</h2>
 
         <form
@@ -121,17 +141,15 @@ export default function FondosCajaChicaPage() {
         >
           <div>
             <label className="block text-sm font-semibold mb-1">
-              Condominio *
+              Condominio
             </label>
-            <select
-              value={condominio}
-              onChange={(e) => setCondominio(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-            >
-              <option value="">Seleccione condominio</option>
-              <option value="Lote 9">Lote 9</option>
-              <option value="Lote 11">Lote 11</option>
-            </select>
+
+            <input
+              type="text"
+              value={condominioNombre}
+              readOnly
+              className="border rounded-lg px-3 py-2 w-full bg-slate-100 text-slate-700"
+            />
           </div>
 
           <div>
@@ -149,7 +167,7 @@ export default function FondosCajaChicaPage() {
             <select
               value={tipo}
               onChange={(e) => setTipo(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
+              className="border rounded-lg px-3 py-2 w-full bg-white"
             >
               <option value="fondo_inicial">Fondo inicial</option>
               <option value="reposicion">Reposición</option>
@@ -208,29 +226,12 @@ export default function FondosCajaChicaPage() {
         </form>
       </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-xl font-bold">Detalle de fondos registrados</h2>
-            <p className="text-sm text-slate-500">
-              Puede filtrar los movimientos por condominio.
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Filtrar por condominio
-            </label>
-            <select
-              value={filtroCondominio}
-              onChange={(e) => setFiltroCondominio(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full md:w-56"
-            >
-              <option value="">Todos</option>
-              <option value="Lote 9">Lote 9</option>
-              <option value="Lote 11">Lote 11</option>
-            </select>
-          </div>
+      <div className="bg-white rounded-2xl p-6 shadow-sm border">
+        <div className="mb-4">
+          <h2 className="text-xl font-bold">Detalle de fondos registrados</h2>
+          <p className="text-sm text-slate-500">
+            Mostrando solamente los fondos del condominio activo.
+          </p>
         </div>
 
         {loading ? (
@@ -250,7 +251,7 @@ export default function FondosCajaChicaPage() {
               </thead>
 
               <tbody>
-                {fondosFiltrados.map((f) => (
+                {fondos.map((f) => (
                   <tr key={f.id}>
                     <td className="p-2 border font-semibold">{f.condominio}</td>
                     <td className="p-2 border">{f.fecha}</td>
@@ -266,10 +267,10 @@ export default function FondosCajaChicaPage() {
                   </tr>
                 ))}
 
-                {fondosFiltrados.length === 0 && (
+                {fondos.length === 0 && (
                   <tr>
                     <td className="p-4 border text-center" colSpan={6}>
-                      No hay fondos registrados.
+                      No hay fondos registrados para este condominio.
                     </td>
                   </tr>
                 )}

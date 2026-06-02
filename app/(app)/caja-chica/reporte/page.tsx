@@ -22,15 +22,21 @@ export default function ReporteCajaChicaPage() {
   const [gastos, setGastos] = useState<CajaChica[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [filtroCondominio, setFiltroCondominio] = useState("");
+  const [condominioNombre, setCondominioNombre] = useState("");
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
 
   useEffect(() => {
-    cargarGastos();
+    const nombre = localStorage.getItem("condominio_nombre") || "";
+
+    setCondominioNombre(nombre);
+
+    if (nombre) {
+      cargarGastos(nombre);
+    }
   }, []);
 
-  async function cargarGastos() {
+  async function cargarGastos(nombreCondominio: string) {
     setLoading(true);
 
     const { data, error } = await supabase
@@ -38,6 +44,7 @@ export default function ReporteCajaChicaPage() {
       .select(
         "id, condominio, fecha, concepto, detalle_gasto, monto, responsable, comprobante, factura_url, estado, created_at"
       )
+      .ilike("condominio", `%${nombreCondominio}%`)
       .order("fecha", { ascending: false });
 
     setLoading(false);
@@ -51,23 +58,16 @@ export default function ReporteCajaChicaPage() {
   }
 
   const gastosFiltrados = gastos.filter((g) => {
-    const cumpleCondominio =
-      filtroCondominio === "" || g.condominio === filtroCondominio;
-
     const cumpleDesde = fechaDesde === "" || g.fecha >= fechaDesde;
     const cumpleHasta = fechaHasta === "" || g.fecha <= fechaHasta;
 
-    return cumpleCondominio && cumpleDesde && cumpleHasta;
+    return cumpleDesde && cumpleHasta;
   });
 
   const totalGastos = gastosFiltrados.reduce(
     (sum, g) => sum + Number(g.monto || 0),
     0
   );
-
-  const condominiosUnicos = new Set(
-    gastosFiltrados.map((g) => g.condominio).filter(Boolean)
-  ).size;
 
   function exportarExcel() {
     if (gastosFiltrados.length === 0) {
@@ -85,13 +85,28 @@ export default function ReporteCajaChicaPage() {
       Comprobante: g.comprobante,
       "URL Factura": g.factura_url || "",
       Estado: g.estado,
-      "Fecha registro": new Date(g.created_at).toLocaleDateString("es-DO"),
+      "Fecha registro": g.created_at
+        ? new Date(g.created_at).toLocaleDateString("es-DO")
+        : "",
     }));
+
+    dataExcel.push({
+      Condominio: "TOTAL",
+      Fecha: "",
+      Concepto: "",
+      "Detalle del gasto": "",
+      "Monto RD$": Number(totalGastos || 0),
+      Responsable: "",
+      Comprobante: "",
+      "URL Factura": "",
+      Estado: "",
+      "Fecha registro": "",
+    });
 
     const hoja = XLSX.utils.json_to_sheet(dataExcel);
 
     hoja["!cols"] = [
-      { wch: 18 },
+      { wch: 40 },
       { wch: 15 },
       { wch: 28 },
       { wch: 45 },
@@ -106,11 +121,13 @@ export default function ReporteCajaChicaPage() {
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, "Reporte Caja Chica");
 
-    XLSX.writeFile(libro, "Reporte_Caja_Chica.xlsx");
+    XLSX.writeFile(
+      libro,
+      `Reporte_Caja_Chica_${condominioNombre.replaceAll(" ", "_")}.xlsx`
+    );
   }
 
   function limpiarFiltros() {
-    setFiltroCondominio("");
     setFechaDesde("");
     setFechaHasta("");
   }
@@ -121,11 +138,11 @@ export default function ReporteCajaChicaPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">Reporte de Caja Chica</h1>
           <p className="text-slate-500">
-            Consulta, filtra y exporta los gastos registrados en caja chica.
+            Consulta y exporta los gastos de caja chica del condominio activo.
           </p>
         </div>
 
@@ -137,13 +154,20 @@ export default function ReporteCajaChicaPage() {
         </button>
       </div>
 
+      <div className="bg-white rounded-2xl p-5 shadow-sm border">
+        <p className="text-sm text-slate-500">Condominio activo</p>
+        <h2 className="text-lg font-bold text-slate-900">
+          {condominioNombre || "No identificado"}
+        </h2>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
           <p className="text-sm text-slate-500">Total registros</p>
           <h2 className="text-2xl font-bold">{gastosFiltrados.length}</h2>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
           <p className="text-sm text-slate-500">Monto total gastado</p>
           <h2 className="text-2xl font-bold text-red-700">
             RD$
@@ -153,37 +177,36 @@ export default function ReporteCajaChicaPage() {
           </h2>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Condominios filtrados</p>
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
+          <p className="text-sm text-slate-500">Resultado</p>
           <h2 className="text-2xl font-bold text-blue-700">
-            {condominiosUnicos}
+            {condominioNombre ? "Filtrado" : "Sin condominio"}
           </h2>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
+      <div className="bg-white rounded-2xl p-6 shadow-sm border">
         <h2 className="text-xl font-bold mb-4">Filtros del reporte</h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-semibold mb-1">
               Condominio
             </label>
-            <select
-              value={filtroCondominio}
-              onChange={(e) => setFiltroCondominio(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-            >
-              <option value="">Todos</option>
-              <option value="Lote 9">Lote 9</option>
-              <option value="Lote 11">Lote 11</option>
-            </select>
+
+            <input
+              type="text"
+              value={condominioNombre}
+              readOnly
+              className="border rounded-lg px-3 py-2 w-full bg-slate-100 text-slate-700"
+            />
           </div>
 
           <div>
             <label className="block text-sm font-semibold mb-1">
               Fecha desde
             </label>
+
             <input
               type="date"
               value={fechaDesde}
@@ -196,6 +219,7 @@ export default function ReporteCajaChicaPage() {
             <label className="block text-sm font-semibold mb-1">
               Fecha hasta
             </label>
+
             <input
               type="date"
               value={fechaHasta}
@@ -204,18 +228,18 @@ export default function ReporteCajaChicaPage() {
             />
           </div>
 
-          <div className="flex items-end">
+          <div className="md:col-span-3 flex justify-end">
             <button
               onClick={limpiarFiltros}
-              className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 w-full"
+              className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 w-full md:w-auto"
             >
-              Limpiar filtros
+              Limpiar fechas
             </button>
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
+      <div className="bg-white rounded-2xl p-6 shadow-sm border">
         <h2 className="text-xl font-bold mb-4">Detalle del reporte</h2>
 
         <div className="overflow-auto border rounded-lg">
@@ -272,7 +296,8 @@ export default function ReporteCajaChicaPage() {
               {gastosFiltrados.length === 0 && (
                 <tr>
                   <td className="p-4 border text-center" colSpan={9}>
-                    No hay gastos registrados para los filtros seleccionados.
+                    No hay gastos registrados para este condominio o filtros
+                    seleccionados.
                   </td>
                 </tr>
               )}

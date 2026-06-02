@@ -14,23 +14,42 @@ type Gasto = {
   monto: number;
 };
 
+type Resumen = {
+  condominio: string;
+  totalFondos: number;
+  totalGastos: number;
+  balance: number;
+};
+
 export default function BalanceCajaChicaPage() {
   const [fondos, setFondos] = useState<Fondo[]>([]);
   const [gastos, setGastos] = useState<Gasto[]>([]);
-  const [filtroCondominio, setFiltroCondominio] = useState("");
+  const [condominioNombre, setCondominioNombre] = useState("");
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    cargarDatos();
+    const nombre = localStorage.getItem("condominio_nombre") || "";
+    setCondominioNombre(nombre);
+
+    if (nombre) {
+      cargarDatos(nombre);
+    }
   }, []);
 
-  async function cargarDatos() {
+  async function cargarDatos(nombreCondominio: string) {
+    setLoading(true);
+
     const { data: fondosData, error: fondosError } = await supabase
       .from("caja_chica_fondos")
-      .select("condominio, monto");
+      .select("condominio, monto")
+      .ilike("condominio", `%${nombreCondominio}%`);
 
     const { data: gastosData, error: gastosError } = await supabase
       .from("caja_chica")
-      .select("condominio, monto");
+      .select("condominio, monto")
+      .ilike("condominio", `%${nombreCondominio}%`);
+
+    setLoading(false);
 
     if (fondosError) {
       alert("Error cargando fondos: " + fondosError.message);
@@ -46,44 +65,30 @@ export default function BalanceCajaChicaPage() {
     setGastos(gastosData || []);
   }
 
-  const condominios = Array.from(
-    new Set([
-      ...fondos.map((f) => f.condominio),
-      ...gastos.map((g) => g.condominio),
-    ])
-  ).filter(Boolean);
+  const totalFondosGeneral = fondos.reduce(
+    (sum, f) => sum + Number(f.monto || 0),
+    0
+  );
 
-  const condominiosFiltrados =
-    filtroCondominio === ""
-      ? condominios
-      : condominios.filter((c) => c === filtroCondominio);
+  const totalGastosGeneral = gastos.reduce(
+    (sum, g) => sum + Number(g.monto || 0),
+    0
+  );
 
-  const resumen = condominiosFiltrados.map((condominio) => {
-    const totalFondos = fondos
-      .filter((f) => f.condominio === condominio)
-      .reduce((sum, f) => sum + Number(f.monto || 0), 0);
-
-    const totalGastos = gastos
-      .filter((g) => g.condominio === condominio)
-      .reduce((sum, g) => sum + Number(g.monto || 0), 0);
-
-    const balance = totalFondos - totalGastos;
-
-    return {
-      condominio,
-      totalFondos,
-      totalGastos,
-      balance,
-    };
-  });
-
-  const totalFondosGeneral = resumen.reduce((sum, r) => sum + r.totalFondos, 0);
-  const totalGastosGeneral = resumen.reduce((sum, r) => sum + r.totalGastos, 0);
   const balanceGeneral = totalFondosGeneral - totalGastosGeneral;
 
+  const resumen: Resumen[] = [
+    {
+      condominio: condominioNombre,
+      totalFondos: totalFondosGeneral,
+      totalGastos: totalGastosGeneral,
+      balance: balanceGeneral,
+    },
+  ];
+
   function exportarExcel() {
-    if (resumen.length === 0) {
-      alert("No hay datos para exportar.");
+    if (!condominioNombre) {
+      alert("No se encontró el condominio activo.");
       return;
     }
 
@@ -94,17 +99,10 @@ export default function BalanceCajaChicaPage() {
       "Balance Disponible RD$": Number(r.balance || 0),
     }));
 
-    dataExcel.push({
-      Condominio: "TOTAL GENERAL",
-      "Fondos / Reposiciones RD$": Number(totalFondosGeneral || 0),
-      "Gastos RD$": Number(totalGastosGeneral || 0),
-      "Balance Disponible RD$": Number(balanceGeneral || 0),
-    });
-
     const hoja = XLSX.utils.json_to_sheet(dataExcel);
 
     hoja["!cols"] = [
-      { wch: 22 },
+      { wch: 40 },
       { wch: 26 },
       { wch: 18 },
       { wch: 26 },
@@ -113,16 +111,19 @@ export default function BalanceCajaChicaPage() {
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, "Balance Caja Chica");
 
-    XLSX.writeFile(libro, "Balance_Caja_Chica.xlsx");
+    XLSX.writeFile(
+      libro,
+      `Balance_Caja_Chica_${condominioNombre.replaceAll(" ", "_")}.xlsx`
+    );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">Balance de Caja Chica</h1>
           <p className="text-slate-500">
-            Resumen de fondos, gastos y balance disponible por condominio.
+            Resumen de fondos, gastos y balance disponible del condominio activo.
           </p>
         </div>
 
@@ -134,8 +135,15 @@ export default function BalanceCajaChicaPage() {
         </button>
       </div>
 
+      <div className="bg-white rounded-2xl p-5 shadow-sm border">
+        <p className="text-sm text-slate-500">Condominio activo</p>
+        <h2 className="text-lg font-bold text-slate-900">
+          {condominioNombre || "No identificado"}
+        </h2>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
           <p className="text-sm text-slate-500">Total fondos</p>
           <h2 className="text-2xl font-bold text-green-700">
             RD$
@@ -145,7 +153,7 @@ export default function BalanceCajaChicaPage() {
           </h2>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
           <p className="text-sm text-slate-500">Total gastos</p>
           <h2 className="text-2xl font-bold text-red-700">
             RD$
@@ -155,7 +163,7 @@ export default function BalanceCajaChicaPage() {
           </h2>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
           <p className="text-sm text-slate-500">Balance disponible</p>
           <h2
             className={`text-2xl font-bold ${
@@ -170,91 +178,45 @@ export default function BalanceCajaChicaPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <label className="block text-sm font-semibold mb-1">
-          Filtrar por condominio
-        </label>
-        <select
-          value={filtroCondominio}
-          onChange={(e) => setFiltroCondominio(e.target.value)}
-          className="border rounded-lg px-3 py-2 w-full md:w-64"
-        >
-          <option value="">Todos</option>
-          <option value="Lote 9">Lote 9</option>
-          <option value="Lote 11">Lote 11</option>
-        </select>
-      </div>
+      <div className="bg-white rounded-2xl p-6 shadow-sm border">
+        <h2 className="text-xl font-bold mb-4">Balance del condominio</h2>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold mb-4">Balance por condominio</h2>
-
-        <div className="overflow-auto border rounded-lg">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="p-2 border">Condominio</th>
-                <th className="p-2 border">Fondos / Reposiciones</th>
-                <th className="p-2 border">Gastos</th>
-                <th className="p-2 border">Balance Disponible</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {resumen.map((r) => (
-                <tr key={r.condominio}>
-                  <td className="p-2 border font-semibold">{r.condominio}</td>
-                  <td className="p-2 border text-right">
-                    RD$
-                    {r.totalFondos.toLocaleString("es-DO", {
-                      minimumFractionDigits: 2,
-                    })}
-                  </td>
-                  <td className="p-2 border text-right">
-                    RD$
-                    {r.totalGastos.toLocaleString("es-DO", {
-                      minimumFractionDigits: 2,
-                    })}
-                  </td>
-                  <td
-                    className={`p-2 border text-right font-bold ${
-                      r.balance >= 0 ? "text-blue-700" : "text-red-700"
-                    }`}
-                  >
-                    RD$
-                    {r.balance.toLocaleString("es-DO", {
-                      minimumFractionDigits: 2,
-                    })}
-                  </td>
-                </tr>
-              ))}
-
-              {resumen.length === 0 && (
+        {loading ? (
+          <p>Cargando balance de caja chica...</p>
+        ) : (
+          <div className="overflow-auto border rounded-lg">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-100">
                 <tr>
-                  <td className="p-4 border text-center" colSpan={4}>
-                    No hay datos de caja chica.
-                  </td>
+                  <th className="p-2 border">Condominio</th>
+                  <th className="p-2 border">Fondos / Reposiciones</th>
+                  <th className="p-2 border">Gastos</th>
+                  <th className="p-2 border">Balance Disponible</th>
                 </tr>
-              )}
-            </tbody>
+              </thead>
 
-            {resumen.length > 0 && (
-              <tfoot className="bg-gray-100 font-bold">
+              <tbody>
                 <tr>
-                  <td className="p-2 border">TOTAL GENERAL</td>
+                  <td className="p-2 border font-semibold">
+                    {condominioNombre || "No identificado"}
+                  </td>
+
                   <td className="p-2 border text-right">
                     RD$
                     {totalFondosGeneral.toLocaleString("es-DO", {
                       minimumFractionDigits: 2,
                     })}
                   </td>
+
                   <td className="p-2 border text-right">
                     RD$
                     {totalGastosGeneral.toLocaleString("es-DO", {
                       minimumFractionDigits: 2,
                     })}
                   </td>
+
                   <td
-                    className={`p-2 border text-right ${
+                    className={`p-2 border text-right font-bold ${
                       balanceGeneral >= 0 ? "text-blue-700" : "text-red-700"
                     }`}
                   >
@@ -264,10 +226,19 @@ export default function BalanceCajaChicaPage() {
                     })}
                   </td>
                 </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
+
+                {!condominioNombre && (
+                  <tr>
+                    <td className="p-4 border text-center" colSpan={4}>
+                      No se encontró el condominio activo. Debe iniciar sesión
+                      nuevamente.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

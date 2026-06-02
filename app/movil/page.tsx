@@ -16,9 +16,8 @@ type PropietarioActual = {
   correo: string;
 };
 
-export default function VamMovilPage() {
+export default function MovilPage() {
   const router = useRouter();
-
   const [propietario, setPropietario] = useState<PropietarioActual | null>(
     null
   );
@@ -39,82 +38,104 @@ export default function VamMovilPage() {
     router.push("/movil-login");
   }
 
-  const opciones = [
-    {
-      titulo: "Estado de Cuenta",
-      descripcion: "Consulta balance, pagos y meses pendientes.",
-      href: "/movil/estado-cuenta",
-    },
-    {
-      titulo: "Reservar Área Social",
-      descripcion: "Solicita reservas de gazebo, salón o terraza.",
-      href: "/movil/reservar-area",
-    },
-    {
-      titulo: "Reportar Incidencia",
-      descripcion: "Reporta averías, problemas o situaciones.",
-      href: "/movil/incidencias",
-    },
-    {
-      titulo: "Anuncios",
-      descripcion: "Consulta comunicaciones del condominio.",
-      href: "/movil/anuncios",
-    },
-    {
-      titulo: "Recibos",
-      descripcion: "Consulta comprobantes y pagos registrados.",
-      href: "/movil/recibos",
-    },
-  ];
-
   if (!propietario) {
     return null;
   }
 
   return (
     <main className="min-h-screen bg-slate-100 p-4">
-      <div className="max-w-md mx-auto space-y-5">
+      <div className="max-w-md mx-auto space-y-4">
         <div className="bg-slate-950 text-white rounded-3xl p-6 shadow">
-          <h1 className="text-3xl font-bold">VAM Móvil</h1>
-
-          <p className="text-slate-300 mt-2">
-            Bienvenido, {propietario.nombre_propietario}
+          <p className="text-sm text-amber-300 font-semibold">
+            VAM Administración de Condominios
           </p>
 
-          <div className="mt-4 bg-slate-900 rounded-2xl p-4 text-sm">
-            <p>
-              <strong>Condominio:</strong> {propietario.condominio_nombre}
-            </p>
-            <p>
-              <strong>Apartamento:</strong> {propietario.no_apartamento}
-            </p>
+          <h1 className="text-2xl font-bold mt-3">
+            Portal del Propietario
+          </h1>
+
+          <p className="text-slate-300 text-sm mt-2">
+            {propietario.condominio_nombre}
+          </p>
+
+          <p className="text-slate-300 text-sm">
+            Apto. {propietario.no_apartamento}
+          </p>
+
+          <div className="mt-4 bg-slate-800 rounded-2xl p-4">
+            <p className="text-xs text-slate-400">Propietario</p>
+            <p className="font-bold">{propietario.nombre_propietario}</p>
           </div>
+        </div>
 
-          <button
-            onClick={cerrarSesion}
-            className="mt-4 text-sm text-amber-300"
+        <div className="grid grid-cols-1 gap-4">
+          <Link
+            href="/movil/pagar"
+            className="bg-green-700 text-white rounded-2xl p-5 shadow block"
           >
-            Cerrar sesión
-          </button>
+            <h2 className="text-lg font-bold">Realizar Pago</h2>
+            <p className="text-sm text-green-100">
+              Reportar pago y subir comprobante
+            </p>
+          </Link>
+
+          <Link
+            href="/movil/estado-cuenta"
+            className="bg-white text-slate-900 rounded-2xl p-5 shadow-sm border block"
+          >
+            <h2 className="text-lg font-bold">Estado de Cuenta</h2>
+            <p className="text-sm text-slate-500">
+              Consultar balance, pagos y cargos pendientes
+            </p>
+          </Link>
+
+          <Link
+            href="/movil/recibos"
+            className="bg-white text-slate-900 rounded-2xl p-5 shadow-sm border block"
+          >
+            <h2 className="text-lg font-bold">Recibos y Pagos</h2>
+            <p className="text-sm text-slate-500">
+              Ver historial de pagos registrados
+            </p>
+          </Link>
+
+          <Link
+            href="/movil/reservar-area"
+            className="bg-white text-slate-900 rounded-2xl p-5 shadow-sm border block"
+          >
+            <h2 className="text-lg font-bold">Reservar Área Social</h2>
+            <p className="text-sm text-slate-500">
+              Solicitar reserva de áreas comunes
+            </p>
+          </Link>
+
+          <Link
+            href="/movil/incidencias"
+            className="bg-white text-slate-900 rounded-2xl p-5 shadow-sm border block"
+          >
+            <h2 className="text-lg font-bold">Reportar Incidencia</h2>
+            <p className="text-sm text-slate-500">
+              Enviar reportes, averías o situaciones del condominio
+            </p>
+          </Link>
+
+          <Link
+            href="/movil/anuncios"
+            className="bg-white text-slate-900 rounded-2xl p-5 shadow-sm border block"
+          >
+            <h2 className="text-lg font-bold">Anuncios</h2>
+            <p className="text-sm text-slate-500">
+              Ver comunicaciones oficiales del condominio
+            </p>
+          </Link>
         </div>
 
-        <div className="space-y-4">
-          {opciones.map((opcion) => (
-            <Link
-              key={opcion.href}
-              href={opcion.href}
-              className="block bg-white rounded-2xl p-5 shadow-sm border active:scale-[0.98] transition"
-            >
-              <h2 className="text-xl font-bold text-slate-800">
-                {opcion.titulo}
-              </h2>
-
-              <p className="text-sm text-slate-500 mt-1">
-                {opcion.descripcion}
-              </p>
-            </Link>
-          ))}
-        </div>
+        <button
+          onClick={cerrarSesion}
+          className="w-full bg-red-600 hover:bg-red-700 text-white rounded-2xl p-4 font-bold shadow"
+        >
+          Cerrar sesión
+        </button>
 
         <p className="text-center text-xs text-slate-400 pt-4">
           VAM Administración de Condominios
