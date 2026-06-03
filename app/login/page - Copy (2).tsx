@@ -25,21 +25,18 @@ export default function LoginPage() {
   }, []);
 
   async function cargarCondominios() {
-  setCondominios([
-    {
-      id: 1,
-      nombre: "Condominio Residencial Colinas del Oeste Lote 9",
-      logo_url: null,
-    },
-    {
-      id: 2,
-      nombre: "Condominio Residencial Colinas del Oeste Lote 11",
-      logo_url: null,
-    },
-  ]);
+    const { data, error } = await supabase
+      .from("condominios")
+      .select("id, nombre, logo_url")
+      .order("id");
 
-  setCondominioId("1");
-}
+    if (error) {
+      setMensaje(error.message);
+      return;
+    }
+
+    setCondominios(data || []);
+  }
 
   const condominioSeleccionado = condominios.find(
     (c) => String(c.id) === condominioId
