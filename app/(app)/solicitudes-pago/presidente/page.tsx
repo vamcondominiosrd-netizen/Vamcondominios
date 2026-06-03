@@ -5,6 +5,7 @@ import { supabase } from "@/app/lib/supabaseClient";
 
 type SolicitudPago = {
   id: number;
+  condominio_id: number | null;
   condominio: string;
   fecha_solicitud: string;
   concepto: string;
@@ -30,17 +31,36 @@ export default function AprobacionPresidentePage() {
   const [loading, setLoading] = useState(false);
   const [comentarios, setComentarios] = useState<Record<number, string>>({});
 
+  const [condominioId, setCondominioId] = useState("");
+  const [condominioNombre, setCondominioNombre] = useState("");
+
   useEffect(() => {
-    cargarSolicitudes();
+    const id = localStorage.getItem("condominio_id") || "";
+    const nombre = localStorage.getItem("condominio_nombre") || "";
+
+    if (!id) {
+      alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
+      return;
+    }
+
+    const nombreFinal = nombre || `Condominio ID ${id}`;
+
+    setCondominioId(id);
+    setCondominioNombre(nombreFinal);
+
+    cargarSolicitudes(id);
   }, []);
 
-  async function cargarSolicitudes() {
+  async function cargarSolicitudes(id: string) {
+    if (!id) return;
+
     setLoading(true);
 
     const { data, error } = await supabase
       .from("solicitudes_pago")
       .select(`
         id,
+        condominio_id,
         condominio,
         fecha_solicitud,
         concepto,
@@ -60,6 +80,7 @@ export default function AprobacionPresidentePage() {
         catalogo_proveedores(nombre_proveedor),
         catalogo_categoria_gastos(nombre_categoria)
       `)
+      .eq("condominio_id", Number(id))
       .eq("estado", "Aprobado por tesorero")
       .order("fecha_revision_tesorero", { ascending: false });
 
@@ -74,6 +95,11 @@ export default function AprobacionPresidentePage() {
   }
 
   async function actualizarEstado(id: number, nuevoEstado: string) {
+    if (!condominioId) {
+      alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
+      return;
+    }
+
     const comentario = comentarios[id] || "";
 
     if (
@@ -98,7 +124,8 @@ export default function AprobacionPresidentePage() {
         comentario_presidente: comentario,
         fecha_revision_presidente: new Date().toISOString(),
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("condominio_id", Number(condominioId));
 
     if (error) {
       alert("Error actualizando solicitud: " + error.message);
@@ -106,7 +133,7 @@ export default function AprobacionPresidentePage() {
     }
 
     alert("Solicitud actualizada correctamente.");
-    cargarSolicitudes();
+    cargarSolicitudes(condominioId);
   }
 
   const totalPendiente = solicitudes.reduce(
@@ -126,6 +153,12 @@ export default function AprobacionPresidentePage() {
         <h1 className="text-3xl font-bold">Aprobación del Presidente</h1>
         <p className="text-slate-500">
           Solicitudes aprobadas por tesorería pendientes de decisión final.
+        </p>
+        <p className="text-sm text-slate-500 mt-1">
+          Condominio activo:{" "}
+          <span className="font-semibold text-slate-700">
+            {condominioNombre || "No seleccionado"}
+          </span>
         </p>
       </div>
 
@@ -184,13 +217,15 @@ export default function AprobacionPresidentePage() {
 
                     <p className="text-sm text-slate-500">
                       Proveedor:{" "}
-                      <strong>{s.catalogo_proveedores?.nombre_proveedor}</strong>
+                      <strong>
+                        {s.catalogo_proveedores?.nombre_proveedor || "-"}
+                      </strong>
                     </p>
 
                     <p className="text-sm text-slate-500">
                       Categoría:{" "}
                       <strong>
-                        {s.catalogo_categoria_gastos?.nombre_categoria}
+                        {s.catalogo_categoria_gastos?.nombre_categoria || "-"}
                       </strong>
                     </p>
                   </div>
@@ -332,7 +367,8 @@ export default function AprobacionPresidentePage() {
 
             {solicitudes.length === 0 && (
               <div className="p-6 text-center text-slate-500">
-                No hay solicitudes pendientes de aprobación por el presidente.
+                No hay solicitudes pendientes de aprobación por el presidente
+                para este condominio.
               </div>
             )}
           </div>

@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/app/lib/supabaseClient";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 
-type Condominio = { id: number; nombre: string };
-type Unidad = { id: number; codigo: string };
+type Unidad = {
+  id: number;
+  codigo: string;
+};
 
 type Cargo = {
   id: number;
@@ -20,42 +20,37 @@ type Cargo = {
 };
 
 export default function ConsultaEstadoPage() {
-  const [condominios, setCondominios] = useState<Condominio[]>([]);
   const [unidades, setUnidades] = useState<Unidad[]>([]);
   const [cargos, setCargos] = useState<Cargo[]>([]);
 
   const [condominioId, setCondominioId] = useState("");
+  const [condominioNombre, setCondominioNombre] = useState("");
+
   const [unidadId, setUnidadId] = useState("");
   const [cedula, setCedula] = useState("");
+
   const [mensaje, setMensaje] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const [ultimoMesPagado, setUltimoMesPagado] = useState("");
-  const [mesesPendientes, setMesesPendientes] = useState(0);
-  const [cargosExtraordinarios, setCargosExtraordinarios] = useState(0);
-
   useEffect(() => {
-    cargarCondominios();
-  }, []);
+    const idGuardado = localStorage.getItem("condominio_id") || "";
+    const nombreGuardado = localStorage.getItem("condominio_nombre") || "";
 
-  async function cargarCondominios() {
-    const { data, error } = await supabase
-      .from("condominios")
-      .select("id, nombre")
-      .order("nombre");
-
-    if (error) {
-      setMensaje(error.message);
+    if (!idGuardado) {
+      setMensaje("No hay condominio seleccionado en la sesión. Debe iniciar sesión nuevamente.");
       return;
     }
 
-    setCondominios(data || []);
-  }
+    setCondominioId(idGuardado);
+    setCondominioNombre(nombreGuardado);
+
+    cargarUnidades(idGuardado);
+  }, []);
 
   async function cargarUnidades(id: string) {
-    setCondominioId(id);
     setUnidadId("");
     setCargos([]);
+    setMensaje("");
 
     const { data, error } = await supabase
       .from("unidades")
@@ -64,7 +59,7 @@ export default function ConsultaEstadoPage() {
       .order("codigo");
 
     if (error) {
-      setMensaje(error.message);
+      setMensaje("Error cargando unidades: " + error.message);
       return;
     }
 
@@ -73,34 +68,22 @@ export default function ConsultaEstadoPage() {
 
   async function consultarEstado() {
     if (!condominioId || !unidadId || !cedula) {
-      setMensaje("Debe completar condominio, unidad y cédula.");
+      setMensaje("Debe completar unidad y cédula.");
       return;
     }
 
     setLoading(true);
     setMensaje("");
+    setCargos([]);
 
-    const cedulaLimpia = cedula.replace(/\D/g, "");
-    const unidadCodigo = unidades.find((u) => String(u.id) === unidadId)?.codigo;
+    const { data: propietario, error: errorPropietario } = await supabase
+      .from("propietarios_apartamento")
+      .select("id, cedula, unidad_id")
+      .eq("unidad_id", Number(unidadId))
+      .eq("cedula", cedula)
+      .maybeSingle();
 
-    const { data: propietarios, error: errorPropietario } = await supabase
-      .from("propietarios_apartamentos")
-      .select("id, cedula, no_apartamento, condominio_id")
-      .eq("condominio_id", Number(condominioId))
-      .eq("no_apartamento", unidadCodigo);
-
-    if (errorPropietario) {
-      setLoading(false);
-      setMensaje(errorPropietario.message);
-      return;
-    }
-
-    const propietarioValido = (propietarios || []).find((p: any) => {
-      const cedulaDB = String(p.cedula || "").replace(/\D/g, "");
-      return cedulaDB === cedulaLimpia;
-    });
-
-    if (!propietarioValido) {
+    if (errorPropietario || !propietario) {
       setLoading(false);
       setMensaje("La cédula no coincide con la unidad seleccionada.");
       return;
@@ -108,116 +91,124 @@ export default function ConsultaEstadoPage() {
 
     const { data, error } = await supabase
       .from("cargos_periodicos")
-      .select("id, periodo, concepto, tipo_cargo, monto, monto_pagado, balance, estado")
+      .select(`
+        id,
+        periodo,
+        concepto,
+        tipo_cargo,
+        monto,
+        monto_pagado,
+        balance,
+        estado
+      `)
       .eq("condominio_id", Number(condominioId))
       .eq("unidad_id", Number(unidadId))
-      .order("anio")
-      .order("mes");
+      .order("periodo");
 
     setLoading(false);
 
     if (error) {
-      setMensaje(error.message);
+      setMensaje("Error consultando estado: " + error.message);
       return;
     }
 
-    const cargosData = data || [];
-    setCargos(cargosData);
+    setCargos(data || []);
 
-    const pagados = cargosData.filter((c) => c.estado === "PAGADO");
-    setUltimoMesPagado(pagados.length > 0 ? pagados[pagados.length - 1]?.periodo || "" : "Sin pagos");
-
-    setMesesPendientes(
-      cargosData.filter((c) => Number(c.balance || 0) > 0).length
-    );
-
-    setCargosExtraordinarios(
-      cargosData
-        .filter((c) => c.tipo_cargo === "EXTRAORDINARIO")
-        .reduce((sum, c) => sum + Number(c.balance || 0), 0)
-    );
+    if (!data || data.length === 0) {
+      setMensaje("No hay cargos registrados para esta unidad.");
+    }
   }
 
-  const totalFacturado = cargos.reduce((sum, c) => sum + Number(c.monto || 0), 0);
-  const totalPagado = cargos.reduce((sum, c) => sum + Number(c.monto_pagado || 0), 0);
-  const balancePendiente = cargos.reduce((sum, c) => sum + Number(c.balance || 0), 0);
+  const totalFacturado = cargos.reduce(
+    (sum, c) => sum + Number(c.monto || 0),
+    0
+  );
 
-  function descargarPDF() {
-    const condominioNombre =
-      condominios.find((c) => String(c.id) === condominioId)?.nombre || "";
+  const totalPagado = cargos.reduce(
+    (sum, c) => sum + Number(c.monto_pagado || 0),
+    0
+  );
 
-    const unidadCodigo =
-      unidades.find((u) => String(u.id) === unidadId)?.codigo || "";
-
-    const doc = new jsPDF();
-
-    doc.setFontSize(16);
-    doc.text("Estado de Cuenta", 14, 18);
-
-    doc.setFontSize(10);
-    doc.text(`Condominio: ${condominioNombre}`, 14, 28);
-    doc.text(`Unidad: ${unidadCodigo}`, 14, 35);
-    doc.text(`Fecha: ${new Date().toLocaleDateString("es-DO")}`, 14, 42);
-
-    doc.text(`Total facturado: RD$ ${totalFacturado.toLocaleString("es-DO")}`, 14, 54);
-    doc.text(`Total pagado: RD$ ${totalPagado.toLocaleString("es-DO")}`, 14, 61);
-    doc.text(`Balance pendiente: RD$ ${balancePendiente.toLocaleString("es-DO")}`, 14, 68);
-    doc.text(`Último mes pagado: ${ultimoMesPagado}`, 14, 75);
-    doc.text(`Meses pendientes: ${mesesPendientes}`, 14, 82);
-    doc.text(`Extraordinarios pendientes: RD$ ${cargosExtraordinarios.toLocaleString("es-DO")}`, 14, 89);
-
-    autoTable(doc, {
-      startY: 98,
-      head: [["Periodo", "Concepto", "Tipo", "Facturado", "Pagado", "Balance", "Estado"]],
-      body: cargos.map((c) => [
-        c.periodo,
-        c.concepto,
-        c.tipo_cargo,
-        `RD$ ${Number(c.monto).toLocaleString("es-DO")}`,
-        `RD$ ${Number(c.monto_pagado).toLocaleString("es-DO")}`,
-        `RD$ ${Number(c.balance).toLocaleString("es-DO")}`,
-        c.estado,
-      ]),
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [30, 41, 59] },
-    });
-
-    doc.save(`Estado_Cuenta_${unidadCodigo}.pdf`);
-  }
+  const balancePendiente = cargos.reduce(
+    (sum, c) => sum + Number(c.balance || 0),
+    0
+  );
 
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-8">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         <div className="bg-white rounded-2xl border shadow-sm p-6">
-          <h1 className="text-3xl font-bold">Estado de Cuenta Inteligente</h1>
-          <p className="text-slate-500 mt-2">Consulta financiera del propietario.</p>
+          <h1 className="text-3xl font-bold">
+            Consulta de Estado de Cuenta
+          </h1>
+
+          <p className="text-slate-500 mt-2">
+            Consulte meses pagados, cargos y balance pendiente del condominio activo.
+          </p>
         </div>
 
         <div className="bg-white rounded-2xl border shadow-sm p-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <select value={condominioId} onChange={(e) => cargarUnidades(e.target.value)} className="border rounded-xl px-4 py-3">
-              <option value="">Seleccione condominio</option>
-              {condominios.map((c) => (
-                <option key={c.id} value={c.id}>{c.nombre}</option>
-              ))}
-            </select>
+            <div>
+              <label className="block text-sm font-semibold mb-2">
+                Condominio
+              </label>
 
-            <select value={unidadId} onChange={(e) => setUnidadId(e.target.value)} className="border rounded-xl px-4 py-3">
-              <option value="">Seleccione unidad</option>
-              {unidades.map((u) => (
-                <option key={u.id} value={u.id}>{u.codigo}</option>
-              ))}
-            </select>
+              <input
+                type="text"
+                value={condominioNombre || `Condominio ID ${condominioId}`}
+                disabled
+                className="w-full border rounded-xl px-4 py-3 bg-slate-100 text-slate-700"
+              />
+            </div>
 
-            <input type="text" value={cedula} onChange={(e) => setCedula(e.target.value)} placeholder="Cédula" className="border rounded-xl px-4 py-3" />
+            <div>
+              <label className="block text-sm font-semibold mb-2">
+                Unidad
+              </label>
 
-            <button onClick={consultarEstado} className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 py-3">
-              {loading ? "Consultando..." : "Consultar"}
-            </button>
+              <select
+                value={unidadId}
+                onChange={(e) => setUnidadId(e.target.value)}
+                className="w-full border rounded-xl px-4 py-3"
+              >
+                <option value="">Seleccione</option>
+
+                {unidades.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.codigo}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold mb-2">
+                Cédula del propietario
+              </label>
+
+              <input
+                type="text"
+                value={cedula}
+                onChange={(e) => setCedula(e.target.value)}
+                placeholder="00100000000"
+                className="w-full border rounded-xl px-4 py-3"
+              />
+            </div>
+
+            <div className="flex items-end">
+              <button
+                onClick={consultarEstado}
+                disabled={loading}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-5 py-3 rounded-xl w-full"
+              >
+                {loading ? "Consultando..." : "Consultar estado"}
+              </button>
+            </div>
           </div>
 
           {mensaje && (
-            <div className="mt-4 bg-blue-50 border border-blue-200 rounded-xl p-4 text-blue-700">
+            <div className="mt-5 bg-blue-50 border border-blue-200 text-blue-800 rounded-xl p-4 text-sm">
               {mensaje}
             </div>
           )}
@@ -225,28 +216,32 @@ export default function ConsultaEstadoPage() {
 
         {cargos.length > 0 && (
           <>
-            <button
-              onClick={descargarPDF}
-              className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-5 py-3"
-            >
-              Descargar PDF
-            </button>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white rounded-2xl border shadow-sm p-5">
+                <p className="text-sm text-slate-500">Total facturado</p>
+                <h2 className="text-2xl font-bold mt-2">
+                  RD$ {totalFacturado.toLocaleString()}
+                </h2>
+              </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card title="Total Facturado" value={`RD$ ${totalFacturado.toLocaleString()}`} color="text-slate-800" />
-              <Card title="Total Pagado" value={`RD$ ${totalPagado.toLocaleString()}`} color="text-green-700" />
-              <Card title="Balance Pendiente" value={`RD$ ${balancePendiente.toLocaleString()}`} color="text-red-700" />
-              <Card title="Último Mes Pagado" value={ultimoMesPagado} color="text-blue-700" />
-            </div>
+              <div className="bg-white rounded-2xl border shadow-sm p-5">
+                <p className="text-sm text-slate-500">Total pagado</p>
+                <h2 className="text-2xl font-bold text-green-600 mt-2">
+                  RD$ {totalPagado.toLocaleString()}
+                </h2>
+              </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Card title="Meses Pendientes" value={String(mesesPendientes)} color="text-orange-700" />
-              <Card title="Cargos Extraordinarios" value={`RD$ ${cargosExtraordinarios.toLocaleString()}`} color="text-purple-700" />
+              <div className="bg-white rounded-2xl border shadow-sm p-5">
+                <p className="text-sm text-slate-500">Balance pendiente</p>
+                <h2 className="text-2xl font-bold text-red-600 mt-2">
+                  RD$ {balancePendiente.toLocaleString()}
+                </h2>
+              </div>
             </div>
 
             <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
               <div className="p-4 border-b">
-                <h2 className="font-bold">Estado detallado</h2>
+                <h2 className="font-bold">Estado de cuenta detallado</h2>
               </div>
 
               <div className="overflow-x-auto">
@@ -269,17 +264,25 @@ export default function ConsultaEstadoPage() {
                         <td className="px-4 py-3 font-medium">{c.periodo}</td>
                         <td className="px-4 py-3">{c.concepto}</td>
                         <td className="px-4 py-3">{c.tipo_cargo}</td>
-                        <td className="px-4 py-3 text-right">RD$ {Number(c.monto).toLocaleString()}</td>
-                        <td className="px-4 py-3 text-right text-green-700 font-bold">RD$ {Number(c.monto_pagado).toLocaleString()}</td>
-                        <td className="px-4 py-3 text-right text-red-700 font-bold">RD$ {Number(c.balance).toLocaleString()}</td>
+                        <td className="px-4 py-3 text-right">
+                          RD$ {Number(c.monto || 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-green-600 font-bold">
+                          RD$ {Number(c.monto_pagado || 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-red-600 font-bold">
+                          RD$ {Number(c.balance || 0).toLocaleString()}
+                        </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={
-                            c.estado === "PAGADO"
-                              ? "bg-green-100 text-green-700 px-3 py-1 rounded-lg text-xs font-bold"
-                              : c.estado === "PARCIAL"
-                              ? "bg-yellow-100 text-yellow-700 px-3 py-1 rounded-lg text-xs font-bold"
-                              : "bg-red-100 text-red-700 px-3 py-1 rounded-lg text-xs font-bold"
-                          }>
+                          <span
+                            className={
+                              c.estado === "PAGADO"
+                                ? "bg-green-100 text-green-700 px-2 py-1 rounded-lg text-xs font-bold"
+                                : c.estado === "PARCIAL"
+                                ? "bg-yellow-100 text-yellow-700 px-2 py-1 rounded-lg text-xs font-bold"
+                                : "bg-red-100 text-red-700 px-2 py-1 rounded-lg text-xs font-bold"
+                            }
+                          >
                             {c.estado}
                           </span>
                         </td>
@@ -293,22 +296,5 @@ export default function ConsultaEstadoPage() {
         )}
       </div>
     </main>
-  );
-}
-
-function Card({
-  title,
-  value,
-  color,
-}: {
-  title: string;
-  value: string;
-  color: string;
-}) {
-  return (
-    <div className="bg-white rounded-2xl border shadow-sm p-5">
-      <p className="text-sm text-slate-500">{title}</p>
-      <h2 className={`text-2xl font-bold mt-2 ${color}`}>{value}</h2>
-    </div>
   );
 }

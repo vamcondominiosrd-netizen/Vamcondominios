@@ -23,6 +23,8 @@ export default function CajaChicaPage() {
   const [guardando, setGuardando] = useState(false);
 
   const [condominio, setCondominio] = useState("");
+  const [condominioId, setCondominioId] = useState("");
+
   const [fecha, setFecha] = useState("");
   const [concepto, setConcepto] = useState("");
   const [detalleGasto, setDetalleGasto] = useState("");
@@ -30,13 +32,28 @@ export default function CajaChicaPage() {
   const [responsable, setResponsable] = useState("");
   const [comprobante, setComprobante] = useState("");
   const [facturaArchivo, setFacturaArchivo] = useState<File | null>(null);
-  const [filtroCondominio, setFiltroCondominio] = useState("");
 
   useEffect(() => {
-    cargarGastos();
+    const idGuardado = localStorage.getItem("condominio_id") || "";
+    const nombreGuardado = localStorage.getItem("condominio_nombre") || "";
+
+    if (!idGuardado) {
+      alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
+      return;
+    }
+
+    const hoy = new Date().toISOString().split("T")[0];
+
+    setCondominioId(idGuardado);
+    setCondominio(nombreGuardado || `Condominio ID ${idGuardado}`);
+    setFecha(hoy);
+
+    cargarGastos(nombreGuardado || `Condominio ID ${idGuardado}`);
   }, []);
 
-  async function cargarGastos() {
+  async function cargarGastos(condominioActivo: string) {
+    if (!condominioActivo) return;
+
     setLoading(true);
 
     const { data, error } = await supabase
@@ -44,6 +61,7 @@ export default function CajaChicaPage() {
       .select(
         "id, condominio, fecha, concepto, detalle_gasto, monto, responsable, comprobante, factura_url, estado, created_at"
       )
+      .eq("condominio", condominioActivo)
       .order("fecha", { ascending: false });
 
     setLoading(false);
@@ -64,7 +82,8 @@ export default function CajaChicaPage() {
       .toString(36)
       .substring(2)}.${extension}`;
 
-    const rutaArchivo = `${condominio || "general"}/${nombreArchivo}`;
+    const carpetaCondominio = condominioId || "general";
+    const rutaArchivo = `${carpetaCondominio}/${nombreArchivo}`;
 
     const { error: uploadError } = await supabase.storage
       .from("facturas-caja-chica")
@@ -121,8 +140,9 @@ export default function CajaChicaPage() {
 
       alert("Gasto de caja chica registrado correctamente.");
 
-      setCondominio("");
-      setFecha("");
+      const hoy = new Date().toISOString().split("T")[0];
+
+      setFecha(hoy);
       setConcepto("");
       setDetalleGasto("");
       setMonto("");
@@ -136,39 +156,31 @@ export default function CajaChicaPage() {
 
       if (inputFile) inputFile.value = "";
 
-      cargarGastos();
+      cargarGastos(condominio);
     } catch (err: any) {
       setGuardando(false);
       alert("Error subiendo factura: " + err.message);
     }
   }
 
-  const gastosFiltrados = gastos.filter((g) =>
-    (g.condominio || "").toLowerCase().includes(filtroCondominio.toLowerCase())
-  );
-
-  const totalGastos = gastosFiltrados.reduce(
+  const totalGastos = gastos.reduce(
     (sum, g) => sum + Number(g.monto || 0),
     0
   );
-
-  const condominiosUnicos = new Set(
-    gastos.map((g) => g.condominio).filter(Boolean)
-  ).size;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Caja Chica</h1>
         <p className="text-slate-500">
-          Registro y control de gastos menores por condominio.
+          Registro y control de gastos menores del condominio activo.
         </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Total gastos registrados</p>
-          <h2 className="text-2xl font-bold">{gastosFiltrados.length}</h2>
+          <p className="text-sm text-slate-500">Gastos registrados</p>
+          <h2 className="text-2xl font-bold">{gastos.length}</h2>
         </div>
 
         <div className="bg-white rounded-2xl p-5 shadow-sm">
@@ -182,9 +194,9 @@ export default function CajaChicaPage() {
         </div>
 
         <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Condominios con gastos</p>
-          <h2 className="text-2xl font-bold text-blue-700">
-            {condominiosUnicos}
+          <p className="text-sm text-slate-500">Condominio activo</p>
+          <h2 className="text-lg font-bold text-blue-700">
+            {condominio || "No seleccionado"}
           </h2>
         </div>
       </div>
@@ -200,15 +212,12 @@ export default function CajaChicaPage() {
             <label className="block text-sm font-semibold mb-1">
               Condominio *
             </label>
-            <select
+            <input
+              type="text"
               value={condominio}
-              onChange={(e) => setCondominio(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-            >
-              <option value="">Seleccione condominio</option>
-              <option value="Lote 9">Lote 9</option>
-              <option value="Lote 11">Lote 11</option>
-            </select>
+              disabled
+              className="border rounded-lg px-3 py-2 w-full bg-slate-100 text-slate-700"
+            />
           </div>
 
           <div>
@@ -320,23 +329,8 @@ export default function CajaChicaPage() {
           <div>
             <h2 className="text-xl font-bold">Detalle de gastos registrados</h2>
             <p className="text-sm text-slate-500">
-              Puede filtrar los gastos por condominio.
+              Mostrando solamente los gastos del condominio activo.
             </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Filtrar por condominio
-            </label>
-            <select
-              value={filtroCondominio}
-              onChange={(e) => setFiltroCondominio(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full md:w-56"
-            >
-              <option value="">Todos</option>
-              <option value="Lote 9">Lote 9</option>
-              <option value="Lote 11">Lote 11</option>
-            </select>
           </div>
         </div>
 
@@ -360,7 +354,7 @@ export default function CajaChicaPage() {
               </thead>
 
               <tbody>
-                {gastosFiltrados.map((g) => (
+                {gastos.map((g) => (
                   <tr key={g.id}>
                     <td className="p-2 border font-semibold">
                       {g.condominio}
@@ -396,10 +390,10 @@ export default function CajaChicaPage() {
                   </tr>
                 ))}
 
-                {gastosFiltrados.length === 0 && (
+                {gastos.length === 0 && (
                   <tr>
                     <td className="p-4 border text-center" colSpan={9}>
-                      No hay gastos registrados.
+                      No hay gastos registrados para este condominio.
                     </td>
                   </tr>
                 )}

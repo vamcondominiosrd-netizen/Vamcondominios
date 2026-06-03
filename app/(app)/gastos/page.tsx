@@ -3,11 +3,20 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/app/lib/supabaseClient";
 
-type Proveedor = { id: number; nombre_proveedor: string };
-type Categoria = { id: number; nombre_categoria: string };
+type Proveedor = {
+  id: number;
+  nombre_proveedor: string;
+  cuenta_banco: string | null;
+};
+
+type Categoria = {
+  id: number;
+  nombre_categoria: string;
+};
 
 type Gasto = {
   id: number;
+  condominio_id?: number;
   condominio: string;
   fecha: string;
   concepto: string;
@@ -63,35 +72,60 @@ export default function GastosPage() {
     const id = localStorage.getItem("condominio_id") || "";
     const nombre = localStorage.getItem("condominio_nombre") || "";
 
-    setCondominioId(id);
-    setCondominioNombre(nombre);
+    if (!id) {
+      alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
+      return;
+    }
 
-    cargarCatalogos();
-    cargarGastos(nombre);
+    const nombreFinal = nombre || `Condominio ID ${id}`;
+    const hoy = new Date().toISOString().split("T")[0];
+
+    setCondominioId(id);
+    setCondominioNombre(nombreFinal);
+    setFecha(hoy);
+
+    cargarCatalogos(id);
+    cargarGastos(id, nombreFinal);
   }, []);
 
-  async function cargarCatalogos() {
-    const { data: proveedoresData } = await supabase
+  async function cargarCatalogos(id: string) {
+    if (!id) return;
+
+    const { data: proveedoresData, error: proveedoresError } = await supabase
       .from("catalogo_proveedores")
-      .select("id, nombre_proveedor")
+      .select("id, nombre_proveedor, cuenta_banco")
       .eq("estado", "activo")
+      .eq("condominio_id", Number(id))
       .order("nombre_proveedor", { ascending: true });
 
-    const { data: categoriasData } = await supabase
+    if (proveedoresError) {
+      alert("Error cargando proveedores: " + proveedoresError.message);
+      return;
+    }
+
+    const { data: categoriasData, error: categoriasError } = await supabase
       .from("catalogo_categoria_gastos")
       .select("id, nombre_categoria")
       .eq("estado", "activo")
       .order("nombre_categoria", { ascending: true });
 
+    if (categoriasError) {
+      alert("Error cargando categorías: " + categoriasError.message);
+      return;
+    }
+
     setProveedores(proveedoresData || []);
     setCategorias(categoriasData || []);
   }
 
-  async function cargarGastos(nombreCondominio: string) {
-    const { data, error } = await supabase
+  async function cargarGastos(id: string, nombreCondominio: string) {
+    if (!id && !nombreCondominio) return;
+
+    let query = supabase
       .from("gastos")
       .select(`
         id,
+        condominio_id,
         condominio,
         fecha,
         concepto,
@@ -118,8 +152,15 @@ export default function GastosPage() {
         catalogo_proveedores(nombre_proveedor),
         catalogo_categoria_gastos(nombre_categoria)
       `)
-      .eq("condominio", nombreCondominio)
       .order("fecha", { ascending: false });
+
+    if (id) {
+      query = query.eq("condominio_id", Number(id));
+    } else {
+      query = query.eq("condominio", nombreCondominio);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       alert("Error cargando gastos: " + error.message);
@@ -154,7 +195,10 @@ export default function GastosPage() {
 
   function limpiarFormulario() {
     setEditandoId(null);
-    setFecha("");
+
+    const hoy = new Date().toISOString().split("T")[0];
+
+    setFecha(hoy);
     setCategoriaId("");
     setProveedorId("");
     setConcepto("");
@@ -175,6 +219,18 @@ export default function GastosPage() {
     if (inputFile) inputFile.value = "";
   }
 
+  function seleccionarProveedor(id: string) {
+    setProveedorId(id);
+
+    const proveedor = proveedores.find((p) => String(p.id) === id);
+
+    if (proveedor?.cuenta_banco) {
+      setCuentaBanco(proveedor.cuenta_banco);
+    } else {
+      setCuentaBanco("");
+    }
+  }
+
   function editarGasto(g: Gasto) {
     setEditandoId(g.id);
     setFecha(g.fecha || "");
@@ -190,6 +246,7 @@ export default function GastosPage() {
     setCuentaBanco(g.cuenta_banco || "");
     setFacturaActualUrl(g.factura_url || "");
     setFacturaArchivo(null);
+
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -204,7 +261,7 @@ export default function GastosPage() {
       .from("gastos")
       .delete()
       .eq("id", g.id)
-      .eq("condominio", condominioNombre);
+      .eq("condominio_id", Number(condominioId));
 
     if (error) {
       alert("Error borrando gasto: " + error.message);
@@ -212,7 +269,7 @@ export default function GastosPage() {
     }
 
     alert("Gasto borrado correctamente.");
-    cargarGastos(condominioNombre);
+    cargarGastos(condominioId, condominioNombre);
   }
 
   async function aprobarTesorero(g: Gasto) {
@@ -224,14 +281,14 @@ export default function GastosPage() {
         estado: "Aprobado por tesorero",
       })
       .eq("id", g.id)
-      .eq("condominio", condominioNombre);
+      .eq("condominio_id", Number(condominioId));
 
     if (error) {
       alert("Error aprobando por tesorero: " + error.message);
       return;
     }
 
-    cargarGastos(condominioNombre);
+    cargarGastos(condominioId, condominioNombre);
   }
 
   async function aprobarPresidente(g: Gasto) {
@@ -248,14 +305,14 @@ export default function GastosPage() {
         estado: "Aprobado por presidente",
       })
       .eq("id", g.id)
-      .eq("condominio", condominioNombre);
+      .eq("condominio_id", Number(condominioId));
 
     if (error) {
       alert("Error aprobando por presidente: " + error.message);
       return;
     }
 
-    cargarGastos(condominioNombre);
+    cargarGastos(condominioId, condominioNombre);
   }
 
   async function marcarPagado(g: Gasto) {
@@ -279,21 +336,23 @@ export default function GastosPage() {
         estado: "Pagado",
       })
       .eq("id", g.id)
-      .eq("condominio", condominioNombre);
+      .eq("condominio_id", Number(condominioId));
 
     if (error) {
       alert("Error marcando como pagado: " + error.message);
       return;
     }
 
-    cargarGastos(condominioNombre);
+    cargarGastos(condominioId, condominioNombre);
   }
 
   async function subirCheque(g: Gasto, archivo: File) {
     if (!archivo) return;
 
     const extension = archivo.name.split(".").pop();
-    const nombreArchivo = `${condominioId || "general"}/${g.id}-${Date.now()}.${extension}`;
+    const nombreArchivo = `${condominioId || "general"}/${
+      g.id
+    }-${Date.now()}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from("cheques-gastos")
@@ -314,7 +373,7 @@ export default function GastosPage() {
         cheque_url: data.publicUrl,
       })
       .eq("id", g.id)
-      .eq("condominio", condominioNombre);
+      .eq("condominio_id", Number(condominioId));
 
     if (error) {
       alert("Cheque subido, pero no se pudo actualizar el gasto: " + error.message);
@@ -322,13 +381,14 @@ export default function GastosPage() {
     }
 
     alert("Cheque subido correctamente.");
-    cargarGastos(condominioNombre);
+    cargarGastos(condominioId, condominioNombre);
   }
 
   async function guardarGasto(e: React.FormEvent) {
     e.preventDefault();
 
     if (
+      !condominioId ||
       !condominioNombre ||
       !fecha ||
       !categoriaId ||
@@ -336,7 +396,9 @@ export default function GastosPage() {
       !concepto ||
       !monto
     ) {
-      alert("Debe completar fecha, categoría, proveedor, concepto y monto.");
+      alert(
+        "Debe completar condominio, fecha, categoría, proveedor, concepto y monto."
+      );
       return;
     }
 
@@ -349,6 +411,7 @@ export default function GastosPage() {
       const facturaUrl = await subirFactura();
 
       const registro: any = {
+        condominio_id: Number(condominioId),
         condominio: condominioNombre,
         fecha,
         categoria_id: Number(categoriaId),
@@ -363,19 +426,14 @@ export default function GastosPage() {
         metodo_pago: metodoPago,
         cuenta_banco: cuentaBanco,
         factura_url: facturaUrl,
-        estado: editandoId ? undefined : "Pendiente aprobación tesorero",
       };
 
-      if (condominioId) registro.condominio_id = Number(condominioId);
-
       if (editandoId) {
-        delete registro.estado;
-
         const { error } = await supabase
           .from("gastos")
           .update(registro)
           .eq("id", editandoId)
-          .eq("condominio", condominioNombre);
+          .eq("condominio_id", Number(condominioId));
 
         setGuardando(false);
 
@@ -386,6 +444,7 @@ export default function GastosPage() {
 
         alert("Gasto modificado correctamente.");
       } else {
+        registro.estado = "Pendiente aprobación tesorero";
         registro.aprobado_tesorero = false;
         registro.aprobado_presidente = false;
         registro.pagado = false;
@@ -403,7 +462,7 @@ export default function GastosPage() {
       }
 
       limpiarFormulario();
-      cargarGastos(condominioNombre);
+      cargarGastos(condominioId, condominioNombre);
     } catch (err: any) {
       setGuardando(false);
       alert("Error subiendo factura: " + err.message);
@@ -467,7 +526,9 @@ export default function GastosPage() {
             <label className="block text-sm font-semibold mb-1">
               Condominio
             </label>
-            <p className="font-semibold text-slate-800">{condominioNombre}</p>
+            <p className="font-semibold text-slate-800">
+              {condominioNombre || "No seleccionado"}
+            </p>
           </div>
 
           <input
@@ -490,18 +551,26 @@ export default function GastosPage() {
             ))}
           </select>
 
-          <select
-            value={proveedorId}
-            onChange={(e) => setProveedorId(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          >
-            <option value="">Seleccione proveedor</option>
-            {proveedores.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre_proveedor}
-              </option>
-            ))}
-          </select>
+          <div>
+            <select
+              value={proveedorId}
+              onChange={(e) => seleccionarProveedor(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+            >
+              <option value="">Seleccione proveedor</option>
+              {proveedores.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nombre_proveedor}
+                </option>
+              ))}
+            </select>
+
+            {proveedores.length === 0 && (
+              <p className="text-xs text-orange-600 mt-1">
+                No hay proveedores activos registrados para este condominio.
+              </p>
+            )}
+          </div>
 
           <input
             type="text"

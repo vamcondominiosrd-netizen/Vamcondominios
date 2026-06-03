@@ -6,6 +6,8 @@ import * as XLSX from "xlsx";
 
 type Proveedor = {
   id: number;
+  condominio_id: number | null;
+  condominio: string | null;
   nombre_proveedor: string;
   rnc_cedula: string;
   telefono: string;
@@ -20,6 +22,9 @@ export default function ProveedoresPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const [condominioId, setCondominioId] = useState("");
+  const [condominio, setCondominio] = useState("");
+
   const [nombreProveedor, setNombreProveedor] = useState("");
   const [rncCedula, setRncCedula] = useState("");
   const [telefono, setTelefono] = useState("");
@@ -29,17 +34,29 @@ export default function ProveedoresPage() {
   const [buscar, setBuscar] = useState("");
 
   useEffect(() => {
-    cargarProveedores();
+    const idGuardado = localStorage.getItem("condominio_id") || "";
+    const nombreGuardado = localStorage.getItem("condominio_nombre") || "";
+
+    if (!idGuardado) {
+      alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
+      return;
+    }
+
+    setCondominioId(idGuardado);
+    setCondominio(nombreGuardado || `Condominio ID ${idGuardado}`);
+
+    cargarProveedores(idGuardado);
   }, []);
 
-  async function cargarProveedores() {
+  async function cargarProveedores(id: string) {
     setLoading(true);
 
     const { data, error } = await supabase
       .from("catalogo_proveedores")
       .select(
-        "id, nombre_proveedor, rnc_cedula, telefono, correo, direccion, cuenta_banco, estado, created_at"
+        "id, condominio_id, condominio, nombre_proveedor, rnc_cedula, telefono, correo, direccion, cuenta_banco, estado, created_at"
       )
+      .eq("condominio_id", Number(id))
       .order("nombre_proveedor", { ascending: true });
 
     setLoading(false);
@@ -55,6 +72,11 @@ export default function ProveedoresPage() {
   async function guardarProveedor(e: React.FormEvent) {
     e.preventDefault();
 
+    if (!condominioId || !condominio) {
+      alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
+      return;
+    }
+
     if (!nombreProveedor) {
       alert("Debe completar el nombre del proveedor.");
       return;
@@ -62,6 +84,8 @@ export default function ProveedoresPage() {
 
     const { error } = await supabase.from("catalogo_proveedores").insert([
       {
+        condominio_id: Number(condominioId),
+        condominio,
         nombre_proveedor: nombreProveedor,
         rnc_cedula: rncCedula,
         telefono,
@@ -86,7 +110,7 @@ export default function ProveedoresPage() {
     setDireccion("");
     setCuentaBanco("");
 
-    cargarProveedores();
+    cargarProveedores(condominioId);
   }
 
   const proveedoresFiltrados = proveedores.filter((p) => {
@@ -101,6 +125,7 @@ export default function ProveedoresPage() {
     }
 
     const dataExcel = proveedoresFiltrados.map((p) => ({
+      Condominio: p.condominio || "",
       Proveedor: p.nombre_proveedor,
       "RNC / Cédula": p.rnc_cedula,
       Teléfono: p.telefono,
@@ -114,6 +139,7 @@ export default function ProveedoresPage() {
 
     hoja["!cols"] = [
       { wch: 35 },
+      { wch: 35 },
       { wch: 18 },
       { wch: 18 },
       { wch: 30 },
@@ -125,10 +151,15 @@ export default function ProveedoresPage() {
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, "Proveedores");
 
-    XLSX.writeFile(libro, "Catalogo_Proveedores.xlsx");
+    XLSX.writeFile(
+      libro,
+      `Catalogo_Proveedores_${condominio || "Condominio"}.xlsx`
+    );
   }
 
-  const activos = proveedoresFiltrados.filter((p) => p.estado === "activo").length;
+  const activos = proveedoresFiltrados.filter(
+    (p) => p.estado === "activo"
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -136,7 +167,7 @@ export default function ProveedoresPage() {
         <div>
           <h1 className="text-3xl font-bold">Catálogo de Proveedores</h1>
           <p className="text-slate-500">
-            Registro y consulta de proveedores para gastos del condominio.
+            Registro y consulta de proveedores del condominio activo.
           </p>
         </div>
 
@@ -160,8 +191,10 @@ export default function ProveedoresPage() {
         </div>
 
         <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Estado del catálogo</p>
-          <h2 className="text-2xl font-bold text-blue-700">Activo</h2>
+          <p className="text-sm text-slate-500">Condominio activo</p>
+          <h2 className="text-lg font-bold text-blue-700">
+            {condominio || "No seleccionado"}
+          </h2>
         </div>
       </div>
 
@@ -172,6 +205,18 @@ export default function ProveedoresPage() {
           onSubmit={guardarProveedor}
           className="grid grid-cols-1 md:grid-cols-2 gap-4"
         >
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Condominio
+            </label>
+            <input
+              type="text"
+              value={condominio}
+              disabled
+              className="border rounded-lg px-3 py-2 w-full bg-slate-100 text-slate-700"
+            />
+          </div>
+
           <div>
             <label className="block text-sm font-semibold mb-1">
               Nombre del proveedor *
@@ -233,7 +278,7 @@ export default function ProveedoresPage() {
             />
           </div>
 
-          <div>
+          <div className="md:col-span-2">
             <label className="block text-sm font-semibold mb-1">Dirección</label>
             <textarea
               value={direccion}
@@ -260,7 +305,7 @@ export default function ProveedoresPage() {
           <div>
             <h2 className="text-xl font-bold">Listado de proveedores</h2>
             <p className="text-sm text-slate-500">
-              Puede buscar por nombre, RNC, teléfono, correo o cuenta bancaria.
+              Mostrando solamente proveedores del condominio activo.
             </p>
           </div>
 
@@ -313,7 +358,7 @@ export default function ProveedoresPage() {
                 {proveedoresFiltrados.length === 0 && (
                   <tr>
                     <td className="p-4 border text-center" colSpan={7}>
-                      No hay proveedores registrados.
+                      No hay proveedores registrados para este condominio.
                     </td>
                   </tr>
                 )}

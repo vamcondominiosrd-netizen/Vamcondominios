@@ -19,9 +19,7 @@ export default function NuevaSolicitudPagoPage() {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [guardando, setGuardando] = useState(false);
 
-  const [condominioId, setCondominioId] = useState("");
   const [condominio, setCondominio] = useState("");
-
   const [fechaSolicitud, setFechaSolicitud] = useState("");
   const [proveedorId, setProveedorId] = useState("");
   const [categoriaId, setCategoriaId] = useState("");
@@ -37,34 +35,14 @@ export default function NuevaSolicitudPagoPage() {
   const [soporteArchivo, setSoporteArchivo] = useState<File | null>(null);
 
   useEffect(() => {
-    const idGuardado = localStorage.getItem("condominio_id") || "";
-    const nombreGuardado = localStorage.getItem("condominio_nombre") || "";
-
-    if (!idGuardado) {
-      alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
-      return;
-    }
-
-    setCondominioId(idGuardado);
-    setCondominio(nombreGuardado || `Condominio ID ${idGuardado}`);
-
-    const hoy = new Date().toISOString().split("T")[0];
-    setFechaSolicitud(hoy);
-
-    cargarCatalogos(idGuardado);
+    cargarCatalogos();
   }, []);
 
-  async function cargarCatalogos(id: string) {
-    if (!id) {
-      alert("No hay condominio activo para cargar proveedores.");
-      return;
-    }
-
+  async function cargarCatalogos() {
     const { data: proveedoresData, error: proveedoresError } = await supabase
       .from("catalogo_proveedores")
       .select("id, nombre_proveedor, cuenta_banco")
       .eq("estado", "activo")
-      .eq("condominio_id", Number(id))
       .order("nombre_proveedor", { ascending: true });
 
     if (proveedoresError) {
@@ -94,8 +72,6 @@ export default function NuevaSolicitudPagoPage() {
 
     if (proveedor?.cuenta_banco) {
       setCuentaBanco(proveedor.cuenta_banco);
-    } else {
-      setCuentaBanco("");
     }
   }
 
@@ -107,8 +83,7 @@ export default function NuevaSolicitudPagoPage() {
       .toString(36)
       .substring(2)}.${extension}`;
 
-    const carpetaCondominio = condominioId || "general";
-    const rutaArchivo = `${carpetaCondominio}/${nombreArchivo}`;
+    const rutaArchivo = `${condominio || "general"}/${nombreArchivo}`;
 
     const { error } = await supabase.storage
       .from("soportes-solicitudes-pago")
@@ -129,7 +104,6 @@ export default function NuevaSolicitudPagoPage() {
     e.preventDefault();
 
     if (
-      !condominioId ||
       !condominio ||
       !fechaSolicitud ||
       !proveedorId ||
@@ -162,7 +136,6 @@ export default function NuevaSolicitudPagoPage() {
 
       const { error } = await supabase.from("solicitudes_pago").insert([
         {
-          condominio_id: Number(condominioId),
           condominio,
           fecha_solicitud: fechaSolicitud,
           proveedor_id: Number(proveedorId),
@@ -179,10 +152,7 @@ export default function NuevaSolicitudPagoPage() {
           soporte_url: soporteUrl,
           prioridad,
           estado: "Pendiente aprobación tesorero",
-          created_by:
-            user?.email ||
-            localStorage.getItem("usuario_nombre") ||
-            "Usuario del sistema",
+          created_by: user?.email || "",
         },
       ]);
 
@@ -195,9 +165,8 @@ export default function NuevaSolicitudPagoPage() {
 
       alert("Solicitud de pago registrada correctamente.");
 
-      const hoy = new Date().toISOString().split("T")[0];
-
-      setFechaSolicitud(hoy);
+      setCondominio("");
+      setFechaSolicitud("");
       setProveedorId("");
       setCategoriaId("");
       setConcepto("");
@@ -244,12 +213,15 @@ export default function NuevaSolicitudPagoPage() {
             <label className="block text-sm font-semibold mb-1">
               Condominio *
             </label>
-            <input
-              type="text"
+            <select
               value={condominio}
-              disabled
-              className="border rounded-lg px-3 py-2 w-full bg-slate-100 text-slate-700"
-            />
+              onChange={(e) => setCondominio(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+            >
+              <option value="">Seleccione condominio</option>
+              <option value="Lote 9">Lote 9</option>
+              <option value="Lote 11">Lote 11</option>
+            </select>
           </div>
 
           <div>
@@ -280,12 +252,6 @@ export default function NuevaSolicitudPagoPage() {
                 </option>
               ))}
             </select>
-
-            {proveedores.length === 0 && (
-              <p className="text-xs text-orange-600 mt-1">
-                No hay proveedores activos registrados para este condominio.
-              </p>
-            )}
           </div>
 
           <div>
