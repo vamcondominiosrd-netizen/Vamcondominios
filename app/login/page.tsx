@@ -28,12 +28,12 @@ export default function LoginPage() {
   setCondominios([
     {
       id: 1,
-      nombre: "Condominio Residencial Colinas del Oeste Lote 9",
+      nombre: "Residencial Colinas del Oeste Lote 9",
       logo_url: null,
     },
     {
       id: 2,
-      nombre: "Condominio Residencial Colinas del Oeste Lote 11",
+      nombre: "Residencial Colinas del Oeste Lote 11",
       logo_url: null,
     },
   ]);
