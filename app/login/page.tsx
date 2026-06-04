@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
@@ -143,7 +144,10 @@ export default function LoginPage() {
 
             <select
               value={condominioId}
-              onChange={(e) => setCondominioId(e.target.value)}
+              onChange={(e) => {
+                setCondominioId(e.target.value);
+                setMensaje("");
+              }}
               className="w-full border border-slate-300 rounded-lg px-4 py-3"
             >
               <option value="">Seleccione un condominio</option>
@@ -164,7 +168,10 @@ export default function LoginPage() {
             <input
               type="email"
               value={usuario}
-              onChange={(e) => setUsuario(e.target.value)}
+              onChange={(e) => {
+                setUsuario(e.target.value);
+                setMensaje("");
+              }}
               placeholder="usuario@correo.com"
               className="w-full border border-slate-300 rounded-lg px-4 py-3"
             />
@@ -178,7 +185,10 @@ export default function LoginPage() {
             <input
               type="password"
               value={clave}
-              onChange={(e) => setClave(e.target.value)}
+              onChange={(e) => {
+                setClave(e.target.value);
+                setMensaje("");
+              }}
               placeholder="Digite su clave"
               className="w-full border border-slate-300 rounded-lg px-4 py-3"
             />
@@ -198,6 +208,19 @@ export default function LoginPage() {
             {loading ? "Entrando..." : "Entrar al sistema"}
           </button>
         </form>
+
+        <div className="mt-6 pt-5 border-t text-center">
+          <p className="text-xs text-slate-500 mb-3">
+            Acceso exclusivo del dueño del sistema
+          </p>
+
+          <Link
+            href="/super-login"
+            className="block w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-lg"
+          >
+            Entrar como Full Administrador
+          </Link>
+        </div>
       </div>
     </main>
   );
