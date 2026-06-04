@@ -2,19 +2,17 @@
 
 import Link from "next/link";
 import {
+  Building2,
+  Home,
   Users,
-  BriefcaseBusiness,
-  Clock,
+  UserCog,
   CalendarDays,
-  Wallet,
-  ShieldCheck,
-  FileText,
-  BarChart3,
-  UserCheck,
+  Settings,
+  WalletCards,
   ArrowRight,
 } from "lucide-react";
 
-type ModuloRH = {
+type ModuloAdministracion = {
   titulo: string;
   descripcion: string;
   href: string;
@@ -23,82 +21,82 @@ type ModuloRH = {
   iconoColor: string;
 };
 
-const modulos: ModuloRH[] = [
-  {
-    titulo: "Personal / Empleados",
-    descripcion: "Registro y control del personal del condominio.",
-    href: "/recursos-humanos/personal",
-    icono: Users,
-    fondo: "from-blue-600 to-blue-800",
-    iconoColor: "text-blue-700",
-  },
-  {
-    titulo: "Cargos y Puestos",
-    descripcion: "Catálogo de cargos, funciones y departamentos.",
-    href: "/recursos-humanos/cargos",
-    icono: BriefcaseBusiness,
-    fondo: "from-slate-700 to-slate-950",
-    iconoColor: "text-slate-700",
-  },
-  {
-    titulo: "Asistencia",
-    descripcion: "Control de entrada, salida, tardanzas y ausencias.",
-    href: "/recursos-humanos/asistencia",
-    icono: Clock,
-    fondo: "from-green-600 to-green-800",
-    iconoColor: "text-green-700",
-  },
-  {
-    titulo: "Turnos",
-    descripcion: "Asignación de horarios y turnos de trabajo.",
-    href: "/recursos-humanos/turnos",
-    icono: CalendarDays,
-    fondo: "from-purple-600 to-purple-800",
-    iconoColor: "text-purple-700",
-  },
-  {
-    titulo: "Nómina",
-    descripcion: "Cálculo de salarios, descuentos y pagos al personal.",
-    href: "/recursos-humanos/nomina",
-    icono: Wallet,
-    fondo: "from-amber-500 to-orange-700",
-    iconoColor: "text-amber-700",
-  },
-  {
-    titulo: "Vacaciones / Permisos",
-    descripcion: "Control de vacaciones, licencias y permisos laborales.",
-    href: "/recursos-humanos/vacaciones",
-    icono: UserCheck,
-    fondo: "from-cyan-600 to-cyan-800",
-    iconoColor: "text-cyan-700",
-  },
-  {
-    titulo: "Seguridad / Vigilancia",
-    descripcion: "Gestión del personal de vigilancia y reportes de seguridad.",
-    href: "/recursos-humanos/seguridad",
-    icono: ShieldCheck,
-    fondo: "from-red-600 to-red-800",
-    iconoColor: "text-red-700",
-  },
-  {
-    titulo: "Documentos",
-    descripcion: "Archivo digital de cédulas, contratos y documentos.",
-    href: "/recursos-humanos/documentos",
-    icono: FileText,
-    fondo: "from-indigo-600 to-indigo-900",
-    iconoColor: "text-indigo-700",
-  },
-  {
-    titulo: "Reportes RH",
-    descripcion: "Reportes generales del área de Recursos Humanos.",
-    href: "/recursos-humanos/reportes",
-    icono: BarChart3,
-    fondo: "from-emerald-600 to-emerald-800",
-    iconoColor: "text-emerald-700",
-  },
-];
+export default function AdministracionPage() {
+  const modulos: ModuloAdministracion[] = [
+    {
+      titulo: "Condominios",
+      descripcion:
+        "Crear, editar y administrar los condominios registrados en el sistema.",
+      href: "/condominios",
+      icono: Building2,
+      fondo: "from-blue-600 to-blue-800",
+      iconoColor: "text-blue-700",
+    },
+    {
+      titulo: "Apartamentos / Unidades",
+      descripcion:
+        "Registrar y mantener los apartamentos o unidades del condominio activo.",
+      href: "/unidades",
+      icono: Home,
+      fondo: "from-emerald-600 to-emerald-800",
+      iconoColor: "text-emerald-700",
+    },
+    {
+      titulo: "Propietarios",
+      descripcion:
+        "Administrar propietarios y relacionarlos con sus apartamentos.",
+      href: "/propietarios",
+      icono: Users,
+      fondo: "from-purple-600 to-purple-800",
+      iconoColor: "text-purple-700",
+    },
+    {
+      titulo: "Directiva / Usuarios",
+      descripcion:
+        "Registrar usuarios administrativos, directiva, tesorero, presidente y roles.",
+      href: "/usuarios",
+      icono: UserCog,
+      fondo: "from-sky-600 to-sky-800",
+      iconoColor: "text-sky-700",
+    },
+    {
+      titulo: "Áreas Sociales",
+      descripcion:
+        "Crear y administrar áreas comunes disponibles para reservas.",
+      href: "/areas-sociales",
+      icono: CalendarDays,
+      fondo: "from-amber-500 to-orange-700",
+      iconoColor: "text-amber-700",
+    },
+    {
+      titulo: "Reservas",
+      descripcion:
+        "Consultar, aprobar y administrar reservas de áreas sociales.",
+      href: "/reservas-areas",
+      icono: CalendarDays,
+      fondo: "from-pink-600 to-rose-800",
+      iconoColor: "text-pink-700",
+    },
+    {
+      titulo: "Configuración General",
+      descripcion:
+        "Definir parámetros generales, información y datos institucionales del condominio.",
+      href: "/configuracion",
+      icono: Settings,
+      fondo: "from-slate-700 to-slate-950",
+      iconoColor: "text-slate-700",
+    },
+    {
+      titulo: "Configuración de Cargos",
+      descripcion:
+        "Configurar cuota ordinaria, día límite de pago, inicio de mora y porcentaje de mora.",
+      href: "/configuracion-cargos",
+      icono: WalletCards,
+      fondo: "from-red-600 to-red-800",
+      iconoColor: "text-red-700",
+    },
+  ];
 
-export default function RecursosHumanosPage() {
   return (
     <main className="space-y-5">
       <section className="bg-white rounded-2xl border shadow-sm p-5">
@@ -109,17 +107,18 @@ export default function RecursosHumanosPage() {
             </p>
 
             <h1 className="text-2xl md:text-3xl font-black text-slate-900 mt-1">
-              Recursos Humanos
+              Administración
             </h1>
 
             <p className="text-sm text-slate-500 mt-2 max-w-3xl">
-              Panel central para la gestión del personal, asistencia, nómina,
-              seguridad, documentos laborales y reportes del condominio.
+              Gestione la información principal del condominio activo:
+              condominios, apartamentos, propietarios, usuarios, áreas sociales
+              y configuraciones generales.
             </p>
           </div>
 
           <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-600 to-slate-900 flex items-center justify-center shadow-lg">
-            <Users className="h-9 w-9 text-white" />
+            <Building2 className="h-9 w-9 text-white" />
           </div>
         </div>
       </section>
@@ -127,7 +126,7 @@ export default function RecursosHumanosPage() {
       <section className="bg-white rounded-2xl border shadow-sm p-5">
         <div className="mb-5">
           <h2 className="text-lg font-bold text-slate-900">
-            Opciones de Recursos Humanos
+            Opciones de Administración
           </h2>
 
           <p className="text-sm text-slate-500 mt-1">
@@ -176,34 +175,34 @@ export default function RecursosHumanosPage() {
       </section>
 
       <section className="bg-slate-900 text-white rounded-2xl border border-slate-800 shadow-sm p-5">
-        <h2 className="text-lg font-bold">Flujo recomendado RH</h2>
+        <h2 className="text-lg font-bold">Flujo recomendado</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4 text-sm">
           <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-blue-300 font-bold">1. Empleados</p>
+            <p className="text-blue-300 font-bold">1. Condominios</p>
             <p className="text-slate-300 mt-1 text-xs">
-              Registrar y mantener los datos del personal.
+              Registrar o seleccionar el condominio.
             </p>
           </div>
 
           <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-blue-300 font-bold">2. Nómina</p>
+            <p className="text-blue-300 font-bold">2. Apartamentos</p>
             <p className="text-slate-300 mt-1 text-xs">
-              Procesar salarios, descuentos y pagos.
+              Crear las unidades del condominio.
             </p>
           </div>
 
           <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-blue-300 font-bold">3. Reportes</p>
+            <p className="text-blue-300 font-bold">3. Propietarios</p>
             <p className="text-slate-300 mt-1 text-xs">
-              Revisar reportes de nómina, empleados y descuentos.
+              Vincular propietarios con apartamentos.
             </p>
           </div>
 
           <div className="bg-slate-800 rounded-xl p-4">
             <p className="text-blue-300 font-bold">4. Configuración</p>
             <p className="text-slate-300 mt-1 text-xs">
-              Ajustar cargos, puestos, turnos y parámetros RH.
+              Definir cuotas, mora y parámetros.
             </p>
           </div>
         </div>

@@ -27,7 +27,6 @@ export default function ConsultaEstadoPage() {
   const [condominioNombre, setCondominioNombre] = useState("");
 
   const [unidadId, setUnidadId] = useState("");
-  const [cedula, setCedula] = useState("");
 
   const [mensaje, setMensaje] = useState("");
   const [loading, setLoading] = useState(false);
@@ -37,12 +36,14 @@ export default function ConsultaEstadoPage() {
     const nombreGuardado = localStorage.getItem("condominio_nombre") || "";
 
     if (!idGuardado) {
-      setMensaje("No hay condominio seleccionado en la sesión. Debe iniciar sesión nuevamente.");
+      setMensaje(
+        "No hay condominio seleccionado en la sesión. Debe iniciar sesión nuevamente."
+      );
       return;
     }
 
     setCondominioId(idGuardado);
-    setCondominioNombre(nombreGuardado);
+    setCondominioNombre(nombreGuardado || `Condominio ID ${idGuardado}`);
 
     cargarUnidades(idGuardado);
   }, []);
@@ -56,7 +57,7 @@ export default function ConsultaEstadoPage() {
       .from("unidades")
       .select("id, codigo")
       .eq("condominio_id", Number(id))
-      .order("codigo");
+      .order("codigo", { ascending: true });
 
     if (error) {
       setMensaje("Error cargando unidades: " + error.message);
@@ -67,27 +68,14 @@ export default function ConsultaEstadoPage() {
   }
 
   async function consultarEstado() {
-    if (!condominioId || !unidadId || !cedula) {
-      setMensaje("Debe completar unidad y cédula.");
+    if (!condominioId || !unidadId) {
+      setMensaje("Debe seleccionar una unidad/apartamento.");
       return;
     }
 
     setLoading(true);
     setMensaje("");
     setCargos([]);
-
-    const { data: propietario, error: errorPropietario } = await supabase
-      .from("propietarios_apartamento")
-      .select("id, cedula, unidad_id")
-      .eq("unidad_id", Number(unidadId))
-      .eq("cedula", cedula)
-      .maybeSingle();
-
-    if (errorPropietario || !propietario) {
-      setLoading(false);
-      setMensaje("La cédula no coincide con la unidad seleccionada.");
-      return;
-    }
 
     const { data, error } = await supabase
       .from("cargos_periodicos")
@@ -103,7 +91,7 @@ export default function ConsultaEstadoPage() {
       `)
       .eq("condominio_id", Number(condominioId))
       .eq("unidad_id", Number(unidadId))
-      .order("periodo");
+      .order("periodo", { ascending: true });
 
     setLoading(false);
 
@@ -112,12 +100,22 @@ export default function ConsultaEstadoPage() {
       return;
     }
 
-    setCargos(data || []);
+    setCargos((data as Cargo[]) || []);
 
     if (!data || data.length === 0) {
       setMensaje("No hay cargos registrados para esta unidad.");
     }
   }
+
+  function limpiarConsulta() {
+    setUnidadId("");
+    setCargos([]);
+    setMensaje("");
+  }
+
+  const unidadSeleccionada = unidades.find(
+    (u) => String(u.id) === String(unidadId)
+  );
 
   const totalFacturado = cargos.reduce(
     (sum, c) => sum + Number(c.monto || 0),
@@ -143,12 +141,13 @@ export default function ConsultaEstadoPage() {
           </h1>
 
           <p className="text-slate-500 mt-2">
-            Consulte meses pagados, cargos y balance pendiente del condominio activo.
+            Consulte meses pagados, cargos y balance pendiente del condominio
+            activo.
           </p>
         </div>
 
         <div className="bg-white rounded-2xl border shadow-sm p-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-semibold mb-2">
                 Condominio
@@ -164,15 +163,19 @@ export default function ConsultaEstadoPage() {
 
             <div>
               <label className="block text-sm font-semibold mb-2">
-                Unidad
+                Apartamento / Unidad
               </label>
 
               <select
                 value={unidadId}
-                onChange={(e) => setUnidadId(e.target.value)}
-                className="w-full border rounded-xl px-4 py-3"
+                onChange={(e) => {
+                  setUnidadId(e.target.value);
+                  setCargos([]);
+                  setMensaje("");
+                }}
+                className="w-full border rounded-xl px-4 py-3 bg-white"
               >
-                <option value="">Seleccione</option>
+                <option value="">Seleccione apartamento</option>
 
                 {unidades.map((u) => (
                   <option key={u.id} value={u.id}>
@@ -182,21 +185,7 @@ export default function ConsultaEstadoPage() {
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold mb-2">
-                Cédula del propietario
-              </label>
-
-              <input
-                type="text"
-                value={cedula}
-                onChange={(e) => setCedula(e.target.value)}
-                placeholder="00100000000"
-                className="w-full border rounded-xl px-4 py-3"
-              />
-            </div>
-
-            <div className="flex items-end">
+            <div className="flex items-end gap-2">
               <button
                 onClick={consultarEstado}
                 disabled={loading}
@@ -204,7 +193,50 @@ export default function ConsultaEstadoPage() {
               >
                 {loading ? "Consultando..." : "Consultar estado"}
               </button>
+
+              <button
+                onClick={limpiarConsulta}
+                type="button"
+                className="bg-slate-600 hover:bg-slate-700 text-white px-5 py-3 rounded-xl"
+              >
+                Limpiar
+              </button>
             </div>
+          </div>
+
+          {unidadSeleccionada && (
+            <div className="mt-5 bg-slate-50 border rounded-xl p-4 text-sm">
+              <span className="text-slate-500">Unidad seleccionada:</span>{" "}
+              <strong>{unidadSeleccionada.codigo}</strong>
+            </div>
+          )}
+
+          <div className="mt-5 bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-xl p-4 text-sm">
+            <p className="font-bold mb-2">Verificación de consulta</p>
+
+            <p>
+              <strong>condominio_id activo:</strong>{" "}
+              {condominioId || "No definido"}
+            </p>
+
+            <p>
+              <strong>condominio:</strong>{" "}
+              {condominioNombre || "No definido"}
+            </p>
+
+            <p>
+              <strong>unidad_id seleccionada:</strong>{" "}
+              {unidadId || "No seleccionada"}
+            </p>
+
+            <p>
+              <strong>apartamento:</strong>{" "}
+              {unidadSeleccionada?.codigo || "No seleccionado"}
+            </p>
+
+            <p>
+              <strong>registros encontrados:</strong> {cargos.length}
+            </p>
           </div>
 
           {mensaje && (
@@ -219,29 +251,44 @@ export default function ConsultaEstadoPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-white rounded-2xl border shadow-sm p-5">
                 <p className="text-sm text-slate-500">Total facturado</p>
+
                 <h2 className="text-2xl font-bold mt-2">
-                  RD$ {totalFacturado.toLocaleString()}
+                  RD${" "}
+                  {totalFacturado.toLocaleString("es-DO", {
+                    minimumFractionDigits: 2,
+                  })}
                 </h2>
               </div>
 
               <div className="bg-white rounded-2xl border shadow-sm p-5">
                 <p className="text-sm text-slate-500">Total pagado</p>
+
                 <h2 className="text-2xl font-bold text-green-600 mt-2">
-                  RD$ {totalPagado.toLocaleString()}
+                  RD${" "}
+                  {totalPagado.toLocaleString("es-DO", {
+                    minimumFractionDigits: 2,
+                  })}
                 </h2>
               </div>
 
               <div className="bg-white rounded-2xl border shadow-sm p-5">
                 <p className="text-sm text-slate-500">Balance pendiente</p>
+
                 <h2 className="text-2xl font-bold text-red-600 mt-2">
-                  RD$ {balancePendiente.toLocaleString()}
+                  RD${" "}
+                  {balancePendiente.toLocaleString("es-DO", {
+                    minimumFractionDigits: 2,
+                  })}
                 </h2>
               </div>
             </div>
 
             <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
               <div className="p-4 border-b">
-                <h2 className="font-bold">Estado de cuenta detallado</h2>
+                <h2 className="font-bold">
+                  Estado de cuenta detallado
+                  {unidadSeleccionada ? ` - ${unidadSeleccionada.codigo}` : ""}
+                </h2>
               </div>
 
               <div className="overflow-x-auto">
@@ -262,17 +309,35 @@ export default function ConsultaEstadoPage() {
                     {cargos.map((c) => (
                       <tr key={c.id} className="border-t">
                         <td className="px-4 py-3 font-medium">{c.periodo}</td>
+
                         <td className="px-4 py-3">{c.concepto}</td>
+
                         <td className="px-4 py-3">{c.tipo_cargo}</td>
+
                         <td className="px-4 py-3 text-right">
-                          RD$ {Number(c.monto || 0).toLocaleString()}
+                          RD${" "}
+                          {Number(c.monto || 0).toLocaleString("es-DO", {
+                            minimumFractionDigits: 2,
+                          })}
                         </td>
+
                         <td className="px-4 py-3 text-right text-green-600 font-bold">
-                          RD$ {Number(c.monto_pagado || 0).toLocaleString()}
+                          RD${" "}
+                          {Number(c.monto_pagado || 0).toLocaleString(
+                            "es-DO",
+                            {
+                              minimumFractionDigits: 2,
+                            }
+                          )}
                         </td>
+
                         <td className="px-4 py-3 text-right text-red-600 font-bold">
-                          RD$ {Number(c.balance || 0).toLocaleString()}
+                          RD${" "}
+                          {Number(c.balance || 0).toLocaleString("es-DO", {
+                            minimumFractionDigits: 2,
+                          })}
                         </td>
+
                         <td className="px-4 py-3 text-center">
                           <span
                             className={

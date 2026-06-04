@@ -2,26 +2,22 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import {
   Home,
-  Upload,
-  FileSpreadsheet,
-  SearchCheck,
-  WalletCards,
-  BarChart3,
-  Settings,
   Building2,
-  Coins,
-  LogOut,
+  WalletCards,
   Users,
-  ReceiptText,
-  FolderOpen,
+  Landmark,
+  Settings,
+  BarChart3,
+  Smartphone,
+  LogOut,
   Megaphone,
-  AlertTriangle,
-  CalendarDays,
-  ClipboardCheck,
+  FolderOpen,
+  ChevronDown,
+  Circle,
 } from "lucide-react";
 
 import { supabase } from "@/app/lib/supabaseClient";
@@ -33,12 +29,24 @@ type CondominioActual = {
   logoUrl: string;
 };
 
+type MenuItem = {
+  href: string;
+  label: string;
+  descripcion: string;
+  icon: any;
+  submenu?: {
+    href: string;
+    label: string;
+  }[];
+};
+
 export default function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
 
   const [condominio, setCondominio] = useState<CondominioActual>({
     id: "",
@@ -46,15 +54,10 @@ export default function AppLayout({
     logoUrl: "",
   });
 
-  const [rol, setRol] = useState("");
-
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
     const nombre = localStorage.getItem("condominio_nombre") || "";
     const logoUrl = localStorage.getItem("condominio_logo_url") || "";
-    const rolGuardado = localStorage.getItem("usuario_rol") || "";
-
-    setRol(rolGuardado);
 
     if (!id) {
       router.push("/login");
@@ -68,287 +71,111 @@ export default function AppLayout({
     });
   }, [router]);
 
-  const grupos = [
+  const menuPrincipal: MenuItem[] = [
     {
-      titulo: "Dashboard",
-      roles: ["Super Admin", "Administrador", "Presidente", "Consulta"],
-      items: [
-        {
-          href: "/dashboard",
-          label: "Dashboard Financiero",
-          icon: Home,
-        },
-      ],
+      href: "/dashboard",
+      label: "Dashboard",
+      descripcion: "Resumen general",
+      icon: Home,
     },
-
     {
-      titulo: "Condominio",
-      roles: ["Super Admin", "Administrador"],
-      items: [
-        {
-         href: "/condominios",
-         label: "Condominios",
-         icon: Building2,
-        },
-
-        {
-          href: "/unidades",
-          label: "Unidades",
-          icon: Building2,
-        },
-        {
-          href: "/propietarios",
-          label: "Propietarios",
-          icon: Users,
-        },
-        {
-          href: "/areas-sociales",
-          label: "Áreas Sociales",
-          icon: Building2,
-        },
-        {
-          href: "/reservas-areas",
-          label: "Reservas",
-          icon: CalendarDays,
-        },
-      ],
+      href: "/administracion",
+      label: "Administración",
+      descripcion: "Condominios, apartamentos y propietarios",
+      icon: Building2,
     },
-
     {
-      titulo: "Cobros",
-      roles: ["Super Admin", "Administrador", "Tesorero"],
-      items: [
-        {
-          href: "/configuracion-cargos",
-          label: "Configuración Cargos",
-          icon: Settings,
-        },
-        {
-          href: "/cargos-mantenimiento",
-          label: "Cargos Mantenimiento",
-          icon: FileSpreadsheet,
-        },
-        {
-          href: "/cargos-extraordinarios",
-          label: "Cargos Extraordinarios",
-          icon: ReceiptText,
-        },
-        {
-          href: "/pagos-mantenimiento",
-          label: "Pagos Mantenimiento",
-          icon: WalletCards,
-        },
-        {
-          href: "/pagos-propietarios",
-          label: "Pagos Propietarios",
-          icon: ClipboardCheck,
-        },
-        {
-          href: "/pagos-movil",
-          label: "Pagos Móviles",
-          icon: WalletCards,
-        },
-        {
-          href: "/consulta-estado",
-          label: "Estado de Cuenta",
-          icon: FileSpreadsheet,
-        },
-      ],
-    },
-
-    {
-      titulo: "Finanzas",
-      roles: ["Super Admin", "Administrador", "Tesorero", "Presidente"],
-      items: [
-        {
-          href: "/gastos",
-          label: "Gastos",
-          icon: ReceiptText,
-        },
-        {
-          href: "/solicitudes-pago",
-          label: "Solicitudes Pago",
-          icon: ClipboardCheck,
-        },
-        {
-          href: "/aprobacion-tesorero",
-          label: "Aprobación Tesorero",
-          icon: ClipboardCheck,
-        },
-        {
-          href: "/aprobacion-presidente",
-          label: "Aprobación Presidente",
-          icon: ClipboardCheck,
-        },
-        {
-          href: "/tesoreria",
-          label: "Tesorería",
-          icon: WalletCards,
-        },
-        {
-          href: "/configuracion-financiera",
-          label: "Configuración Financiera",
-          icon: Settings,
-        },
-        {
-          href: "/configuracion-financiera/balance-banco",
-          label: "Balance Banco",
-          icon: WalletCards,
-        },
-        {
-          href: "/reportes/estado-financiero",
-          label: "Estado Financiero",
-          icon: BarChart3,
-        },
-        {
-          href: "/reportes/presupuesto-anual",
-          label: "Presupuesto Anual",
-          icon: BarChart3,
-        },
-      ],
-    },
-
-    {
-  titulo: "Banco",
-  roles: [
-    "Super Admin",
-    "Administrador",
-    "Tesorero",
-  ],
-  items: [
-    {
-      href: "/archivo-banco/importar",
-      label: "Importar Banco",
-      icon: Upload,
-    },
-
-    {
-      href: "/apartamento-banco-alias/importar",
-      label: "Cuentas Banco Propietarios",
-      icon: FileSpreadsheet,
-    },
-
-    {
-      href: "/archivo-banco/identificar",
-      label: "Identificar Pagos",
-      icon: SearchCheck,
-    },
-
-    {
-      href: "/pagos-identificados",
-      label: "Pagos Identificados",
+      href: "/finanzas",
+      label: "Finanzas",
+      descripcion: "Configuraciones, pagos y caja chica",
       icon: WalletCards,
-    },
-  ],
-},
-
-    {
-      titulo: "Caja Chica",
-      roles: ["Super Admin", "Administrador", "Tesorero"],
-      items: [
+      submenu: [
         {
-          href: "/caja-chica",
-          label: "Movimientos",
-          icon: Coins,
+          href: "/finanzas/configuraciones",
+          label: "Configuraciones",
         },
         {
-          href: "/caja-chica/fondos",
-          label: "Fondos",
-          icon: WalletCards,
+          href: "/finanzas/pagos",
+          label: "Pagos",
         },
         {
-          href: "/caja-chica/balance",
-          label: "Balance",
-          icon: BarChart3,
-        },
-        {
-          href: "/caja-chica/reporte",
-          label: "Reportes",
-          icon: FileSpreadsheet,
+          href: "/finanzas/caja-chica",
+          label: "Caja Chica",
         },
       ],
     },
-
     {
-      titulo: "Operaciones",
-      roles: ["Super Admin", "Administrador", "Soporte"],
-      items: [
-        {
-          href: "/incidencias",
-          label: "Incidencias",
-          icon: AlertTriangle,
-        },
-        {
-          href: "/anuncios",
-          label: "Anuncios",
-          icon: Megaphone,
-        },
-      ],
+      href: "/recursos-humanos",
+      label: "Recursos Humanos",
+      descripcion: "Empleados, nómina y reportes RH",
+      icon: Users,
     },
-
     {
-      titulo: "Recursos Humanos",
-      roles: ["Super Admin", "Administrador"],
-      items: [
-        {
-          href: "/recursos-humanos",
-          label: "Panel RH",
-          icon: Users,
-        },
-      ],
+      href: "/banco",
+      label: "Banco",
+      descripcion: "Importación y conciliación bancaria",
+      icon: Landmark,
     },
-
     {
-      titulo: "Catálogos",
-      roles: ["Super Admin", "Administrador"],
-      items: [
-        {
-          href: "/catalogos/proveedores",
-          label: "Proveedores",
-          icon: Building2,
-        },
-        {
-          href: "/catalogos/categorias-gastos",
-          label: "Categorías Gastos",
-          icon: FolderOpen,
-        },
-      ],
+      href: "/operaciones",
+      label: "Operaciones",
+      descripcion: "Incidencias, reservas y anuncios",
+      icon: Megaphone,
     },
-
     {
-      titulo: "Sistema",
-      roles: ["Super Admin"],
-      items: [
-        {
-          href: "/reportes",
-          label: "Reportes",
-          icon: BarChart3,
-        },
-        {
-          href: "/condominios",
-          label: "Condominios",
-          icon: Building2,
-        },
-        {
-          href: "/configuracion",
-          label: "Configuración",
-          icon: Settings,
-        },
-      ],
+      href: "/catalogos",
+      label: "Catálogos",
+      descripcion: "Proveedores, categorías y parámetros",
+      icon: FolderOpen,
+    },
+    {
+      href: "/reportes",
+      label: "Reportes",
+      descripcion: "Estados financieros y análisis",
+      icon: BarChart3,
+    },
+    {
+      href: "/portal-movil",
+      label: "Portal Móvil",
+      descripcion: "Acceso móvil para residentes y directiva",
+      icon: Smartphone,
+    },
+    {
+      href: "/seguridad",
+      label: "Seguridad",
+      descripcion: "Usuarios, roles y permisos",
+      icon: Settings,
     },
   ];
 
-  const gruposFiltrados = grupos.filter((g) => g.roles.includes(rol));
-
   async function cerrarSesion() {
-    localStorage.clear();
+    localStorage.removeItem("condominio_id");
+    localStorage.removeItem("condominio_nombre");
+    localStorage.removeItem("condominio_logo_url");
+    localStorage.removeItem("usuario_rol");
+    localStorage.removeItem("usuario_nombre");
+    localStorage.removeItem("usuario_admin_id");
+    localStorage.removeItem("propietario_actual");
+
     await supabase.auth.signOut();
+
     router.push("/login");
   }
 
   function cambiarCondominio() {
-    localStorage.clear();
+    localStorage.removeItem("condominio_id");
+    localStorage.removeItem("condominio_nombre");
+    localStorage.removeItem("condominio_logo_url");
+
     router.push("/login");
+  }
+
+  function estaActivo(href: string) {
+    if (href === "/dashboard") {
+      return pathname === "/dashboard";
+    }
+
+    return pathname === href || pathname.startsWith(`${href}/`);
   }
 
   if (!condominio.id) {
@@ -357,87 +184,143 @@ export default function AppLayout({
 
   return (
     <div className="min-h-screen flex bg-slate-100">
-      <aside className="w-80 bg-slate-950 text-white p-5 hidden md:flex flex-col overflow-y-auto">
-        <div className="flex items-center gap-3 mb-6">
-          {condominio.logoUrl ? (
-            <img
-              src={condominio.logoUrl}
-              alt={condominio.nombre}
-              className="h-14 w-14 object-contain rounded-2xl border border-slate-700 bg-white p-2"
-            />
-          ) : (
-            <img
-              src="/logo.jpg"
-              alt="Logo"
-              className="h-14 w-14 object-contain rounded-2xl border border-slate-700 bg-white p-2"
-            />
-          )}
+      <aside className="w-80 bg-slate-950 text-white hidden md:flex flex-col border-r border-slate-800">
+        <div className="p-5 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            {condominio.logoUrl ? (
+              <img
+                src={condominio.logoUrl}
+                alt={condominio.nombre}
+                className="h-14 w-14 object-contain rounded-2xl border border-slate-700 bg-white p-2"
+              />
+            ) : (
+              <div className="h-14 w-14 rounded-2xl bg-amber-500 flex items-center justify-center">
+                <Building2 className="h-7 w-7 text-slate-950" />
+              </div>
+            )}
 
-          <div>
-            <h1 className="font-bold text-base leading-tight">
-              Sistema de Condominios
-            </h1>
+            <div>
+              <h1 className="font-bold text-base leading-tight">
+                VAM Administración
+              </h1>
 
-            <p className="text-xs text-slate-300">
-              {rol || "Administrador"}
-            </p>
+              <p className="text-xs text-slate-300">
+                Sistema de Condominios
+              </p>
+            </div>
           </div>
         </div>
 
-        <div className="mb-6 bg-slate-900 rounded-2xl p-4 border border-slate-800">
-          <p className="text-xs uppercase tracking-wider text-slate-400 mb-2">
-            Condominio activo
-          </p>
+        <div className="p-5 border-b border-slate-800">
+          <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800">
+            <p className="text-xs uppercase tracking-wider text-slate-400 mb-2">
+              Condominio activo
+            </p>
 
-          <p className="font-semibold text-sm text-white leading-snug">
-            {condominio.nombre}
-          </p>
+            <p className="font-semibold text-sm text-white leading-snug">
+              {condominio.nombre}
+            </p>
 
-          <button
-            onClick={cambiarCondominio}
-            className="mt-3 text-xs text-amber-400 hover:text-amber-300"
-          >
-            Cambiar condominio
-          </button>
+            <button
+              onClick={cambiarCondominio}
+              className="mt-3 text-xs text-amber-400 hover:text-amber-300"
+            >
+              Cambiar condominio
+            </button>
+          </div>
         </div>
 
-        <nav className="space-y-5 flex-1">
-          {gruposFiltrados.map((grupo) => (
-            <div key={grupo.titulo}>
-              <p className="text-xs uppercase tracking-wider text-slate-400 mb-2 px-2">
-                {grupo.titulo}
-              </p>
+        <nav className="flex-1 overflow-y-auto p-4 space-y-1">
+          {menuPrincipal.map((item) => {
+            const Icon = item.icon;
+            const activo = estaActivo(item.href);
+            const tieneSubmenu = item.submenu && item.submenu.length > 0;
 
-              <div className="space-y-1">
-                {grupo.items.map((item) => {
-                  const Icon = item.icon;
+            return (
+              <div key={item.href}>
+                <Link
+                  href={item.href}
+                  className={`flex items-start gap-3 rounded-2xl px-4 py-3 transition border ${
+                    activo
+                      ? "bg-blue-700 border-blue-600 text-white shadow"
+                      : "border-transparent text-slate-200 hover:bg-slate-900 hover:border-slate-800"
+                  }`}
+                >
+                  <div
+                    className={`mt-0.5 rounded-xl p-2 ${
+                      activo ? "bg-white/15" : "bg-slate-900"
+                    }`}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </div>
 
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className="flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm text-slate-200 hover:bg-slate-800 hover:text-white transition"
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-bold leading-tight">
+                        {item.label}
+                      </p>
+
+                      {tieneSubmenu && (
+                        <ChevronDown className="h-4 w-4 opacity-80" />
+                      )}
+                    </div>
+
+                    <p
+                      className={`text-xs mt-1 leading-snug ${
+                        activo ? "text-blue-100" : "text-slate-400"
+                      }`}
                     >
-                      <Icon className="h-5 w-5" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
+                      {item.descripcion}
+                    </p>
+                  </div>
+                </Link>
+
+                {tieneSubmenu && activo && (
+                  <div className="ml-6 mt-2 mb-2 space-y-1 border-l border-slate-700 pl-4">
+                    {item.submenu?.map((sub) => {
+                      const subActivo =
+                        pathname === sub.href ||
+                        pathname.startsWith(`${sub.href}/`);
+
+                      return (
+                        <Link
+                          key={sub.href}
+                          href={sub.href}
+                          className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition ${
+                            subActivo
+                              ? "bg-slate-800 text-amber-300 font-bold"
+                              : "text-slate-300 hover:bg-slate-900 hover:text-white"
+                          }`}
+                        >
+                          <Circle
+                            className={`h-2.5 w-2.5 ${
+                              subActivo ? "fill-amber-300" : ""
+                            }`}
+                          />
+                          {sub.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
 
-        <button
-          onClick={cerrarSesion}
-          className="mt-6 flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-red-200 hover:bg-red-900/40 transition"
-        >
-          <LogOut className="h-5 w-5" />
-          Cerrar sesión
-        </button>
+        <div className="p-4 border-t border-slate-800">
+          <button
+            onClick={cerrarSesion}
+            className="w-full flex items-center gap-3 rounded-2xl px-4 py-3 text-sm text-red-200 hover:bg-red-900/40 transition"
+          >
+            <LogOut className="h-5 w-5" />
+
+            Cerrar sesión
+          </button>
+        </div>
       </aside>
 
-      <main className="flex-1 p-6">
+      <main className="flex-1 p-6 overflow-y-auto">
         <AuthGuard>{children}</AuthGuard>
       </main>
     </div>

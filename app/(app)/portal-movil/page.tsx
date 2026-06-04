@@ -2,17 +2,19 @@
 
 import Link from "next/link";
 import {
-  BarChart3,
-  FileSpreadsheet,
+  Smartphone,
+  LogIn,
+  Home,
   WalletCards,
-  AlertTriangle,
   ReceiptText,
-  TrendingUp,
-  Download,
+  AlertTriangle,
+  CalendarDays,
+  Megaphone,
+  ClipboardCheck,
   ArrowRight,
 } from "lucide-react";
 
-type ModuloReporte = {
+type ModuloPortalMovil = {
   titulo: string;
   descripcion: string;
   href: string;
@@ -21,88 +23,97 @@ type ModuloReporte = {
   iconoColor: string;
 };
 
-export default function ReportesPage() {
-  const modulos: ModuloReporte[] = [
+export default function PortalMovilPage() {
+  const modulos: ModuloPortalMovil[] = [
     {
-      titulo: "Centro de Reportes",
+      titulo: "Login Móvil",
       descripcion:
-        "Vista general de reportes disponibles del condominio activo.",
-      href: "/reportes",
-      icono: BarChart3,
+        "Acceso móvil para propietarios, residentes y miembros de la directiva.",
+      href: "/movil-login",
+      icono: LogIn,
       fondo: "from-blue-600 to-blue-800",
       iconoColor: "text-blue-700",
     },
     {
-      titulo: "Estado Financiero",
+      titulo: "Inicio Móvil",
       descripcion:
-        "Consultar balances, ingresos, egresos y situación financiera.",
-      href: "/reportes/estado-financiero",
-      icono: FileSpreadsheet,
+        "Pantalla principal del portal móvil según el tipo de usuario.",
+      href: "/movil",
+      icono: Home,
+      fondo: "from-slate-700 to-slate-950",
+      iconoColor: "text-slate-700",
+    },
+    {
+      titulo: "Pagar Mantenimiento",
+      descripcion:
+        "Registrar pagos de mantenimiento desde el portal móvil.",
+      href: "/movil/pagos",
+      icono: WalletCards,
       fondo: "from-emerald-600 to-emerald-800",
       iconoColor: "text-emerald-700",
     },
     {
-      titulo: "Ingresos vs Gastos",
+      titulo: "Estado de Cuenta",
       descripcion:
-        "Analizar ingresos y gastos por mes, período o categoría.",
-      href: "/reportes/ingresos-gastos",
-      icono: TrendingUp,
+        "Consultar cargos, pagos, balances y créditos desde el móvil.",
+      href: "/movil/estado-cuenta",
+      icono: ReceiptText,
       fondo: "from-purple-600 to-purple-800",
       iconoColor: "text-purple-700",
     },
     {
-      titulo: "Cuentas por Cobrar",
+      titulo: "Reportar Incidencia",
       descripcion:
-        "Revisar balances pendientes por apartamento y período.",
-      href: "/reportes/cuentas-por-cobrar",
-      icono: WalletCards,
-      fondo: "from-amber-500 to-orange-700",
-      iconoColor: "text-amber-700",
-    },
-    {
-      titulo: "Morosidad",
-      descripcion:
-        "Reporte de propietarios con pagos pendientes o vencidos.",
-      href: "/morosidad",
+        "Permitir a residentes reportar incidencias con fotos y detalles.",
+      href: "/movil/incidencias",
       icono: AlertTriangle,
       fondo: "from-red-600 to-red-800",
       iconoColor: "text-red-700",
     },
     {
-      titulo: "Pagos por Apartamento",
+      titulo: "Reservar Área Social",
       descripcion:
-        "Consultar pagos registrados por unidad, fecha y concepto.",
-      href: "/reportes/pagos-apartamento",
-      icono: WalletCards,
-      fondo: "from-sky-600 to-sky-800",
-      iconoColor: "text-sky-700",
+        "Solicitar reservas de áreas sociales desde el portal móvil.",
+      href: "/movil/reservas",
+      icono: CalendarDays,
+      fondo: "from-amber-500 to-orange-700",
+      iconoColor: "text-amber-700",
     },
     {
-      titulo: "Gastos por Categoría",
+      titulo: "Anuncios",
       descripcion:
-        "Analizar gastos por proveedor, categoría, período y fondo.",
-      href: "/reportes/gastos-categoria",
-      icono: ReceiptText,
+        "Consultar avisos, comunicados e informaciones publicadas.",
+      href: "/movil/anuncios",
+      icono: Megaphone,
       fondo: "from-pink-600 to-rose-800",
       iconoColor: "text-pink-700",
     },
     {
-      titulo: "Presupuesto Anual",
+      titulo: "Solicitudes de Pago Móvil",
       descripcion:
-        "Comparar presupuesto anual contra ingresos y gastos reales.",
-      href: "/reportes/presupuesto-anual",
-      icono: FileSpreadsheet,
+        "Acceso móvil para revisar y aprobar solicitudes de pago.",
+      href: "/movil/solicitudes-pago",
+      icono: ClipboardCheck,
       fondo: "from-indigo-600 to-indigo-900",
       iconoColor: "text-indigo-700",
     },
     {
-      titulo: "Exportar a Excel",
+      titulo: "Aprobación Tesorero",
       descripcion:
-        "Generar archivos Excel con reportes financieros y operativos.",
-      href: "/reportes/exportar",
-      icono: Download,
-      fondo: "from-slate-700 to-slate-950",
-      iconoColor: "text-slate-700",
+        "Revisar solicitudes pendientes de aprobación por tesorería.",
+      href: "/movil/solicitudes-pago/tesorero",
+      icono: ClipboardCheck,
+      fondo: "from-teal-600 to-teal-800",
+      iconoColor: "text-teal-700",
+    },
+    {
+      titulo: "Aprobación Presidente",
+      descripcion:
+        "Autorizar solicitudes aprobadas previamente por tesorería.",
+      href: "/movil/solicitudes-pago/presidente",
+      icono: ClipboardCheck,
+      fondo: "from-cyan-600 to-cyan-800",
+      iconoColor: "text-cyan-700",
     },
   ];
 
@@ -111,22 +122,22 @@ export default function ReportesPage() {
       <section className="bg-white rounded-2xl border shadow-sm p-5">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">
+            <p className="text-xs font-semibold text-cyan-700 uppercase tracking-wide">
               Módulo
             </p>
 
             <h1 className="text-2xl md:text-3xl font-black text-slate-900 mt-1">
-              Reportes
+              Portal Móvil
             </h1>
 
             <p className="text-sm text-slate-500 mt-2 max-w-3xl">
-              Consulte reportes financieros, cuentas por cobrar, morosidad,
-              pagos, gastos, presupuesto anual y exportaciones del condominio.
+              Centralice los accesos móviles para propietarios, residentes,
+              tesorería, presidencia y administración del condominio.
             </p>
           </div>
 
-          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-green-600 to-slate-900 flex items-center justify-center shadow-lg">
-            <BarChart3 className="h-9 w-9 text-white" />
+          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-cyan-600 to-slate-900 flex items-center justify-center shadow-lg">
+            <Smartphone className="h-9 w-9 text-white" />
           </div>
         </div>
       </section>
@@ -134,11 +145,11 @@ export default function ReportesPage() {
       <section className="bg-white rounded-2xl border shadow-sm p-5">
         <div className="mb-5">
           <h2 className="text-lg font-bold text-slate-900">
-            Opciones de Reportes
+            Opciones del Portal Móvil
           </h2>
 
           <p className="text-sm text-slate-500 mt-1">
-            Seleccione una opción para continuar trabajando.
+            Seleccione una opción para revisar o probar el acceso móvil.
           </p>
         </div>
 
@@ -163,7 +174,7 @@ export default function ReportesPage() {
                 </div>
 
                 <div className="p-4">
-                  <h3 className="font-black text-slate-900 text-base group-hover:text-green-700">
+                  <h3 className="font-black text-slate-900 text-base group-hover:text-cyan-700">
                     {modulo.titulo}
                   </h3>
 
@@ -171,7 +182,7 @@ export default function ReportesPage() {
                     {modulo.descripcion}
                   </p>
 
-                  <div className="mt-3 flex items-center justify-between text-xs font-bold text-green-700">
+                  <div className="mt-3 flex items-center justify-between text-xs font-bold text-cyan-700">
                     <span>Abrir módulo</span>
                     <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition" />
                   </div>
@@ -183,34 +194,34 @@ export default function ReportesPage() {
       </section>
 
       <section className="bg-slate-900 text-white rounded-2xl border border-slate-800 shadow-sm p-5">
-        <h2 className="text-lg font-bold">Flujo recomendado Reportes</h2>
+        <h2 className="text-lg font-bold">Flujo recomendado Portal Móvil</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4 text-sm">
           <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-green-300 font-bold">1. Estado Financiero</p>
+            <p className="text-cyan-300 font-bold">1. Login</p>
             <p className="text-slate-300 mt-1 text-xs">
-              Revisar ingresos, gastos y balance general.
+              El usuario entra como propietario, residente o directiva.
             </p>
           </div>
 
           <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-green-300 font-bold">2. Cuentas por Cobrar</p>
+            <p className="text-cyan-300 font-bold">2. Consulta</p>
             <p className="text-slate-300 mt-1 text-xs">
-              Consultar balances pendientes y morosidad.
+              Revisa estado de cuenta, anuncios y pagos pendientes.
             </p>
           </div>
 
           <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-green-300 font-bold">3. Gastos</p>
+            <p className="text-cyan-300 font-bold">3. Gestión</p>
             <p className="text-slate-300 mt-1 text-xs">
-              Analizar gastos por categoría y proveedor.
+              Reporta incidencias, reservas o pagos desde el móvil.
             </p>
           </div>
 
           <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-green-300 font-bold">4. Exportar</p>
+            <p className="text-cyan-300 font-bold">4. Aprobaciones</p>
             <p className="text-slate-300 mt-1 text-xs">
-              Generar reportes en Excel para revisión externa.
+              Tesorero y presidente pueden aprobar solicitudes.
             </p>
           </div>
         </div>

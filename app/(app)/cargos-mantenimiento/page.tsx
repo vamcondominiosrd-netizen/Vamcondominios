@@ -6,16 +6,18 @@ import { useRouter } from "next/navigation";
 
 type Cargo = {
   id: number;
+  condominio_id: number;
+  unidad_id: number;
+  anio: number;
+  mes: number;
   periodo: string;
-  monto_base: number;
-  recargo_aplicado: number;
+  concepto: string;
+  tipo_cargo: string;
+  monto: number;
+  monto_pagado: number;
   balance: number;
   estado: string;
-  fecha_emision?: string;
-  fecha_vencimiento?: string;
-  unidades: {
-    codigo: string;
-  } | null;
+  created_at?: string;
 };
 
 type Unidad = {
@@ -58,7 +60,7 @@ export default function CargoMantenimientoPage() {
     }
 
     setCondominioId(id);
-    setCondominioNombre(nombre);
+    setCondominioNombre(nombre || `Condominio ID ${id}`);
 
     const hoy = new Date();
     const periodoActual = `${hoy.getFullYear()}-${String(
@@ -108,22 +110,24 @@ export default function CargoMantenimientoPage() {
     setLoading(true);
 
     const { data, error } = await supabase
-      .from("cargos")
+      .from("cargos_periodicos")
       .select(`
         id,
+        condominio_id,
+        unidad_id,
+        anio,
+        mes,
         periodo,
-        monto_base,
-        recargo_aplicado,
+        concepto,
+        tipo_cargo,
+        monto,
+        monto_pagado,
         balance,
         estado,
-        fecha_emision,
-        fecha_vencimiento,
-        unidades (
-          codigo
-        )
+        created_at
       `)
       .eq("condominio_id", Number(id))
-      .order("fecha_emision", { ascending: false });
+      .order("id", { ascending: false });
 
     setLoading(false);
 
@@ -135,11 +139,13 @@ export default function CargoMantenimientoPage() {
     setCargos((data as Cargo[]) || []);
   }
 
-  function calcularFechaVencimiento(periodoCargo: string) {
-    const [anio, mes] = periodoCargo.split("-").map(Number);
-    const diaLimite = Number(configuracion?.dia_limite_pago || 5);
+  function obtenerAnioMes(periodoCargo: string) {
+    const [anioTexto, mesTexto] = periodoCargo.split("-");
 
-    return new Date(anio, mes - 1, diaLimite).toISOString().slice(0, 10);
+    return {
+      anio: Number(anioTexto),
+      mes: Number(mesTexto),
+    };
   }
 
   async function generarCargos() {
@@ -172,11 +178,20 @@ export default function CargoMantenimientoPage() {
       return;
     }
 
+    const { anio, mes } = obtenerAnioMes(periodo);
+
+    if (!anio || !mes) {
+      alert("El período seleccionado no es válido.");
+      return;
+    }
+
     const { data: cargosExistentes, error: errorExiste } = await supabase
-      .from("cargos")
+      .from("cargos_periodicos")
       .select("id")
       .eq("condominio_id", Number(condominioId))
       .eq("periodo", periodo)
+      .eq("concepto", "Mantenimiento")
+      .eq("tipo_cargo", "Mantenimiento")
       .limit(1);
 
     if (errorExiste) {
@@ -186,46 +201,67 @@ export default function CargoMantenimientoPage() {
 
     if (cargosExistentes && cargosExistentes.length > 0) {
       alert(
-        `Ya existen cargos generados para el período ${periodo}. No se duplicarán cargos.`
+        `Ya existen cargos de mantenimiento generados para el período ${periodo}. No se duplicarán cargos.`
       );
       return;
     }
 
     const confirmar = confirm(
-      `¿Desea generar los cargos del período ${periodo} para ${unidades.length} unidades por RD$ ${cuota.toLocaleString(
-        "es-DO"
-      )} cada una?`
+      `¿Desea generar el mantenimiento del período ${periodo} para ${
+        unidades.length
+      } apartamentos por RD$ ${cuota.toLocaleString("es-DO", {
+        minimumFractionDigits: 2,
+      })} cada uno?`
     );
 
     if (!confirmar) return;
 
     setLoading(true);
 
-    const fechaVencimiento = calcularFechaVencimiento(periodo);
-
     const cargosInsertar = unidades.map((u) => ({
-    client_id: Number(condominioId),
-    condominio_id: Number(condominioId),
-    unidad_id: u.id,
-    periodo,
-    monto_base: cuota,
-    recargo_aplicado: 0,
-    balance: cuota,
-    estado: "Pendiente",
-    fecha_emision: new Date().toISOString().slice(0, 10),
-    fecha_vencimiento: fechaVencimiento,
+      condominio_id: Number(condominioId),
+      unidad_id: u.id,
+      anio,
+      mes,
+      periodo,
+      concepto: "Mantenimiento",
+      tipo_cargo: "Mantenimiento",
+      monto: cuota,
+      monto_pagado: 0,
+      balance: cuota,
+      estado: "PENDIENTE",
     }));
 
-    const { error } = await supabase.from("cargos").insert(cargosInsertar);
-
-    setLoading(false);
+    const { error } = await supabase
+      .from("cargos_periodicos")
+      .insert(cargosInsertar);
 
     if (error) {
+      setLoading(false);
       alert("Error generando cargos: " + error.message);
       return;
     }
 
-    alert("Cargos generados correctamente.");
+    const { error: errorCreditos } = await supabase.rpc(
+      "aplicar_creditos_a_cargos",
+      {
+        p_condominio_id: Number(condominioId),
+      }
+    );
+
+    setLoading(false);
+
+    if (errorCreditos) {
+      alert(
+        "Cargos generados, pero no se pudieron aplicar los créditos a favor: " +
+          errorCreditos.message
+      );
+
+      cargarCargos(condominioId);
+      return;
+    }
+
+    alert("Cargos generados correctamente y créditos aplicados.");
     cargarCargos(condominioId);
   }
 
@@ -260,8 +296,11 @@ export default function CargoMantenimientoPage() {
     const cargosPendientes = cargos.filter(
       (c) =>
         c.periodo === periodo &&
-        (c.estado === "Pendiente" || c.estado === "En mora") &&
-        Number(c.balance || 0) > 0
+        (c.estado === "PENDIENTE" ||
+          c.estado === "PARCIAL" ||
+          c.estado === "EN MORA") &&
+        Number(c.balance || 0) > 0 &&
+        c.tipo_cargo === "Mantenimiento"
     );
 
     if (cargosPendientes.length === 0) {
@@ -278,27 +317,57 @@ export default function CargoMantenimientoPage() {
     setLoading(true);
 
     for (const cargo of cargosPendientes) {
-      const moraAnterior = Number(cargo.recargo_aplicado || 0);
+      const conceptoMora = `Mora ${periodo}`;
+      const montoMora = Number(cargo.monto || 0) * (porcentaje / 100);
 
-      if (moraAnterior > 0) {
+      const { data: moraExistente } = await supabase
+        .from("cargos_periodicos")
+        .select("id")
+        .eq("condominio_id", Number(condominioId))
+        .eq("unidad_id", cargo.unidad_id)
+        .eq("periodo", periodo)
+        .eq("concepto", conceptoMora)
+        .eq("tipo_cargo", "Mora")
+        .limit(1);
+
+      if (moraExistente && moraExistente.length > 0) {
         continue;
       }
 
-      const mora = Number(cargo.monto_base || 0) * (porcentaje / 100);
-      const nuevoBalance = Number(cargo.balance || 0) + mora;
-
-      await supabase
-        .from("cargos")
-        .update({
-          recargo_aplicado: mora,
-          balance: nuevoBalance,
-          estado: "En mora",
-        })
-        .eq("id", cargo.id)
-        .eq("condominio_id", Number(condominioId));
+      await supabase.from("cargos_periodicos").insert([
+        {
+          condominio_id: Number(condominioId),
+          unidad_id: cargo.unidad_id,
+          anio: cargo.anio,
+          mes: cargo.mes,
+          periodo,
+          concepto: conceptoMora,
+          tipo_cargo: "Mora",
+          monto: montoMora,
+          monto_pagado: 0,
+          balance: montoMora,
+          estado: "PENDIENTE",
+        },
+      ]);
     }
 
+    const { error: errorCreditos } = await supabase.rpc(
+      "aplicar_creditos_a_cargos",
+      {
+        p_condominio_id: Number(condominioId),
+      }
+    );
+
     setLoading(false);
+
+    if (errorCreditos) {
+      alert(
+        "Mora aplicada, pero no se pudieron aplicar los créditos a favor: " +
+          errorCreditos.message
+      );
+      cargarCargos(condominioId);
+      return;
+    }
 
     alert("Mora aplicada correctamente.");
     cargarCargos(condominioId);
@@ -310,23 +379,39 @@ export default function CargoMantenimientoPage() {
     });
   }
 
-  const totalBalance = cargos.reduce(
-    (sum, c) => sum + Number(c.balance || 0),
-    0
-  );
-
-  const totalMora = cargos.reduce(
-    (sum, c) => sum + Number(c.recargo_aplicado || 0),
-    0
-  );
-
-  const pendientes = cargos.filter((c) => c.estado === "Pendiente").length;
-  const enMora = cargos.filter((c) => c.estado === "En mora").length;
-  const pagados = cargos.filter((c) => c.estado === "Pagado").length;
+  function obtenerCodigoUnidad(unidadId: number) {
+    const unidad = unidades.find((u) => Number(u.id) === Number(unidadId));
+    return unidad?.codigo || `Unidad ${unidadId}`;
+  }
 
   const cargosDelPeriodo = periodo
     ? cargos.filter((c) => c.periodo === periodo)
     : cargos;
+
+  const totalBalance = cargosDelPeriodo.reduce(
+    (sum, c) => sum + Number(c.balance || 0),
+    0
+  );
+
+  const totalPagado = cargosDelPeriodo.reduce(
+    (sum, c) => sum + Number(c.monto_pagado || 0),
+    0
+  );
+
+  const totalCargado = cargosDelPeriodo.reduce(
+    (sum, c) => sum + Number(c.monto || 0),
+    0
+  );
+
+  const pendientes = cargosDelPeriodo.filter(
+    (c) => c.estado === "PENDIENTE"
+  ).length;
+
+  const parciales = cargosDelPeriodo.filter(
+    (c) => c.estado === "PARCIAL"
+  ).length;
+
+  const pagados = cargosDelPeriodo.filter((c) => c.estado === "PAGADO").length;
 
   return (
     <div className="space-y-6">
@@ -336,7 +421,8 @@ export default function CargoMantenimientoPage() {
         </h1>
 
         <p className="text-slate-500 mt-1">
-          Generación y control de cargos mensuales del condominio activo.
+          Generación mensual de mantenimiento usando cargos_periodicos y
+          aplicación automática de créditos a favor.
         </p>
       </div>
 
@@ -416,7 +502,7 @@ export default function CargoMantenimientoPage() {
               disabled={loading || !configuracion}
               className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white rounded-xl px-5 py-3 w-full font-bold"
             >
-              {loading ? "Procesando..." : "Generar cargos"}
+              {loading ? "Procesando..." : "Generar mantenimiento"}
             </button>
           </div>
 
@@ -432,8 +518,8 @@ export default function CargoMantenimientoPage() {
         </div>
 
         <p className="text-xs text-slate-500 mt-3">
-          El sistema valida si ya existen cargos del mismo período para evitar
-          duplicados.
+          El sistema valida si ya existen cargos de mantenimiento del mismo
+          período para evitar duplicados.
         </p>
       </div>
 
@@ -446,8 +532,10 @@ export default function CargoMantenimientoPage() {
         </div>
 
         <div className="bg-white rounded-2xl border shadow-sm p-5">
-          <p className="text-sm text-slate-500">En mora</p>
-          <h2 className="text-3xl font-bold text-red-600 mt-2">{enMora}</h2>
+          <p className="text-sm text-slate-500">Parciales</p>
+          <h2 className="text-3xl font-bold text-blue-600 mt-2">
+            {parciales}
+          </h2>
         </div>
 
         <div className="bg-white rounded-2xl border shadow-sm p-5">
@@ -458,18 +546,25 @@ export default function CargoMantenimientoPage() {
         </div>
 
         <div className="bg-white rounded-2xl border shadow-sm p-5">
-          <p className="text-sm text-slate-500">Total mora</p>
-          <h2 className="text-3xl font-bold text-red-700 mt-2">
-            RD$ {dinero(totalMora)}
+          <p className="text-sm text-slate-500">Total cargado</p>
+          <h2 className="text-3xl font-bold text-slate-800 mt-2">
+            RD$ {dinero(totalCargado)}
           </h2>
         </div>
 
         <div className="bg-white rounded-2xl border shadow-sm p-5">
           <p className="text-sm text-slate-500">Total balance</p>
-          <h2 className="text-3xl font-bold text-slate-800 mt-2">
+          <h2 className="text-3xl font-bold text-red-700 mt-2">
             RD$ {dinero(totalBalance)}
           </h2>
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border shadow-sm p-5">
+        <p className="text-sm text-slate-500">Total pagado / aplicado</p>
+        <h2 className="text-3xl font-bold text-green-700 mt-2">
+          RD$ {dinero(totalPagado)}
+        </h2>
       </div>
 
       <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
@@ -477,7 +572,7 @@ export default function CargoMantenimientoPage() {
           <div>
             <h2 className="font-bold">Listado de cargos</h2>
             <p className="text-sm text-slate-500">
-              Mostrando cargos del período seleccionado.
+              Mostrando cargos del período seleccionado desde cargos_periodicos.
             </p>
           </div>
 
@@ -495,8 +590,10 @@ export default function CargoMantenimientoPage() {
                 <tr>
                   <th className="text-left px-4 py-3">Unidad</th>
                   <th className="text-left px-4 py-3">Período</th>
-                  <th className="text-right px-4 py-3">Cuota</th>
-                  <th className="text-right px-4 py-3">Mora</th>
+                  <th className="text-left px-4 py-3">Concepto</th>
+                  <th className="text-left px-4 py-3">Tipo</th>
+                  <th className="text-right px-4 py-3">Monto</th>
+                  <th className="text-right px-4 py-3">Pagado</th>
                   <th className="text-right px-4 py-3">Balance</th>
                   <th className="text-center px-4 py-3">Estado</th>
                 </tr>
@@ -506,17 +603,21 @@ export default function CargoMantenimientoPage() {
                 {cargosDelPeriodo.map((c) => (
                   <tr key={c.id} className="border-t hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium">
-                      {c.unidades?.codigo || "-"}
+                      {obtenerCodigoUnidad(c.unidad_id)}
                     </td>
 
                     <td className="px-4 py-3">{c.periodo}</td>
 
+                    <td className="px-4 py-3">{c.concepto}</td>
+
+                    <td className="px-4 py-3">{c.tipo_cargo}</td>
+
                     <td className="px-4 py-3 text-right">
-                      RD$ {dinero(c.monto_base)}
+                      RD$ {dinero(c.monto)}
                     </td>
 
-                    <td className="px-4 py-3 text-right text-red-600">
-                      RD$ {dinero(c.recargo_aplicado)}
+                    <td className="px-4 py-3 text-right text-green-700">
+                      RD$ {dinero(c.monto_pagado)}
                     </td>
 
                     <td className="px-4 py-3 text-right font-bold">
@@ -524,13 +625,13 @@ export default function CargoMantenimientoPage() {
                     </td>
 
                     <td className="px-4 py-3 text-center">
-                      {c.estado === "Pagado" ? (
+                      {c.estado === "PAGADO" ? (
                         <span className="bg-green-100 text-green-700 text-xs px-3 py-1 rounded-full">
                           Pagado
                         </span>
-                      ) : c.estado === "En mora" ? (
-                        <span className="bg-red-100 text-red-700 text-xs px-3 py-1 rounded-full">
-                          En mora
+                      ) : c.estado === "PARCIAL" ? (
+                        <span className="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded-full">
+                          Parcial
                         </span>
                       ) : (
                         <span className="bg-yellow-100 text-yellow-700 text-xs px-3 py-1 rounded-full">
@@ -544,7 +645,7 @@ export default function CargoMantenimientoPage() {
                 {!loading && cargosDelPeriodo.length === 0 && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={8}
                       className="px-4 py-8 text-center text-slate-500"
                     >
                       No hay cargos registrados para este período.
