@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-type MenuItem = {
+type Modulo = {
   titulo: string;
   descripcion: string;
   href: string;
@@ -13,30 +13,28 @@ type MenuItem = {
   activo: boolean;
 };
 
-export default function MobileAdminHomePage() {
+export default function MobileAdminPage() {
   const router = useRouter();
 
   const [condominioNombre, setCondominioNombre] = useState("");
-  const [condominioLogoUrl, setCondominioLogoUrl] = useState("");
+  const [condominioLogo, setCondominioLogo] = useState("");
   const [usuarioNombre, setUsuarioNombre] = useState("");
   const [usuarioRol, setUsuarioRol] = useState("");
 
   useEffect(() => {
-    const condominioId = localStorage.getItem("condominio_id") || "";
-    const nombre = localStorage.getItem("condominio_nombre") || "";
-    const logo = localStorage.getItem("condominio_logo_url") || "";
-    const usuario = localStorage.getItem("usuario_nombre") || "";
-    const rol = localStorage.getItem("usuario_rol") || "";
+    const id = localStorage.getItem("condominio_id") || "";
 
-    if (!condominioId) {
+    if (!id) {
       router.push("/mobile");
       return;
     }
 
-    setCondominioNombre(nombre);
-    setCondominioLogoUrl(logo);
-    setUsuarioNombre(usuario);
-    setUsuarioRol(rol);
+    setCondominioNombre(
+      localStorage.getItem("condominio_nombre") || `Condominio ID ${id}`
+    );
+    setCondominioLogo(localStorage.getItem("condominio_logo_url") || "");
+    setUsuarioNombre(localStorage.getItem("usuario_nombre") || "Usuario");
+    setUsuarioRol(localStorage.getItem("usuario_rol") || "Administrador");
   }, [router]);
 
   function cerrarSesion() {
@@ -50,66 +48,74 @@ export default function MobileAdminHomePage() {
     router.push("/mobile");
   }
 
-  const modulos: MenuItem[] = [
+  const modulos: Modulo[] = [
     {
       titulo: "Banco",
-      descripcion: "Importar banco, identificar pagos y revisar pagos identificados.",
+      descripcion: "Importar banco, identificar pagos y revisar movimientos.",
       href: "/mobile/admin/banco",
       icono: "🏦",
-      color: "from-emerald-700 to-green-500",
+      color: "from-blue-700 to-blue-500",
       activo: true,
     },
     {
       titulo: "Pagos",
-      descripcion: "Registrar y consultar pagos de mantenimiento.",
+      descripcion: "Consultar pagos de mantenimiento registrados.",
       href: "/mobile/admin/pagos",
       icono: "💳",
-      color: "from-blue-700 to-blue-500",
-      activo: false,
+      color: "from-green-700 to-emerald-500",
+      activo: true,
+    },
+    {
+      titulo: "Solicitudes-pagos",
+      descripcion: "Crear, firmar, aprobar y generar gastos.",
+      href: "/mobile/admin/solicitudes-pagos",
+      icono: "💼",
+      color: "from-indigo-700 to-blue-500",
+      activo: true,
+    },
+    {
+      titulo: "Gastos",
+      descripcion: "Registrar gastos, aprobar pagos y marcar pagados.",
+      href: "/mobile/admin/gastos",
+      icono: "🧾",
+      color: "from-orange-700 to-amber-500",
+      activo: true,
     },
     {
       titulo: "Propietarios",
-      descripcion: "Consultar apartamentos, propietarios y datos de contacto.",
+      descripcion: "Administrar propietarios y apartamentos.",
       href: "/mobile/admin/propietarios",
       icono: "👥",
       color: "from-purple-700 to-fuchsia-500",
       activo: true,
     },
     {
-      titulo: "Gastos",
-      descripcion: "Registrar gastos, suplidores y comprobantes.",
-      href: "/mobile/admin/gastos",
-      icono: "🧾",
-      color: "from-orange-600 to-red-500",
-      activo: true,
-    },
-    {
       titulo: "Incidencias",
-      descripcion: "Ver reportes, reclamos y solicitudes de residentes.",
+      descripcion: "Revisar reportes, quejas y solicitudes de residentes.",
       href: "/mobile/admin/incidencias",
       icono: "🛠️",
       color: "from-slate-800 to-slate-600",
-      activo: false,
+      activo: true,
     },
     {
       titulo: "Anuncios",
-      descripcion: "Publicar avisos y comunicaciones a los residentes.",
+      descripcion: "Publicar avisos y comunicaciones a residentes.",
       href: "/mobile/admin/anuncios",
       icono: "📢",
       color: "from-cyan-700 to-sky-500",
-      activo: false,
+      activo: true,
     },
     {
       titulo: "Reportes",
-      descripcion: "Ingresos, gastos, balance y estado financiero.",
+      descripcion: "Ver reportes financieros y administrativos.",
       href: "/mobile/admin/reportes",
       icono: "📊",
-      color: "from-indigo-700 to-blue-500",
+      color: "from-rose-700 to-pink-500",
       activo: false,
     },
     {
       titulo: "Configuración",
-      descripcion: "Parámetros del condominio y opciones del sistema.",
+      descripcion: "Parámetros generales del condominio.",
       href: "/mobile/admin/configuracion",
       icono: "⚙️",
       color: "from-zinc-700 to-zinc-500",
@@ -117,78 +123,44 @@ export default function MobileAdminHomePage() {
     },
   ];
 
-  const modulosActivos = modulos.filter((m) => m.activo).length;
-  const modulosPendientes = modulos.filter((m) => !m.activo).length;
-
   return (
     <main className="min-h-screen bg-slate-100 pb-24">
-      <section className="bg-slate-950 text-white rounded-b-3xl p-5 shadow">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            {condominioLogoUrl ? (
-              <img
-                src={condominioLogoUrl}
-                alt={condominioNombre || "Logo"}
-                className="h-14 w-14 rounded-2xl object-contain bg-white p-2"
-              />
-            ) : (
-              <div className="h-14 w-14 rounded-2xl bg-white/10 flex items-center justify-center text-3xl">
-                🏢
-              </div>
-            )}
-
-            <div>
-              <p className="text-xs text-slate-300">Panel móvil</p>
-              <h1 className="text-2xl font-black">VAM Admin</h1>
+      <section className="bg-slate-900 text-white rounded-b-3xl p-5 shadow">
+        <div className="flex items-center gap-4">
+          {condominioLogo ? (
+            <img
+              src={condominioLogo}
+              alt="Logo condominio"
+              className="h-14 w-14 rounded-2xl object-cover bg-white"
+            />
+          ) : (
+            <div className="h-14 w-14 rounded-2xl bg-white/20 flex items-center justify-center text-3xl">
+              🏢
             </div>
-          </div>
+          )}
 
-          <button
-            onClick={cerrarSesion}
-            className="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-xl text-xs font-bold"
-          >
-            Salir
-          </button>
+          <div className="flex-1">
+            <h1 className="text-xl font-black leading-tight">
+              VAM Administración
+            </h1>
+
+            <p className="text-sm opacity-90 leading-tight">
+              {condominioNombre || "Condominio activo"}
+            </p>
+          </div>
         </div>
 
-        <div className="mt-5">
-          <p className="text-sm text-slate-300">Condominio</p>
-          <h2 className="text-lg font-bold">
-            {condominioNombre || "Condominio no identificado"}
-          </h2>
-
-          <p className="text-xs text-slate-400 mt-2">
-            Usuario: {usuarioNombre || "Administrador"}{" "}
-            {usuarioRol ? `• ${usuarioRol}` : ""}
-          </p>
+        <div className="mt-4 bg-white/10 rounded-2xl p-4">
+          <p className="text-sm opacity-90">Usuario</p>
+          <p className="font-bold">{usuarioNombre}</p>
+          <p className="text-xs opacity-80 mt-1">Rol: {usuarioRol}</p>
         </div>
       </section>
 
       <section className="p-4 space-y-4">
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white rounded-2xl border shadow-sm p-4">
-            <p className="text-xs text-slate-500">Módulos</p>
-            <h3 className="text-2xl font-black">{modulos.length}</h3>
-          </div>
-
-          <div className="bg-white rounded-2xl border shadow-sm p-4">
-            <p className="text-xs text-slate-500">Activos</p>
-            <h3 className="text-2xl font-black text-green-700">
-              {modulosActivos}
-            </h3>
-          </div>
-
-          <div className="bg-white rounded-2xl border shadow-sm p-4">
-            <p className="text-xs text-slate-500">Pendientes</p>
-            <h3 className="text-2xl font-black text-orange-600">
-              {modulosPendientes}
-            </h3>
-          </div>
-        </div>
-
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <h2 className="text-lg font-black text-slate-900">
-            Módulos administrativos
+            Menú principal
           </h2>
 
           <p className="text-sm text-slate-500 mt-1">
@@ -197,39 +169,37 @@ export default function MobileAdminHomePage() {
         </div>
 
         <div className="space-y-3">
-          {modulos.map((item) => {
-            const card = (
+          {modulos.map((modulo) => {
+            const contenido = (
               <div
-                className={`rounded-2xl border shadow-sm overflow-hidden ${
-                  item.activo
-                    ? "bg-white"
-                    : "bg-white opacity-70"
+                className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${
+                  !modulo.activo ? "opacity-60" : ""
                 }`}
               >
-                <div className={`h-2 bg-gradient-to-r ${item.color}`} />
+                <div className={`h-2 bg-gradient-to-r ${modulo.color}`} />
 
                 <div className="p-4 flex items-center gap-4">
                   <div
-                    className={`h-14 w-14 rounded-2xl bg-gradient-to-br ${item.color} text-white flex items-center justify-center text-3xl shadow-sm`}
+                    className={`h-14 w-14 rounded-2xl bg-gradient-to-br ${modulo.color} text-white flex items-center justify-center text-3xl shadow-sm`}
                   >
-                    {item.icono}
+                    {modulo.icono}
                   </div>
 
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <h3 className="font-black text-slate-900">
-                        {item.titulo}
+                        {modulo.titulo}
                       </h3>
 
-                      {!item.activo && (
-                        <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-bold">
+                      {!modulo.activo && (
+                        <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-full font-bold">
                           Próximo
                         </span>
                       )}
                     </div>
 
                     <p className="text-sm text-slate-500 mt-1">
-                      {item.descripcion}
+                      {modulo.descripcion}
                     </p>
                   </div>
 
@@ -238,17 +208,13 @@ export default function MobileAdminHomePage() {
               </div>
             );
 
-            if (!item.activo) {
-              return (
-                <div key={item.titulo}>
-                  {card}
-                </div>
-              );
+            if (!modulo.activo) {
+              return <div key={modulo.titulo}>{contenido}</div>;
             }
 
             return (
-              <Link key={item.titulo} href={item.href}>
-                {card}
+              <Link key={modulo.titulo} href={modulo.href}>
+                {contenido}
               </Link>
             );
           })}
@@ -267,19 +233,19 @@ export default function MobileAdminHomePage() {
 
           <Link
             href="/mobile/admin/banco"
-            className="py-3 text-xs font-bold text-emerald-700"
+            className="py-3 text-xs font-bold text-slate-700"
           >
             <div className="text-xl">🏦</div>
             Banco
           </Link>
 
-          <button
-            type="button"
-            className="py-3 text-xs font-bold text-slate-400"
+          <Link
+            href="/mobile/admin/solicitudes-pagos"
+            className="py-3 text-xs font-bold text-slate-700"
           >
-            <div className="text-xl">📊</div>
-            Reportes
-          </button>
+            <div className="text-xl">💼</div>
+            Solicitudes
+          </Link>
 
           <button
             type="button"
