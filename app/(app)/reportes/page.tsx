@@ -69,10 +69,10 @@ export default function ReportesPage() {
       iconoColor: "text-red-700",
     },
     {
-      titulo: "Pagos por Apartamento",
+      titulo: "Pagos por Propietarios",
       descripcion:
         "Consultar pagos registrados por unidad, fecha y concepto.",
-      href: "/reportes/pagos-apartamento",
+      href: "/reportes/pagos-propietarios",
       icono: WalletCards,
       fondo: "from-sky-600 to-sky-800",
       iconoColor: "text-sky-700",

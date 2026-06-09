@@ -46,10 +46,10 @@ export default function FinanzasPage() {
           iconoColor: "text-blue-700",
         },
         {
-          titulo: "Morosidad",
+          titulo: "Cuadre de Pagos Propietarios",
           descripcion:
-            "Revisar apartamentos con balances vencidos o pendientes de pago.",
-          href: "/morosidad",
+            "Revisar Los Pagos de Propietarios.",
+          href: "finanzas/pagos/cuadre-propietario",
           icono: AlertTriangle,
           fondo: "from-red-600 to-red-800",
           iconoColor: "text-red-700",

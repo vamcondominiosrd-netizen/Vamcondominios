@@ -130,6 +130,23 @@ function claveTransaccion(row: {
   ].join("|");
 }
 
+function obtenerRangoMes(mes: string) {
+  if (!mes) return null;
+
+  const [year, month] = mes.split("-").map(Number);
+
+  if (!year || !month) return null;
+
+  const desde = `${year}-${String(month).padStart(2, "0")}-01`;
+
+  const siguienteMes = month === 12 ? 1 : month + 1;
+  const siguienteYear = month === 12 ? year + 1 : year;
+
+  const hasta = `${siguienteYear}-${String(siguienteMes).padStart(2, "0")}-01`;
+
+  return { desde, hasta };
+}
+
 export default function ImportarArchivoBancoPage() {
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
@@ -143,22 +160,35 @@ export default function ImportarArchivoBancoPage() {
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("Todos");
 
+  const [mesFiltro, setMesFiltro] = useState(() => {
+    const hoy = new Date();
+    const yyyy = hoy.getFullYear();
+    const mm = String(hoy.getMonth() + 1).padStart(2, "0");
+    return `${yyyy}-${mm}`;
+  });
+
+  const [duplicadosInternos, setDuplicadosInternos] = useState(0);
+  const [duplicadosExistentes, setDuplicadosExistentes] = useState(0);
+  const [nombreArchivoActual, setNombreArchivoActual] = useState("");
+
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
     const nombre = localStorage.getItem("condominio_nombre") || "";
 
     setCondominioId(id);
     setCondominioNombre(nombre);
-
-    if (id) {
-      cargarGuardados(id);
-    }
   }, []);
 
-  async function cargarGuardados(id: string) {
+  useEffect(() => {
+    if (condominioId) {
+      cargarGuardados(condominioId, mesFiltro);
+    }
+  }, [condominioId, mesFiltro]);
+
+  async function cargarGuardados(id: string, mes: string) {
     setCargandoGuardados(true);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("archivo_banco")
       .select(
         "id, condominio_id, condominio, fecha_posteo, monto_transaccion, no_serial, descripcion, estado"
@@ -166,6 +196,14 @@ export default function ImportarArchivoBancoPage() {
       .eq("condominio_id", Number(id))
       .order("fecha_posteo", { ascending: false })
       .order("id", { ascending: false });
+
+    const rango = obtenerRangoMes(mes);
+
+    if (rango) {
+      query = query.gte("fecha_posteo", rango.desde).lt("fecha_posteo", rango.hasta);
+    }
+
+    const { data, error } = await query;
 
     setCargandoGuardados(false);
 
@@ -175,6 +213,64 @@ export default function ImportarArchivoBancoPage() {
     }
 
     setGuardados((data as BancoGuardado[]) || []);
+  }
+
+  function descargarPlantilla() {
+    const data = [
+      {
+        "Fecha Posteo": "",
+        "Monto Transacción": "",
+        "No Serial": "",
+        Descripción: "",
+      },
+      {
+        "Fecha Posteo": "2026-06-01",
+        "Monto Transacción": 4500,
+        "No Serial": "EJEMPLO-001",
+        Descripción: "Pago mantenimiento A1",
+      },
+    ];
+
+    const hoja = XLSX.utils.json_to_sheet(data);
+    const libro = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(libro, hoja, "Plantilla Banco");
+
+    XLSX.writeFile(libro, "plantilla-importacion-banco.xlsx");
+  }
+
+  async function verificarDuplicadosExistentes(registros: BancoRow[]) {
+    if (!condominioId) return 0;
+
+    const { data, error } = await supabase
+      .from("archivo_banco")
+      .select(
+        "id, condominio_id, fecha_posteo, monto_transaccion, no_serial, descripcion"
+      )
+      .eq("condominio_id", Number(condominioId));
+
+    if (error) {
+      alert("Error verificando duplicados: " + error.message);
+      return 0;
+    }
+
+    const clavesExistentes = new Set(
+      ((data as any[]) || []).map((item) =>
+        claveTransaccion({
+          condominio_id: Number(item.condominio_id),
+          fecha_posteo: item.fecha_posteo || "",
+          monto_transaccion: Number(item.monto_transaccion || 0),
+          no_serial: item.no_serial || "",
+          descripcion: item.descripcion || "",
+        })
+      )
+    );
+
+    const duplicados = registros.filter((row) =>
+      clavesExistentes.has(claveTransaccion(row))
+    ).length;
+
+    return duplicados;
   }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -187,9 +283,14 @@ export default function ImportarArchivoBancoPage() {
       return;
     }
 
+    setNombreArchivoActual(file.name);
+    setDuplicadosInternos(0);
+    setDuplicadosExistentes(0);
+    setRows([]);
+
     const reader = new FileReader();
 
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       const data = evt.target?.result;
       const workbook = XLSX.read(data, { type: "array" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -199,7 +300,7 @@ export default function ImportarArchivoBancoPage() {
         raw: true,
       });
 
-      const mapped: BancoRow[] = json
+      const mappedRaw: BancoRow[] = json
         .map((r) => {
           const fecha = normalizarFecha(
             obtenerValor(r, [
@@ -267,11 +368,36 @@ export default function ImportarArchivoBancoPage() {
 
       const mapa = new Map<string, BancoRow>();
 
-      mapped.forEach((row) => {
+      mappedRaw.forEach((row) => {
         mapa.set(claveTransaccion(row), row);
       });
 
-      setRows(Array.from(mapa.values()));
+      const mapped = Array.from(mapa.values());
+
+      const duplicadosDentroArchivo = mappedRaw.length - mapped.length;
+      setDuplicadosInternos(duplicadosDentroArchivo);
+
+      const duplicadosBD = await verificarDuplicadosExistentes(mapped);
+      setDuplicadosExistentes(duplicadosBD);
+
+      setRows(mapped);
+
+      if (mapped.length === 0) {
+        alert(
+          "El archivo no contiene registros válidos. Verifique que tenga Fecha Posteo, Monto Transacción, No Serial y Descripción."
+        );
+        return;
+      }
+
+      if (duplicadosBD === mapped.length) {
+        alert(
+          "ALERTA: Este archivo parece que ya fue subido anteriormente. Todos los registros ya existen en el sistema."
+        );
+      } else if (duplicadosBD > 0) {
+        alert(
+          `ALERTA: Se encontraron ${duplicadosBD} registros que ya existen. El sistema solo importará los registros nuevos.`
+        );
+      }
     };
 
     reader.readAsArrayBuffer(file);
@@ -321,14 +447,19 @@ export default function ImportarArchivoBancoPage() {
 
     if (registrosNuevos.length === 0) {
       setLoading(false);
-      alert("Todos los registros del archivo ya existen. No se importó nada.");
+      alert(
+        "ALERTA: Este archivo ya fue subido anteriormente. No se importó ningún registro duplicado."
+      );
       return;
     }
 
     const confirmar = confirm(
-      `Se importarán ${registrosNuevos.length} registros nuevos para ${condominioNombre}. Se omitieron ${
-        rows.length - registrosNuevos.length
-      } duplicados. ¿Desea continuar?`
+      `Archivo: ${nombreArchivoActual || "Sin nombre"}\n\n` +
+        `Condominio: ${condominioNombre}\n` +
+        `Registros del archivo actual: ${rows.length}\n` +
+        `Registros nuevos a importar: ${registrosNuevos.length}\n` +
+        `Duplicados omitidos: ${rows.length - registrosNuevos.length}\n\n` +
+        `¿Desea continuar?`
     );
 
     if (!confirmar) {
@@ -349,9 +480,31 @@ export default function ImportarArchivoBancoPage() {
     }
 
     alert("Archivo del banco importado correctamente.");
+
     setRows([]);
-    cargarGuardados(condominioId);
+    setDuplicadosInternos(0);
+    setDuplicadosExistentes(0);
+    setNombreArchivoActual("");
+
+    cargarGuardados(condominioId, mesFiltro);
   }
+
+  const guardadosFiltrados = guardados.filter((item) => {
+    const texto = `${item.fecha_posteo || ""} ${item.monto_transaccion || ""} ${
+      item.no_serial || ""
+    } ${item.descripcion || ""} ${item.estado || ""}`
+      .toLowerCase()
+      .trim();
+
+    const coincideBusqueda = texto.includes(busqueda.toLowerCase().trim());
+
+    const estadoReal = item.estado || "Revisar";
+
+    const coincideEstado =
+      filtroEstado === "Todos" ? true : estadoReal === filtroEstado;
+
+    return coincideBusqueda && coincideEstado;
+  });
 
   function exportarExcel() {
     const data = guardadosFiltrados.map((item) => ({
@@ -373,7 +526,9 @@ export default function ImportarArchivoBancoPage() {
 
     XLSX.utils.book_append_sheet(libro, hoja, "Archivo Banco");
 
-    const nombreArchivo = `archivo-banco-${condominioNombre || "condominio"}`
+    const nombreArchivo = `archivo-banco-${condominioNombre || "condominio"}-${
+      mesFiltro || "todos"
+    }`
       .replace(/\s+/g, "-")
       .toLowerCase();
 
@@ -387,22 +542,7 @@ export default function ImportarArchivoBancoPage() {
     0
   );
 
-  const guardadosFiltrados = guardados.filter((item) => {
-    const texto = `${item.fecha_posteo || ""} ${item.monto_transaccion || ""} ${
-      item.no_serial || ""
-    } ${item.descripcion || ""} ${item.estado || ""}`
-      .toLowerCase()
-      .trim();
-
-    const coincideBusqueda = texto.includes(busqueda.toLowerCase().trim());
-
-    const estadoReal = item.estado || "Revisar";
-
-    const coincideEstado =
-      filtroEstado === "Todos" ? true : estadoReal === filtroEstado;
-
-    return coincideBusqueda && coincideEstado;
-  });
+  const registrosNuevosPreview = Math.max(totalPreview - duplicadosExistentes, 0);
 
   const totalGuardados = guardados.length;
 
@@ -427,8 +567,9 @@ export default function ImportarArchivoBancoPage() {
         </h1>
 
         <p className="text-slate-500 mt-2">
-          Sube el archivo Excel del banco. Cada transacción se guardará con el
-          condominio activo para que luego pueda ser identificada correctamente.
+          Descarga la plantilla, completa los datos del banco y sube el archivo.
+          El sistema mostrará solo el archivo actual antes de guardarlo y
+          validará si ya fue importado anteriormente.
         </p>
       </div>
 
@@ -447,6 +588,38 @@ export default function ImportarArchivoBancoPage() {
       </div>
 
       <div className="border rounded-2xl p-5 bg-white shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-xl font-black text-slate-900">
+              Plantilla de inicio
+            </h2>
+
+            <p className="text-sm text-slate-500 mt-1">
+              Descarga esta plantilla para llenar los datos del archivo del
+              banco con el formato correcto.
+            </p>
+          </div>
+
+          <button
+            onClick={descargarPlantilla}
+            className="bg-green-700 hover:bg-green-800 text-white px-5 py-3 rounded-xl font-bold"
+          >
+            Descargar plantilla Excel
+          </button>
+        </div>
+
+        <div className="bg-slate-50 border rounded-2xl p-4">
+          <p className="text-sm font-semibold text-slate-700">
+            Columnas requeridas:
+          </p>
+
+          <p className="text-sm text-slate-500 mt-1">
+            Fecha Posteo, Monto Transacción, No Serial y Descripción.
+          </p>
+        </div>
+      </div>
+
+      <div className="border rounded-2xl p-5 bg-white shadow-sm">
         <label className="block text-sm font-semibold mb-2">
           Seleccionar archivo Excel o CSV
         </label>
@@ -459,29 +632,86 @@ export default function ImportarArchivoBancoPage() {
         />
 
         <p className="text-xs text-slate-500 mt-2">
-          Columnas esperadas: Fecha Posteo, Monto Transacción, No Serial y
-          Descripción. También acepta Fecha, Monto, Referencia, Detalle o
-          Concepto.
+          Al seleccionar el archivo, se mostrará una vista previa solamente del
+          archivo que se está cargando.
         </p>
       </div>
 
       {rows.length > 0 && (
         <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
-            <h2 className="text-lg font-black text-blue-900">
-              Revisión previa antes de guardar
+          <div
+            className={`border rounded-2xl p-4 ${
+              duplicadosExistentes === rows.length
+                ? "bg-red-50 border-red-200"
+                : duplicadosExistentes > 0
+                ? "bg-yellow-50 border-yellow-200"
+                : "bg-blue-50 border-blue-200"
+            }`}
+          >
+            <h2
+              className={`text-lg font-black ${
+                duplicadosExistentes === rows.length
+                  ? "text-red-900"
+                  : duplicadosExistentes > 0
+                  ? "text-yellow-900"
+                  : "text-blue-900"
+              }`}
+            >
+              Revisión previa del archivo actual
             </h2>
 
-            <p className="text-sm text-blue-700 mt-1">
-              Estos registros se guardarán en archivo_banco con estado inicial
-              Revisar y con el condominio activo.
+            <p
+              className={`text-sm mt-1 ${
+                duplicadosExistentes === rows.length
+                  ? "text-red-700"
+                  : duplicadosExistentes > 0
+                  ? "text-yellow-700"
+                  : "text-blue-700"
+              }`}
+            >
+              Archivo seleccionado: {nombreArchivoActual || "Sin nombre"}
             </p>
+
+            {duplicadosExistentes === rows.length && (
+              <p className="text-sm text-red-700 font-bold mt-2">
+                ALERTA: Este archivo parece que ya fue subido anteriormente. No
+                se recomienda volver a importarlo.
+              </p>
+            )}
+
+            {duplicadosExistentes > 0 && duplicadosExistentes < rows.length && (
+              <p className="text-sm text-yellow-700 font-bold mt-2">
+                ALERTA: Hay registros duplicados. El sistema solo importará los
+                registros nuevos.
+              </p>
+            )}
+
+            {duplicadosInternos > 0 && (
+              <p className="text-sm text-orange-700 font-bold mt-2">
+                También se encontraron {duplicadosInternos} registros repetidos
+                dentro del mismo archivo y fueron omitidos en la vista previa.
+              </p>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-white rounded-2xl p-5 shadow-sm border">
-              <p className="text-sm text-slate-500">Registros leídos</p>
+              <p className="text-sm text-slate-500">Registros del archivo</p>
               <h2 className="text-3xl font-black">{totalPreview}</h2>
+            </div>
+
+            <div className="bg-white rounded-2xl p-5 shadow-sm border">
+              <p className="text-sm text-slate-500">Registros nuevos</p>
+              <h2 className="text-3xl font-black text-green-700">
+                {registrosNuevosPreview}
+              </h2>
+            </div>
+
+            <div className="bg-white rounded-2xl p-5 shadow-sm border">
+              <p className="text-sm text-slate-500">Duplicados</p>
+              <h2 className="text-3xl font-black text-red-700">
+                {duplicadosExistentes}
+              </h2>
             </div>
 
             <div className="bg-white rounded-2xl p-5 shadow-sm border">
@@ -490,21 +720,22 @@ export default function ImportarArchivoBancoPage() {
                 {formatearMoneda(montoPreview)}
               </h2>
             </div>
-
-            <div className="bg-white rounded-2xl p-5 shadow-sm border">
-              <p className="text-sm text-slate-500">Estado inicial</p>
-              <h2 className="text-2xl font-black text-yellow-700">Revisar</h2>
-            </div>
           </div>
 
-          <div className="flex items-center justify-between bg-white rounded-2xl border shadow-sm p-5">
-            <h2 className="text-lg font-bold">
-              Vista previa: {rows.length} registros
-            </h2>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white rounded-2xl border shadow-sm p-5">
+            <div>
+              <h2 className="text-lg font-bold">
+                Vista previa del archivo actual
+              </h2>
+
+              <p className="text-sm text-slate-500">
+                Estos registros se guardarán con estado inicial Revisar.
+              </p>
+            </div>
 
             <button
               onClick={guardarEnSupabase}
-              disabled={loading}
+              disabled={loading || registrosNuevosPreview === 0}
               className="bg-blue-700 text-white px-5 py-3 rounded-xl hover:bg-blue-800 disabled:opacity-50 font-bold"
             >
               {loading ? "Guardando..." : "Guardar en Archivo Banco"}
@@ -560,16 +791,27 @@ export default function ImportarArchivoBancoPage() {
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
             <h2 className="text-xl font-black">
-              Archivo banco cargado
+              Archivos del banco importados
             </h2>
 
             <p className="text-sm text-slate-500">
-              Aquí puedes revisar las transacciones ya importadas para el
-              condominio activo.
+              Consulta las transacciones ya importadas por mes, estado y
+              búsqueda.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 w-full md:w-auto">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 w-full md:w-auto">
+            <div>
+              <label className="block text-sm font-semibold mb-1">Mes</label>
+
+              <input
+                type="month"
+                value={mesFiltro}
+                onChange={(e) => setMesFiltro(e.target.value)}
+                className="border rounded-xl px-4 py-3 w-full bg-white"
+              />
+            </div>
+
             <div>
               <label className="block text-sm font-semibold mb-1">Estado</label>
 
@@ -597,7 +839,7 @@ export default function ImportarArchivoBancoPage() {
 
             <div className="flex items-end">
               <button
-                onClick={() => cargarGuardados(condominioId)}
+                onClick={() => cargarGuardados(condominioId, mesFiltro)}
                 className="bg-slate-700 hover:bg-slate-800 text-white px-5 py-3 rounded-xl font-bold w-full"
               >
                 Actualizar
@@ -617,7 +859,7 @@ export default function ImportarArchivoBancoPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
           <div className="bg-slate-50 rounded-2xl p-5 border">
-            <p className="text-sm text-slate-500">Total cargados</p>
+            <p className="text-sm text-slate-500">Total del mes</p>
             <h2 className="text-3xl font-black">{totalGuardados}</h2>
           </div>
 
@@ -671,7 +913,9 @@ export default function ImportarArchivoBancoPage() {
 
                     <td className="p-3 border">{item.no_serial || "-"}</td>
 
-                    <td className="p-3 border">{item.descripcion || "-"}</td>
+                    <td className="p-3 border">
+                      {item.descripcion || "-"}
+                    </td>
 
                     <td className="p-3 border text-center">
                       <span

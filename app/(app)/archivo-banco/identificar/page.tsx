@@ -844,19 +844,19 @@ export default function IdentificarPagosPage() {
     .reduce((total, item) => total + Number(item.monto_transaccion || 0), 0);
 
   if (loading) {
-    return <div className="p-6">Cargando datos...</div>;
+    return <div className="p-4 text-sm">Cargando datos...</div>;
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
+    <div className="p-4 space-y-4">
+      <div className="bg-white rounded-2xl border shadow-sm p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-black text-slate-900">
+            <h1 className="text-2xl font-black text-slate-900">
               Identificación Automática de Pagos
             </h1>
 
-            <p className="text-slate-500 mt-2">
+            <p className="text-sm text-slate-500 mt-1">
               Primero busca el apartamento dentro de la descripción del banco.
               Si no lo encuentra, usa los alias cargados en apartamento_banco_alias.
             </p>
@@ -872,7 +872,7 @@ export default function IdentificarPagosPage() {
           <button
             onClick={guardarPagosIdentificados}
             disabled={guardando}
-            className="bg-blue-700 text-white px-5 py-3 rounded-xl hover:bg-blue-800 disabled:opacity-50 font-bold"
+            className="bg-blue-700 text-white px-4 py-2 rounded-lg hover:bg-blue-800 disabled:opacity-50 font-bold text-sm"
           >
             {guardando ? "Guardando..." : "Guardar pagos identificados"}
           </button>
@@ -880,7 +880,7 @@ export default function IdentificarPagosPage() {
       </div>
 
       {editando && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-3xl p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4">
           <h2 className="text-xl font-black text-yellow-900">
             Actualizar pago en revisión
           </h2>
@@ -890,10 +890,10 @@ export default function IdentificarPagosPage() {
             pago identificado.
           </p>
 
-          <div className="bg-white rounded-2xl border p-4 my-5">
+          <div className="bg-white rounded-xl border p-3 my-4">
             <p className="text-sm text-slate-500">Transacción seleccionada</p>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3 text-sm">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mt-2 text-xs">
               <div>
                 <p className="text-slate-500">Fecha</p>
                 <p className="font-bold">{editando.fecha_posteo}</p>
@@ -933,7 +933,7 @@ export default function IdentificarPagosPage() {
               <select
                 value={editUnidadId}
                 onChange={(e) => seleccionarUnidadManual(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full bg-white"
+                className="border rounded-lg px-3 py-2 w-full bg-white text-sm"
               >
                 <option value="">Seleccione apartamento</option>
 
@@ -953,7 +953,7 @@ export default function IdentificarPagosPage() {
               <input
                 value={editApartamento}
                 onChange={(e) => setEditApartamento(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full"
+                className="border rounded-lg px-3 py-2 w-full text-sm"
                 placeholder="Ej. G1"
               />
             </div>
@@ -966,7 +966,7 @@ export default function IdentificarPagosPage() {
               <input
                 value={editPropietario}
                 onChange={(e) => setEditPropietario(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full"
+                className="border rounded-lg px-3 py-2 w-full text-sm"
                 placeholder="Nombre del propietario"
               />
             </div>
@@ -979,7 +979,7 @@ export default function IdentificarPagosPage() {
               <input
                 value={obtenerPeriodo(editando.fecha_posteo)}
                 disabled
-                className="border rounded-xl px-4 py-3 w-full bg-slate-100"
+                className="border rounded-lg px-3 py-2 w-full bg-slate-100 text-sm"
               />
             </div>
 
@@ -991,7 +991,7 @@ export default function IdentificarPagosPage() {
               <textarea
                 value={editObservacion}
                 onChange={(e) => setEditObservacion(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full"
+                className="border rounded-lg px-3 py-2 w-full text-sm"
                 rows={3}
               />
             </div>
@@ -1000,7 +1000,7 @@ export default function IdentificarPagosPage() {
               <button
                 type="submit"
                 disabled={guardandoManual}
-                className="bg-green-700 hover:bg-green-800 text-white px-5 py-3 rounded-xl font-bold disabled:opacity-50"
+                className="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded-lg font-bold disabled:opacity-50 text-sm"
               >
                 {guardandoManual
                   ? "Guardando..."
@@ -1010,7 +1010,7 @@ export default function IdentificarPagosPage() {
               <button
                 type="button"
                 onClick={cancelarEdicionManual}
-                className="bg-slate-700 hover:bg-slate-800 text-white px-5 py-3 rounded-xl font-bold"
+                className="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-lg font-bold text-sm"
               >
                 Cancelar
               </button>
@@ -1019,40 +1019,40 @@ export default function IdentificarPagosPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="border rounded-2xl p-5 bg-white shadow-sm">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="border rounded-xl p-4 bg-white shadow-sm">
           <p className="text-slate-500 text-sm">Total transacciones</p>
-          <h2 className="text-3xl font-black">{resultado.length}</h2>
+          <h2 className="text-2xl font-black">{resultado.length}</h2>
         </div>
 
-        <div className="border rounded-2xl p-5 bg-white shadow-sm">
+        <div className="border rounded-xl p-4 bg-white shadow-sm">
           <p className="text-slate-500 text-sm">Identificadas</p>
-          <h2 className="text-3xl font-black text-green-700">
+          <h2 className="text-xl font-black text-green-700">
             {identificados}
           </h2>
         </div>
 
-        <div className="border rounded-2xl p-5 bg-white shadow-sm">
+        <div className="border rounded-xl p-4 bg-white shadow-sm">
           <p className="text-slate-500 text-sm">Pendientes</p>
-          <h2 className="text-3xl font-black text-red-700">{pendientes}</h2>
+          <h2 className="text-xl font-black text-red-700">{pendientes}</h2>
         </div>
 
-        <div className="border rounded-2xl p-5 bg-white shadow-sm">
+        <div className="border rounded-xl p-4 bg-white shadow-sm">
           <p className="text-slate-500 text-sm">Monto identificado</p>
-          <h2 className="text-2xl font-black text-green-700">
+          <h2 className="text-xl font-black text-green-700">
             {formatearMoneda(montoIdentificado)}
           </h2>
         </div>
 
-        <div className="border rounded-2xl p-5 bg-white shadow-sm">
+        <div className="border rounded-xl p-4 bg-white shadow-sm">
           <p className="text-slate-500 text-sm">Monto pendiente</p>
-          <h2 className="text-2xl font-black text-red-700">
+          <h2 className="text-xl font-black text-red-700">
             {formatearMoneda(montoPendiente)}
           </h2>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border shadow-sm p-5">
+      <div className="bg-white rounded-xl border shadow-sm p-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-semibold mb-1">Estado</label>
@@ -1060,7 +1060,7 @@ export default function IdentificarPagosPage() {
             <select
               value={filtroEstado}
               onChange={(e) => setFiltroEstado(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
+              className="border rounded-lg px-3 py-2 w-full bg-white text-sm"
             >
               <option value="Todos">Todos</option>
               <option value="Identificado">Identificado</option>
@@ -1074,71 +1074,71 @@ export default function IdentificarPagosPage() {
             <input
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
+              className="border rounded-lg px-3 py-2 w-full text-sm"
               placeholder="Buscar por descripción, apartamento, propietario, serial..."
             />
           </div>
         </div>
       </div>
 
-      <div className="overflow-auto border rounded-2xl bg-white shadow-sm">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-100">
+      <div className="overflow-auto border rounded-xl bg-white shadow-sm max-h-[420px]">
+        <table className="min-w-[1040px] text-xs">
+          <thead className="bg-slate-100 sticky top-0 z-10">
             <tr>
-              <th className="p-3 border text-left">Fecha</th>
-              <th className="p-3 border text-right">Monto</th>
-              <th className="p-3 border text-left">No Serial</th>
-              <th className="p-3 border text-left">Descripción Banco</th>
-              <th className="p-3 border text-left">Método</th>
-              <th className="p-3 border text-left">Referencia encontrada</th>
-              <th className="p-3 border text-center">% Coincidencia</th>
-              <th className="p-3 border text-left">Apartamento</th>
-              <th className="p-3 border text-left">Propietario</th>
-              <th className="p-3 border text-center">Estado</th>
-              <th className="p-3 border text-center">Acciones</th>
+              <th className="p-2 border text-left">Fecha</th>
+              <th className="p-2 border text-right">Monto</th>
+              <th className="p-2 border text-left">No Serial</th>
+              <th className="p-2 border text-left">Descripción Banco</th>
+              <th className="p-2 border text-left">Método</th>
+              <th className="p-2 border text-left">Referencia encontrada</th>
+              <th className="p-2 border text-center">% Coincidencia</th>
+              <th className="p-2 border text-left">Apartamento</th>
+              <th className="p-2 border text-left">Propietario</th>
+              <th className="p-2 border text-center">Estado</th>
+              <th className="p-2 border text-center">Acciones</th>
             </tr>
           </thead>
 
           <tbody>
             {resultadoFiltrado.map((r) => (
               <tr key={r.id} className="hover:bg-slate-50">
-                <td className="p-3 border">{r.fecha_posteo}</td>
+                <td className="p-2 border">{r.fecha_posteo}</td>
 
-                <td className="p-3 border text-right font-bold">
+                <td className="p-2 border text-right font-bold">
                   {formatearMoneda(r.monto_transaccion)}
                 </td>
 
-                <td className="p-3 border">{r.no_serial || "-"}</td>
+                <td className="p-2 border">{r.no_serial || "-"}</td>
 
-                <td className="p-3 border max-w-[360px]">
+                <td className="p-2 border max-w-[260px] truncate">
                   {r.descripcion || "-"}
                 </td>
 
-                <td className="p-3 border">
+                <td className="p-2 border">
                   {r.metodo_identificacion || "-"}
                 </td>
 
-                <td className="p-3 border max-w-[280px]">
+                <td className="p-2 border max-w-[220px] truncate">
                   {r.alias_registrado || "-"}
                 </td>
 
-                <td className="p-3 border text-center font-bold">
+                <td className="p-2 border text-center font-bold">
                   {r.puntos_coincidencia > 0
                     ? `${r.puntos_coincidencia}%`
                     : "-"}
                 </td>
 
-                <td className="p-3 border font-black">
+                <td className="p-2 border font-black">
                   {r.apartamento_identificado || "Pendiente"}
                 </td>
 
-                <td className="p-3 border">
+                <td className="p-2 border max-w-[180px] truncate">
                   {r.propietario_identificado || "-"}
                 </td>
 
-                <td className="p-3 border text-center">
+                <td className="p-2 border text-center">
                   <span
-                    className={`px-3 py-1 rounded-full text-xs font-bold ${
+                    className={`px-2 py-1 rounded-full text-[11px] font-bold ${
                       r.estado_identificacion === "Identificado"
                         ? "bg-green-100 text-green-700"
                         : "bg-red-100 text-red-700"
@@ -1148,7 +1148,7 @@ export default function IdentificarPagosPage() {
                   </span>
                 </td>
 
-                <td className="p-3 border text-center">
+                <td className="p-2 border text-center">
                   <button
                     onClick={() => abrirEdicionManual(r)}
                     className={`px-3 py-2 rounded-lg text-xs font-bold text-white ${
@@ -1168,7 +1168,7 @@ export default function IdentificarPagosPage() {
             {resultadoFiltrado.length === 0 && (
               <tr>
                 <td
-                  className="p-6 border text-center text-slate-500"
+                  className="p-4 border text-center text-slate-500"
                   colSpan={11}
                 >
                   No hay transacciones para mostrar con esta consulta.

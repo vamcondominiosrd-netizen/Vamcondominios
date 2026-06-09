@@ -77,15 +77,7 @@ export default function AdministracionPage() {
       fondo: "from-pink-600 to-rose-800",
       iconoColor: "text-pink-700",
     },
-    {
-      titulo: "Configuración General",
-      descripcion:
-        "Definir parámetros generales, información y datos institucionales del condominio.",
-      href: "/configuracion",
-      icono: Settings,
-      fondo: "from-slate-700 to-slate-950",
-      iconoColor: "text-slate-700",
-    },
+   
     {
       titulo: "Configuración de Cargos",
       descripcion:

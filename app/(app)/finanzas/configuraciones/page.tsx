@@ -8,6 +8,7 @@ import {
   Settings,
   BarChart3,
   ArrowRight,
+  Calculator,
 } from "lucide-react";
 
 type Modulo = {
@@ -58,6 +59,15 @@ export default function FinanzasConfiguracionesPage() {
       iconoColor: "text-slate-700",
     },
     {
+      titulo: "Presupuesto y Cuota",
+      descripcion:
+        "Elabora el presupuesto proyectado, revisa gastos reales y calcula la cuota sugerida.",
+      href: "/finanzas/configuraciones/presupuesto",
+      icono: Calculator,
+      fondo: "from-emerald-600 to-green-800",
+      iconoColor: "text-emerald-700",
+    },
+    {
       titulo: "Reporte Financiero",
       descripcion:
         "Consultar ingresos, gastos, balances y estados financieros.",
@@ -83,7 +93,7 @@ export default function FinanzasConfiguracionesPage() {
 
             <p className="text-sm text-slate-500 mt-2 max-w-3xl">
               Configure cargos, morosidad, fondos bancarios, parámetros
-              financieros y reportes del condominio activo.
+              financieros, presupuesto y reportes del condominio activo.
             </p>
           </div>
 

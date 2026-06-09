@@ -1,32 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/app/lib/supabaseClient";
 
 type Condominio = {
   id: number;
-  client_id: number;
+  client_id: number | null;
   nombre: string;
-  rnc: string;
-  direccion: string;
-  telefono: string;
-  correo: string;
-  cuota_mensual: number;
-  porcentaje_mora: number;
-  dia_inicio_mora: number;
-  estado: string;
-  logo_url: string;
-  nombre_representante: string;
-  cedula_representante: string;
-  cargo_representante: string;
+  rnc: string | null;
+  direccion: string | null;
+  telefono: string | null;
+  correo: string | null;
+  cuota_mensual: number | null;
+  porcentaje_mora: number | null;
+  dia_inicio_mora: number | null;
+  estado: string | null;
+  logo_url: string | null;
+  nombre_representante: string | null;
+  cedula_representante: string | null;
+  cargo_representante: string | null;
   created_at: string;
 };
 
 export default function CondominiosPage() {
+  const [condominioActivoId, setCondominioActivoId] = useState("");
+  const [condominioActivoNombre, setCondominioActivoNombre] = useState("");
+
   const [condominios, setCondominios] = useState<Condominio[]>([]);
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
+
   const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [detalleId, setDetalleId] = useState<number | null>(null);
+
+  const [buscar, setBuscar] = useState("");
 
   const [nombre, setNombre] = useState("");
   const [rnc, setRnc] = useState("");
@@ -45,25 +52,54 @@ export default function CondominiosPage() {
   const [cargoRepresentante, setCargoRepresentante] = useState("");
 
   useEffect(() => {
-    cargarCondominios();
+    const id = localStorage.getItem("condominio_id") || "";
+    const nombreActivo = localStorage.getItem("condominio_nombre") || "";
+
+    setCondominioActivoId(id);
+    setCondominioActivoNombre(nombreActivo);
+
+    if (!id) {
+      alert("No se encontró el condominio activo. Debe iniciar sesión nuevamente.");
+      return;
+    }
+
+    cargarCondominios(id);
   }, []);
 
-  async function cargarCondominios() {
+  async function cargarCondominios(idActivo?: string) {
     setLoading(true);
+
+    const id =
+      idActivo ||
+      localStorage.getItem("condominio_id") ||
+      condominioActivoId;
+
+    if (!id) {
+      setLoading(false);
+      alert("No se encontró el condominio activo.");
+      return;
+    }
 
     const { data, error } = await supabase
       .from("condominios")
       .select("*")
-      .order("nombre", { ascending: true });
+      .eq("id", Number(id))
+      .order("id", { ascending: true });
 
     setLoading(false);
 
     if (error) {
-      alert("Error cargando condominios: " + error.message);
+      alert("Error cargando condominio: " + error.message);
       return;
     }
 
-    setCondominios((data as Condominio[]) || []);
+    const lista = (data as Condominio[]) || [];
+
+    setCondominios(lista);
+
+    if (lista.length > 0 && !detalleId) {
+      setDetalleId(lista[0].id);
+    }
   }
 
   function limpiarFormulario() {
@@ -105,7 +141,10 @@ export default function CondominiosPage() {
     setCedulaRepresentante(c.cedula_representante || "");
     setCargoRepresentante(c.cargo_representante || "");
 
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
   }
 
   async function guardarCondominio(e: React.FormEvent) {
@@ -121,20 +160,20 @@ export default function CondominiosPage() {
     const registro = {
       client_id: 1,
       nombre: nombre.trim(),
-      rnc: rnc.trim(),
-      direccion: direccion.trim(),
-      telefono: telefono.trim(),
-      correo: correo.trim(),
-      logo_url: logoUrl.trim(),
+      rnc: rnc.trim() || null,
+      direccion: direccion.trim() || null,
+      telefono: telefono.trim() || null,
+      correo: correo.trim() || null,
+      logo_url: logoUrl.trim() || null,
 
       cuota_mensual: Number(cuotaMensual || 0),
       porcentaje_mora: Number(porcentajeMora || 5),
       dia_inicio_mora: Number(diaInicioMora || 10),
       estado,
 
-      nombre_representante: nombreRepresentante.trim(),
-      cedula_representante: cedulaRepresentante.trim(),
-      cargo_representante: cargoRepresentante.trim(),
+      nombre_representante: nombreRepresentante.trim() || null,
+      cedula_representante: cedulaRepresentante.trim() || null,
+      cargo_representante: cargoRepresentante.trim() || null,
     };
 
     if (editandoId) {
@@ -150,9 +189,21 @@ export default function CondominiosPage() {
         return;
       }
 
+      if (String(editandoId) === String(condominioActivoId)) {
+        localStorage.setItem("condominio_nombre", nombre.trim());
+
+        if (logoUrl.trim()) {
+          localStorage.setItem("condominio_logo_url", logoUrl.trim());
+        } else {
+          localStorage.removeItem("condominio_logo_url");
+        }
+
+        setCondominioActivoNombre(nombre.trim());
+      }
+
       alert("Condominio actualizado correctamente.");
       limpiarFormulario();
-      cargarCondominios();
+      cargarCondominios(condominioActivoId);
       return;
     }
 
@@ -166,8 +217,10 @@ export default function CondominiosPage() {
     }
 
     alert("Condominio registrado correctamente.");
+
     limpiarFormulario();
-    cargarCondominios();
+
+    cargarCondominios(condominioActivoId);
   }
 
   async function cambiarEstado(id: number, nuevoEstado: string) {
@@ -187,8 +240,36 @@ export default function CondominiosPage() {
       return;
     }
 
-    cargarCondominios();
+    cargarCondominios(condominioActivoId);
   }
+
+  function verDetalle(id: number) {
+    setDetalleId((actual) => (actual === id ? null : id));
+  }
+
+  function dinero(valor: number | null | undefined) {
+    return Number(valor || 0).toLocaleString("es-DO", {
+      minimumFractionDigits: 2,
+    });
+  }
+
+  const condominiosFiltrados = useMemo(() => {
+    const texto = buscar.toLowerCase().trim();
+
+    if (!texto) return condominios;
+
+    return condominios.filter((c) => {
+      const combinado = `
+        ${c.nombre || ""}
+        ${c.rnc || ""}
+        ${c.telefono || ""}
+        ${c.correo || ""}
+        ${c.direccion || ""}
+      `.toLowerCase();
+
+      return combinado.includes(texto);
+    });
+  }, [condominios, buscar]);
 
   const activos = condominios.filter((c) => c.estado === "activo").length;
   const inactivos = condominios.filter((c) => c.estado !== "activo").length;
@@ -199,13 +280,18 @@ export default function CondominiosPage() {
         <h1 className="text-4xl font-black text-slate-900">Condominios</h1>
 
         <p className="text-slate-500 mt-2">
-          Configuración general, financiera y legal de cada condominio.
+          Registro, configuración y administración del condominio activo.
+        </p>
+
+        <p className="text-sm text-blue-700 font-bold mt-3">
+          Condominio activo en sesión:{" "}
+          {condominioActivoNombre || "No seleccionado"}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Total condominios</p>
+          <p className="text-sm text-slate-500">Total mostrado</p>
           <h2 className="text-3xl font-black">{condominios.length}</h2>
         </div>
 
@@ -217,6 +303,13 @@ export default function CondominiosPage() {
         <div className="bg-white rounded-2xl p-5 shadow-sm border">
           <p className="text-sm text-slate-500">Inactivos</p>
           <h2 className="text-3xl font-black text-red-700">{inactivos}</h2>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
+          <p className="text-sm text-slate-500">Condominio ID</p>
+          <h2 className="text-3xl font-black text-blue-700">
+            {condominioActivoId || "-"}
+          </h2>
         </div>
       </div>
 
@@ -236,7 +329,9 @@ export default function CondominiosPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">Nombre *</label>
+            <label className="block text-sm font-semibold mb-1">
+              Nombre *
+            </label>
 
             <input
               type="text"
@@ -260,7 +355,9 @@ export default function CondominiosPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">Teléfono</label>
+            <label className="block text-sm font-semibold mb-1">
+              Teléfono
+            </label>
 
             <input
               type="text"
@@ -462,131 +559,223 @@ export default function CondominiosPage() {
       </div>
 
       <div className="bg-white rounded-3xl p-6 shadow-sm border">
-        <h2 className="text-xl font-black mb-4">Listado de condominios</h2>
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <h2 className="text-xl font-black">Condominio activo</h2>
+
+            <p className="text-sm text-slate-500">
+              Mostrando solamente el condominio logueado en este momento.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">Buscar</label>
+
+            <input
+              type="text"
+              value={buscar}
+              onChange={(e) => setBuscar(e.target.value)}
+              className="border rounded-xl px-4 py-3 w-full md:w-96"
+              placeholder="Buscar dentro del condominio activo..."
+            />
+          </div>
+        </div>
 
         {loading ? (
-          <p>Cargando condominios...</p>
+          <p>Cargando condominio...</p>
         ) : (
-          <div className="space-y-4">
-            {condominios.map((c) => (
-              <div key={c.id} className="border rounded-2xl p-5">
-                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                  <div className="flex gap-4">
-                    {c.logo_url ? (
-                      <img
-                        src={c.logo_url}
-                        alt={c.nombre}
-                        className="h-20 w-20 object-contain border rounded-2xl p-2 bg-white"
-                      />
-                    ) : (
-                      <div className="h-20 w-20 rounded-2xl bg-slate-100 border flex items-center justify-center text-slate-400 text-xs">
-                        Sin logo
-                      </div>
+          <div className="overflow-x-auto border rounded-2xl">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-4 py-3 text-left">Condominio</th>
+                  <th className="px-4 py-3 text-left">RNC</th>
+                  <th className="px-4 py-3 text-left">Teléfono</th>
+                  <th className="px-4 py-3 text-right">Cuota</th>
+                  <th className="px-4 py-3 text-center">Estado</th>
+                  <th className="px-4 py-3 text-center">Acción</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {condominiosFiltrados.map((c) => (
+                  <tbody key={c.id}>
+                    <tr className="border-t bg-blue-50">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          {c.logo_url ? (
+                            <img
+                              src={c.logo_url}
+                              alt={c.nombre}
+                              className="h-10 w-10 object-contain border rounded-xl p-1 bg-white"
+                            />
+                          ) : (
+                            <div className="h-10 w-10 rounded-xl bg-slate-100 border flex items-center justify-center text-slate-400 text-[10px]">
+                              Logo
+                            </div>
+                          )}
+
+                          <div>
+                            <p className="font-black">{c.nombre}</p>
+
+                            <p className="text-xs text-blue-700 font-bold">
+                              Condominio activo
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3">{c.rnc || "-"}</td>
+
+                      <td className="px-4 py-3">{c.telefono || "-"}</td>
+
+                      <td className="px-4 py-3 text-right font-bold text-green-700">
+                        RD$ {dinero(c.cuota_mensual)}
+                      </td>
+
+                      <td className="px-4 py-3 text-center">
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                            c.estado === "activo"
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
+                          }`}
+                        >
+                          {c.estado || "-"}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex flex-wrap justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => verDetalle(c.id)}
+                            className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                          >
+                            {detalleId === c.id ? "Ocultar" : "Ver detalle"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => editarCondominio(c)}
+                            className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                          >
+                            Editar
+                          </button>
+
+                          {c.estado === "activo" ? (
+                            <button
+                              type="button"
+                              onClick={() => cambiarEstado(c.id, "inactivo")}
+                              className="bg-red-700 hover:bg-red-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                            >
+                              Inactivar
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => cambiarEstado(c.id, "activo")}
+                              className="bg-green-700 hover:bg-green-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                            >
+                              Activar
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+
+                    {detalleId === c.id && (
+                      <tr className="bg-slate-50">
+                        <td colSpan={6} className="px-4 py-4">
+                          <div className="border rounded-2xl p-5 bg-white">
+                            <div className="flex flex-col md:flex-row gap-4">
+                              {c.logo_url ? (
+                                <img
+                                  src={c.logo_url}
+                                  alt={c.nombre}
+                                  className="h-24 w-24 object-contain border rounded-2xl p-2 bg-white"
+                                />
+                              ) : (
+                                <div className="h-24 w-24 rounded-2xl bg-slate-100 border flex items-center justify-center text-slate-400 text-xs">
+                                  Sin logo
+                                </div>
+                              )}
+
+                              <div className="flex-1">
+                                <h3 className="text-xl font-black">
+                                  {c.nombre}
+                                </h3>
+
+                                <p className="text-sm text-slate-500 mt-1">
+                                  {c.direccion || "-"}
+                                </p>
+
+                                <p className="text-sm text-slate-500 mt-2">
+                                  RNC: {c.rnc || "-"} · Tel:{" "}
+                                  {c.telefono || "-"} · Correo:{" "}
+                                  {c.correo || "-"}
+                                </p>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5 text-sm">
+                                  <div className="bg-slate-50 border rounded-xl p-3">
+                                    <p className="text-slate-500">
+                                      Cuota mensual
+                                    </p>
+
+                                    <p className="font-bold text-green-700">
+                                      RD$ {dinero(c.cuota_mensual)}
+                                    </p>
+                                  </div>
+
+                                  <div className="bg-slate-50 border rounded-xl p-3">
+                                    <p className="text-slate-500">% Mora</p>
+
+                                    <p className="font-semibold">
+                                      {c.porcentaje_mora || 0}%
+                                    </p>
+                                  </div>
+
+                                  <div className="bg-slate-50 border rounded-xl p-3">
+                                    <p className="text-slate-500">Día mora</p>
+
+                                    <p className="font-semibold">
+                                      Día {c.dia_inicio_mora || 10}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="mt-5 bg-slate-50 border rounded-xl p-3 text-sm">
+                                  <p className="font-bold text-slate-800">
+                                    Representante contratos
+                                  </p>
+
+                                  <p className="text-slate-600">
+                                    {c.nombre_representante || "-"} · Cédula:{" "}
+                                    {c.cedula_representante || "-"} · Cargo:{" "}
+                                    {c.cargo_representante || "-"}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
                     )}
+                  </tbody>
+                ))}
 
-                    <div>
-                      <h3 className="text-xl font-black">{c.nombre}</h3>
-
-                      <p className="text-sm text-slate-500">
-                        {c.direccion || "-"}
-                      </p>
-
-                      <p className="text-sm text-slate-500 mt-1">
-                        RNC: {c.rnc || "-"} · Tel: {c.telefono || "-"} · Correo:{" "}
-                        {c.correo || "-"}
-                      </p>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 text-sm">
-                        <div>
-                          <p className="text-slate-500">Cuota mensual</p>
-
-                          <p className="font-bold text-green-700">
-                            RD$
-                            {Number(c.cuota_mensual || 0).toLocaleString(
-                              "es-DO",
-                              {
-                                minimumFractionDigits: 2,
-                              }
-                            )}
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-slate-500">% Mora</p>
-
-                          <p className="font-semibold">
-                            {c.porcentaje_mora || 0}%
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-slate-500">Día mora</p>
-
-                          <p className="font-semibold">
-                            Día {c.dia_inicio_mora || 10}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 bg-slate-50 border rounded-xl p-3 text-sm">
-                        <p className="font-bold text-slate-800">
-                          Representante contratos
-                        </p>
-
-                        <p className="text-slate-600">
-                          {c.nombre_representante || "-"} · Cédula:{" "}
-                          {c.cedula_representante || "-"} · Cargo:{" "}
-                          {c.cargo_representante || "-"}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="text-right min-w-[160px]">
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        c.estado === "activo"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
+                {condominiosFiltrados.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-4 py-8 text-center text-slate-500"
                     >
-                      {c.estado}
-                    </span>
-
-                    <div className="mt-4 flex flex-col gap-2">
-                      <button
-                        onClick={() => editarCondominio(c)}
-                        className="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold"
-                      >
-                        Editar
-                      </button>
-
-                      {c.estado === "activo" ? (
-                        <button
-                          onClick={() => cambiarEstado(c.id, "inactivo")}
-                          className="bg-red-700 hover:bg-red-800 text-white px-4 py-2 rounded-lg text-sm font-bold"
-                        >
-                          Inactivar
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => cambiarEstado(c.id, "activo")}
-                          className="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded-lg text-sm font-bold"
-                        >
-                          Activar
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {condominios.length === 0 && (
-              <div className="p-6 text-center text-slate-500">
-                No hay condominios registrados.
-              </div>
-            )}
+                      No hay información para mostrar del condominio activo.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

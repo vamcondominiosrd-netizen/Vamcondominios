@@ -137,7 +137,7 @@ export default function ConsultaEstadoPage() {
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="bg-white rounded-2xl border shadow-sm p-6">
           <h1 className="text-3xl font-bold">
-            Consulta de Estado de Cuenta
+            Consulta de Estado de Cuenta Apartamentos
           </h1>
 
           <p className="text-slate-500 mt-2">
