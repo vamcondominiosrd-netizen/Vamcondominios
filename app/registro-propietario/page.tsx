@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { supabase } from "@/app/lib/supabaseClient";
 
+const CONDOMINIO_NOMBRE = "Colinas del Oeste Lote 4";
+
 const apartamentos = [
   "L4-G1",
   "L4-G2",
@@ -28,7 +30,7 @@ const apartamentos = [
   "L4-L2",
   "L4-L3",
   "L4-L4",
-  ];
+ ];
 
 export default function RegistroPropietarioPage() {
   const [noApartamento, setNoApartamento] = useState("");
@@ -68,6 +70,21 @@ export default function RegistroPropietarioPage() {
     setCantidadMascotas("");
     setObservacionMascota("");
     setAceptoConfirmacion(false);
+  }
+
+  async function verificarRegistroExistente(apartamento: string) {
+    const { data, error } = await supabase
+      .from("registro_propietarios_movil")
+      .select("id, estado, created_at")
+      .eq("condominio", CONDOMINIO_NOMBRE)
+      .eq("no_apartamento", apartamento)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error("Error verificando registro existente: " + error.message);
+    }
+
+    return data;
   }
 
   async function guardarRegistro(e: React.FormEvent) {
@@ -138,10 +155,20 @@ export default function RegistroPropietarioPage() {
     try {
       setLoading(true);
 
+      const existeRegistro = await verificarRegistroExistente(noApartamento);
+
+      if (existeRegistro) {
+        setExito(false);
+        setMensaje(
+          "Ya existe un registro enviado para este apartamento. Si necesita corregir la información, favor comunicarse con la administración."
+        );
+        return;
+      }
+
       const { error } = await supabase
         .from("registro_propietarios_movil")
         .insert({
-          condominio: "Colinas del Oeste Lote 4",
+          condominio: CONDOMINIO_NOMBRE,
           no_apartamento: noApartamento,
 
           nombre_propietario: nombrePropietario.trim(),
@@ -173,6 +200,16 @@ export default function RegistroPropietarioPage() {
         });
 
       if (error) {
+        if (
+          error.message.toLowerCase().includes("duplicate") ||
+          error.message.toLowerCase().includes("unique")
+        ) {
+          setMensaje(
+            "Ya existe un registro enviado para este apartamento. Si necesita corregir la información, favor comunicarse con la administración."
+          );
+          return;
+        }
+
         setMensaje("Error guardando información: " + error.message);
         return;
       }
@@ -196,7 +233,7 @@ export default function RegistroPropietarioPage() {
         <div className="bg-slate-950 text-white rounded-3xl p-6 shadow text-center">
           <div className="flex justify-center mb-3">
             <img
-              src="/logo.jpg"
+              src="/logo-vam.png"
               alt="Logo VAM Administradora de Condominios"
               className="h-20 w-20 object-contain rounded-full bg-white p-2"
             />
@@ -210,9 +247,7 @@ export default function RegistroPropietarioPage() {
             Registro Básico de Propietarios
           </p>
 
-          <p className="text-slate-300 text-sm mt-2">
-            Colinas del Oeste Lote 4
-          </p>
+          <p className="text-slate-300 text-sm mt-2">{CONDOMINIO_NOMBRE}</p>
         </div>
 
         <div className="bg-white rounded-3xl border shadow-sm p-5">
@@ -224,7 +259,7 @@ export default function RegistroPropietarioPage() {
 
               <label className="text-sm font-semibold">Condominio</label>
               <input
-                value="Colinas del Oeste Lote 4"
+                value={CONDOMINIO_NOMBRE}
                 readOnly
                 className="w-full mt-1 mb-4 border rounded-xl px-4 py-3 bg-slate-100 text-slate-700"
               />
