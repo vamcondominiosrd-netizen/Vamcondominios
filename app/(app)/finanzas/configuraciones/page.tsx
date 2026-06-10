@@ -76,6 +76,15 @@ export default function FinanzasConfiguracionesPage() {
       fondo: "from-green-600 to-green-800",
       iconoColor: "text-green-700",
     },
+
+     {
+      titulo: "Mantenimiento Bancos",
+      descripcion: "Consultar y administrar los nombres de bancos",
+      href: "/finanzas/configuraciones/bancos",
+      icono: BarChart3,
+      fondo: "from-emerald-600 to-green-800",
+      iconoColor: "text-green-700",
+},
   ];
 
   return (

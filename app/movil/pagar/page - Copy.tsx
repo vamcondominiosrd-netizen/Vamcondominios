@@ -17,11 +17,6 @@ type PropietarioActual = {
   correo: string;
 };
 
-type BancoNombre = {
-  id: number;
-  nombre_banco: string;
-};
-
 export default function MovilPagarPage() {
   const router = useRouter();
 
@@ -29,13 +24,12 @@ export default function MovilPagarPage() {
     null
   );
 
-  const [bancos, setBancos] = useState<BancoNombre[]>([]);
-
   const [concepto, setConcepto] = useState("Pago de mantenimiento");
   const [monto, setMonto] = useState("");
   const [fechaPago, setFechaPago] = useState("");
   const [metodoPago, setMetodoPago] = useState("Transferencia");
   const [banco, setBanco] = useState("");
+  const [referencia, setReferencia] = useState("");
   const [comprobante, setComprobante] = useState<File | null>(null);
 
   const [loading, setLoading] = useState(false);
@@ -55,25 +49,7 @@ export default function MovilPagarPage() {
 
     const hoy = new Date().toISOString().slice(0, 10);
     setFechaPago(hoy);
-
-    cargarBancos();
   }, [router]);
-
-  async function cargarBancos() {
-    const { data, error } = await supabase
-      .from("banco_nombre")
-      .select("id, nombre_banco")
-      .eq("estado", "activo")
-      .order("orden", { ascending: true })
-      .order("nombre_banco", { ascending: true });
-
-    if (error) {
-      setMensaje("Error cargando bancos: " + error.message);
-      return;
-    }
-
-    setBancos((data as BancoNombre[]) || []);
-  }
 
   async function subirComprobante() {
     if (!comprobante) return "";
@@ -119,8 +95,8 @@ export default function MovilPagarPage() {
       return;
     }
 
-    if (metodoPago !== "Efectivo" && !banco) {
-      setMensaje("Debe seleccionar el banco utilizado para el pago.");
+    if (!referencia.trim()) {
+      setMensaje("Debe indicar el número de referencia.");
       return;
     }
 
@@ -148,8 +124,8 @@ export default function MovilPagarPage() {
         monto: Number(monto),
         fecha_pago: fechaPago,
         metodo_pago: metodoPago,
-        banco: metodoPago === "Efectivo" ? "" : banco,
-        referencia: "",
+        banco,
+        referencia,
         comprobante_url: comprobanteUrl,
 
         estado: "Pendiente de validación",
@@ -166,6 +142,7 @@ export default function MovilPagarPage() {
 
       setMonto("");
       setBanco("");
+      setReferencia("");
       setComprobante(null);
       setConcepto("Pago de mantenimiento");
       setMetodoPago("Transferencia");
@@ -255,13 +232,7 @@ export default function MovilPagarPage() {
 
               <select
                 value={metodoPago}
-                onChange={(e) => {
-                  setMetodoPago(e.target.value);
-
-                  if (e.target.value === "Efectivo") {
-                    setBanco("");
-                  }
-                }}
+                onChange={(e) => setMetodoPago(e.target.value)}
                 className="w-full mt-1 border rounded-xl px-4 py-3 bg-white"
               >
                 <option>Transferencia</option>
@@ -271,32 +242,29 @@ export default function MovilPagarPage() {
               </select>
             </div>
 
-            {metodoPago !== "Efectivo" && (
-              <div>
-                <label className="text-sm font-semibold">Banco</label>
+            <div>
+              <label className="text-sm font-semibold">Banco</label>
 
-                <select
-                  value={banco}
-                  onChange={(e) => setBanco(e.target.value)}
-                  className="w-full mt-1 border rounded-xl px-4 py-3 bg-white"
-                >
-                  <option value="">Seleccione banco</option>
+              <input
+                value={banco}
+                onChange={(e) => setBanco(e.target.value)}
+                placeholder="Ejemplo: Banco Popular"
+                className="w-full mt-1 border rounded-xl px-4 py-3"
+              />
+            </div>
 
-                  {bancos.map((b) => (
-                    <option key={b.id} value={b.nombre_banco}>
-                      {b.nombre_banco}
-                    </option>
-                  ))}
-                </select>
+            <div>
+              <label className="text-sm font-semibold">
+                Número de referencia
+              </label>
 
-                {bancos.length === 0 && (
-                  <p className="text-xs text-orange-600 mt-1">
-                    No hay bancos activos registrados. Debe crear los bancos en
-                    el mantenimiento.
-                  </p>
-                )}
-              </div>
-            )}
+              <input
+                value={referencia}
+                onChange={(e) => setReferencia(e.target.value)}
+                placeholder="Referencia del depósito o transferencia"
+                className="w-full mt-1 border rounded-xl px-4 py-3"
+              />
+            </div>
 
             <div>
               <label className="text-sm font-semibold">

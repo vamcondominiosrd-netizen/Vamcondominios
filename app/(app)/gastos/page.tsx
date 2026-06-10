@@ -1,72 +1,82 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/app/lib/supabaseClient";
-
-type Proveedor = {
-  id: number;
-  nombre_proveedor: string;
-  cuenta_banco: string | null;
-};
-
-type Categoria = {
-  id: number;
-  nombre_categoria: string;
-};
 
 type Gasto = {
   id: number;
   condominio_id?: number;
-  condominio: string;
-  fecha: string;
-  concepto: string;
-  detalle_gasto: string;
-  monto: number;
-  itbis: number;
-  total: number;
-  no_factura: string;
-  ncf: string;
-  metodo_pago: string;
-  cuenta_banco: string;
-  factura_url: string;
-  estado: string;
-  categoria_id?: number;
-  proveedor_id?: number;
-  aprobado_tesorero?: boolean;
-  aprobado_presidente?: boolean;
-  fecha_aprobacion_tesorero?: string;
-  fecha_aprobacion_presidente?: string;
-  cheque_url?: string;
-  numero_cheque?: string;
-  fecha_pago?: string;
-  pagado?: boolean;
-  catalogo_proveedores?: { nombre_proveedor: string };
-  catalogo_categoria_gastos?: { nombre_categoria: string };
+  condominio: string | null;
+  fecha: string | null;
+  concepto: string | null;
+  detalle_gasto: string | null;
+  monto: number | null;
+  itbis: number | null;
+  total: number | null;
+  no_factura: string | null;
+  ncf: string | null;
+  metodo_pago: string | null;
+  cuenta_banco: string | null;
+  factura_url: string | null;
+  estado: string | null;
+  categoria_id?: number | null;
+  proveedor_id?: number | null;
+  aprobado_tesorero?: boolean | null;
+  aprobado_presidente?: boolean | null;
+  fecha_aprobacion_tesorero?: string | null;
+  fecha_aprobacion_presidente?: string | null;
+  cheque_url?: string | null;
+  numero_cheque?: string | null;
+  fecha_pago?: string | null;
+  pagado?: boolean | null;
+  catalogo_proveedores?: { nombre_proveedor: string | null } | null;
+  catalogo_categoria_gastos?: { nombre_categoria: string | null } | null;
 };
 
+function dinero(valor: number | null | undefined) {
+  return Number(valor || 0).toLocaleString("es-DO", {
+    minimumFractionDigits: 2,
+  });
+}
+
+function estadoColor(g: Gasto) {
+  if (g.pagado) return "bg-green-100 text-green-700";
+
+  if (g.aprobado_tesorero && g.aprobado_presidente && !g.pagado) {
+    return "bg-blue-100 text-blue-700";
+  }
+
+  if (g.aprobado_tesorero && !g.aprobado_presidente) {
+    return "bg-yellow-100 text-yellow-700";
+  }
+
+  return "bg-slate-100 text-slate-700";
+}
+
+function etiquetaEstado(g: Gasto) {
+  if (g.pagado) return "Pagado";
+
+  if (g.aprobado_tesorero && g.aprobado_presidente && !g.pagado) {
+    return "Aprobado pendiente de pago";
+  }
+
+  if (g.aprobado_tesorero && !g.aprobado_presidente) {
+    return "Pendiente presidente";
+  }
+
+  return g.estado || "Sin estado";
+}
+
 export default function GastosPage() {
-  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
-  const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [gastos, setGastos] = useState<Gasto[]>([]);
-  const [guardando, setGuardando] = useState(false);
-  const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
 
-  const [fecha, setFecha] = useState("");
-  const [categoriaId, setCategoriaId] = useState("");
-  const [proveedorId, setProveedorId] = useState("");
-  const [concepto, setConcepto] = useState("");
-  const [detalleGasto, setDetalleGasto] = useState("");
-  const [monto, setMonto] = useState("");
-  const [itbis, setItbis] = useState("");
-  const [noFactura, setNoFactura] = useState("");
-  const [ncf, setNcf] = useState("");
-  const [metodoPago, setMetodoPago] = useState("");
-  const [cuentaBanco, setCuentaBanco] = useState("");
-  const [facturaArchivo, setFacturaArchivo] = useState<File | null>(null);
-  const [facturaActualUrl, setFacturaActualUrl] = useState("");
+  const [buscar, setBuscar] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState("");
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
@@ -78,48 +88,17 @@ export default function GastosPage() {
     }
 
     const nombreFinal = nombre || `Condominio ID ${id}`;
-    const hoy = new Date().toISOString().split("T")[0];
 
     setCondominioId(id);
     setCondominioNombre(nombreFinal);
-    setFecha(hoy);
 
-    cargarCatalogos(id);
     cargarGastos(id, nombreFinal);
   }, []);
 
-  async function cargarCatalogos(id: string) {
-    if (!id) return;
-
-    const { data: proveedoresData, error: proveedoresError } = await supabase
-      .from("catalogo_proveedores")
-      .select("id, nombre_proveedor, cuenta_banco")
-      .eq("estado", "activo")
-      .eq("condominio_id", Number(id))
-      .order("nombre_proveedor", { ascending: true });
-
-    if (proveedoresError) {
-      alert("Error cargando proveedores: " + proveedoresError.message);
-      return;
-    }
-
-    const { data: categoriasData, error: categoriasError } = await supabase
-      .from("catalogo_categoria_gastos")
-      .select("id, nombre_categoria")
-      .eq("estado", "activo")
-      .order("nombre_categoria", { ascending: true });
-
-    if (categoriasError) {
-      alert("Error cargando categorías: " + categoriasError.message);
-      return;
-    }
-
-    setProveedores(proveedoresData || []);
-    setCategorias(categoriasData || []);
-  }
-
   async function cargarGastos(id: string, nombreCondominio: string) {
     if (!id && !nombreCondominio) return;
+
+    setLoading(true);
 
     let query = supabase
       .from("gastos")
@@ -162,6 +141,8 @@ export default function GastosPage() {
 
     const { data, error } = await query;
 
+    setLoading(false);
+
     if (error) {
       alert("Error cargando gastos: " + error.message);
       return;
@@ -170,688 +151,339 @@ export default function GastosPage() {
     setGastos((data as Gasto[]) || []);
   }
 
-  async function subirFactura() {
-    if (!facturaArchivo) return facturaActualUrl || "";
+  const gastosFiltrados = useMemo(() => {
+    return gastos.filter((g) => {
+      let cumpleEstado = true;
 
-    const extension = facturaArchivo.name.split(".").pop();
-    const nombreArchivo = `${Date.now()}-${Math.random()
-      .toString(36)
-      .substring(2)}.${extension}`;
-
-    const rutaArchivo = `${condominioId || "general"}/${nombreArchivo}`;
-
-    const { error } = await supabase.storage
-      .from("facturas-gastos")
-      .upload(rutaArchivo, facturaArchivo);
-
-    if (error) throw new Error(error.message);
-
-    const { data } = supabase.storage
-      .from("facturas-gastos")
-      .getPublicUrl(rutaArchivo);
-
-    return data.publicUrl;
-  }
-
-  function limpiarFormulario() {
-    setEditandoId(null);
-
-    const hoy = new Date().toISOString().split("T")[0];
-
-    setFecha(hoy);
-    setCategoriaId("");
-    setProveedorId("");
-    setConcepto("");
-    setDetalleGasto("");
-    setMonto("");
-    setItbis("");
-    setNoFactura("");
-    setNcf("");
-    setMetodoPago("");
-    setCuentaBanco("");
-    setFacturaArchivo(null);
-    setFacturaActualUrl("");
-
-    const inputFile = document.getElementById(
-      "facturaGasto"
-    ) as HTMLInputElement | null;
-
-    if (inputFile) inputFile.value = "";
-  }
-
-  function seleccionarProveedor(id: string) {
-    setProveedorId(id);
-
-    const proveedor = proveedores.find((p) => String(p.id) === id);
-
-    if (proveedor?.cuenta_banco) {
-      setCuentaBanco(proveedor.cuenta_banco);
-    } else {
-      setCuentaBanco("");
-    }
-  }
-
-  function editarGasto(g: Gasto) {
-    setEditandoId(g.id);
-    setFecha(g.fecha || "");
-    setCategoriaId(g.categoria_id ? String(g.categoria_id) : "");
-    setProveedorId(g.proveedor_id ? String(g.proveedor_id) : "");
-    setConcepto(g.concepto || "");
-    setDetalleGasto(g.detalle_gasto || "");
-    setMonto(String(g.monto || 0));
-    setItbis(String(g.itbis || 0));
-    setNoFactura(g.no_factura || "");
-    setNcf(g.ncf || "");
-    setMetodoPago(g.metodo_pago || "");
-    setCuentaBanco(g.cuenta_banco || "");
-    setFacturaActualUrl(g.factura_url || "");
-    setFacturaArchivo(null);
-
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  async function borrarGasto(g: Gasto) {
-    const confirmar = confirm(
-      `¿Seguro que desea borrar el gasto "${g.concepto}"?`
-    );
-
-    if (!confirmar) return;
-
-    const { error } = await supabase
-      .from("gastos")
-      .delete()
-      .eq("id", g.id)
-      .eq("condominio_id", Number(condominioId));
-
-    if (error) {
-      alert("Error borrando gasto: " + error.message);
-      return;
-    }
-
-    alert("Gasto borrado correctamente.");
-    cargarGastos(condominioId, condominioNombre);
-  }
-
-  async function aprobarTesorero(g: Gasto) {
-    const { error } = await supabase
-      .from("gastos")
-      .update({
-        aprobado_tesorero: true,
-        fecha_aprobacion_tesorero: new Date().toISOString(),
-        estado: "Aprobado por tesorero",
-      })
-      .eq("id", g.id)
-      .eq("condominio_id", Number(condominioId));
-
-    if (error) {
-      alert("Error aprobando por tesorero: " + error.message);
-      return;
-    }
-
-    cargarGastos(condominioId, condominioNombre);
-  }
-
-  async function aprobarPresidente(g: Gasto) {
-    if (!g.aprobado_tesorero) {
-      alert("Primero debe aprobar el tesorero.");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("gastos")
-      .update({
-        aprobado_presidente: true,
-        fecha_aprobacion_presidente: new Date().toISOString(),
-        estado: "Aprobado por presidente",
-      })
-      .eq("id", g.id)
-      .eq("condominio_id", Number(condominioId));
-
-    if (error) {
-      alert("Error aprobando por presidente: " + error.message);
-      return;
-    }
-
-    cargarGastos(condominioId, condominioNombre);
-  }
-
-  async function marcarPagado(g: Gasto) {
-    if (!g.aprobado_presidente) {
-      alert("Primero debe aprobar el presidente.");
-      return;
-    }
-
-    const numeroCheque = prompt("Número de cheque emitido:");
-    if (!numeroCheque) return;
-
-    const fechaPago = prompt("Fecha de pago en formato YYYY-MM-DD:");
-    if (!fechaPago) return;
-
-    const { error } = await supabase
-      .from("gastos")
-      .update({
-        pagado: true,
-        numero_cheque: numeroCheque,
-        fecha_pago: fechaPago,
-        estado: "Pagado",
-      })
-      .eq("id", g.id)
-      .eq("condominio_id", Number(condominioId));
-
-    if (error) {
-      alert("Error marcando como pagado: " + error.message);
-      return;
-    }
-
-    cargarGastos(condominioId, condominioNombre);
-  }
-
-  async function subirCheque(g: Gasto, archivo: File) {
-    if (!archivo) return;
-
-    const extension = archivo.name.split(".").pop();
-    const nombreArchivo = `${condominioId || "general"}/${
-      g.id
-    }-${Date.now()}.${extension}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("cheques-gastos")
-      .upload(nombreArchivo, archivo);
-
-    if (uploadError) {
-      alert("Error subiendo cheque: " + uploadError.message);
-      return;
-    }
-
-    const { data } = supabase.storage
-      .from("cheques-gastos")
-      .getPublicUrl(nombreArchivo);
-
-    const { error } = await supabase
-      .from("gastos")
-      .update({
-        cheque_url: data.publicUrl,
-      })
-      .eq("id", g.id)
-      .eq("condominio_id", Number(condominioId));
-
-    if (error) {
-      alert("Cheque subido, pero no se pudo actualizar el gasto: " + error.message);
-      return;
-    }
-
-    alert("Cheque subido correctamente.");
-    cargarGastos(condominioId, condominioNombre);
-  }
-
-  async function guardarGasto(e: React.FormEvent) {
-    e.preventDefault();
-
-    if (
-      !condominioId ||
-      !condominioNombre ||
-      !fecha ||
-      !categoriaId ||
-      !proveedorId ||
-      !concepto ||
-      !monto
-    ) {
-      alert(
-        "Debe completar condominio, fecha, categoría, proveedor, concepto y monto."
-      );
-      return;
-    }
-
-    try {
-      setGuardando(true);
-
-      const montoNumero = Number(monto || 0);
-      const itbisNumero = Number(itbis || 0);
-      const totalNumero = montoNumero + itbisNumero;
-      const facturaUrl = await subirFactura();
-
-      const registro: any = {
-        condominio_id: Number(condominioId),
-        condominio: condominioNombre,
-        fecha,
-        categoria_id: Number(categoriaId),
-        proveedor_id: Number(proveedorId),
-        concepto,
-        detalle_gasto: detalleGasto,
-        monto: montoNumero,
-        itbis: itbisNumero,
-        total: totalNumero,
-        no_factura: noFactura,
-        ncf,
-        metodo_pago: metodoPago,
-        cuenta_banco: cuentaBanco,
-        factura_url: facturaUrl,
-      };
-
-      if (editandoId) {
-        const { error } = await supabase
-          .from("gastos")
-          .update(registro)
-          .eq("id", editandoId)
-          .eq("condominio_id", Number(condominioId));
-
-        setGuardando(false);
-
-        if (error) {
-          alert("Error modificando gasto: " + error.message);
-          return;
-        }
-
-        alert("Gasto modificado correctamente.");
-      } else {
-        registro.estado = "Pendiente aprobación tesorero";
-        registro.aprobado_tesorero = false;
-        registro.aprobado_presidente = false;
-        registro.pagado = false;
-
-        const { error } = await supabase.from("gastos").insert([registro]);
-
-        setGuardando(false);
-
-        if (error) {
-          alert("Error guardando gasto: " + error.message);
-          return;
-        }
-
-        alert("Gasto registrado correctamente.");
+      if (filtroEstado === "pagado") {
+        cumpleEstado = g.pagado === true;
       }
 
-      limpiarFormulario();
-      cargarGastos(condominioId, condominioNombre);
-    } catch (err: any) {
-      setGuardando(false);
-      alert("Error subiendo factura: " + err.message);
-    }
-  }
+      if (filtroEstado === "pendiente_pago") {
+        cumpleEstado =
+          g.aprobado_tesorero === true &&
+          g.aprobado_presidente === true &&
+          g.pagado !== true;
+      }
 
-  const totalGastos = gastos.reduce((sum, g) => sum + Number(g.total || 0), 0);
+      if (filtroEstado === "pendiente_presidente") {
+        cumpleEstado =
+          g.aprobado_tesorero === true && g.aprobado_presidente !== true;
+      }
+
+      if (filtroEstado === "sin_pagar") {
+        cumpleEstado = g.pagado !== true;
+      }
+
+      const texto = `${g.id || ""} ${g.fecha || ""} ${g.concepto || ""} ${
+        g.detalle_gasto || ""
+      } ${g.no_factura || ""} ${g.ncf || ""} ${g.metodo_pago || ""} ${
+        g.numero_cheque || ""
+      } ${g.catalogo_proveedores?.nombre_proveedor || ""} ${
+        g.catalogo_categoria_gastos?.nombre_categoria || ""
+      } ${g.estado || ""}`.toLowerCase();
+
+      const cumpleBusqueda = texto.includes(buscar.toLowerCase().trim());
+
+      return cumpleEstado && cumpleBusqueda;
+    });
+  }, [gastos, buscar, filtroEstado]);
+
+  const totalGastos = gastosFiltrados.reduce(
+    (sum, g) => sum + Number(g.total || 0),
+    0
+  );
+
+  const totalPagado = gastosFiltrados
+    .filter((g) => g.pagado)
+    .reduce((sum, g) => sum + Number(g.total || 0), 0);
+
+  const totalPendientePago = gastosFiltrados
+    .filter(
+      (g) =>
+        g.aprobado_tesorero === true &&
+        g.aprobado_presidente === true &&
+        g.pagado !== true
+    )
+    .reduce((sum, g) => sum + Number(g.total || 0), 0);
+
+  const cantidadPagados = gastosFiltrados.filter((g) => g.pagado).length;
+
+  const cantidadPendientePago = gastosFiltrados.filter(
+    (g) =>
+      g.aprobado_tesorero === true &&
+      g.aprobado_presidente === true &&
+      g.pagado !== true
+  ).length;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Gastos Profesionales</h1>
-        <p className="text-slate-500">
-          Registro, aprobación y pago de gastos del condominio activo.
-        </p>
-      </div>
+      <div className="bg-white rounded-3xl border shadow-sm p-6">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-black text-slate-900">
+              Gastos Profesionales
+            </h1>
 
-      <div className="bg-white rounded-2xl p-5 shadow-sm border">
-        <p className="text-xs uppercase tracking-wide text-slate-500">
-          Condominio activo
-        </p>
-        <p className="font-bold text-slate-800 mt-1">
-          {condominioNombre || "No seleccionado"}
-        </p>
-      </div>
+            <p className="text-slate-500 mt-2">
+              Consulta financiera de gastos generados desde Solicitudes de Pago.
+            </p>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Total registros</p>
-          <h2 className="text-2xl font-bold">{gastos.length}</h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Monto total gastos</p>
-          <h2 className="text-2xl font-bold text-red-700">
-            RD$
-            {totalGastos.toLocaleString("es-DO", {
-              minimumFractionDigits: 2,
-            })}
-          </h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Modo</p>
-          <h2 className="text-2xl font-bold text-blue-700">
-            {editandoId ? "Editando" : "Nuevo"}
-          </h2>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold mb-4">
-          {editandoId ? "Modificar gasto" : "Registrar gasto"}
-        </h2>
-
-        <form
-          onSubmit={guardarGasto}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
-          <div className="md:col-span-2 bg-slate-50 border rounded-lg px-3 py-3">
-            <label className="block text-sm font-semibold mb-1">
-              Condominio
-            </label>
-            <p className="font-semibold text-slate-800">
-              {condominioNombre || "No seleccionado"}
+            <p className="text-sm text-blue-700 font-bold mt-3">
+              Condominio activo: {condominioNombre || "No seleccionado"}
             </p>
           </div>
 
-          <input
-            type="date"
-            value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          />
-
-          <select
-            value={categoriaId}
-            onChange={(e) => setCategoriaId(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          >
-            <option value="">Seleccione categoría</option>
-            {categorias.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nombre_categoria}
-              </option>
-            ))}
-          </select>
-
-          <div>
-            <select
-              value={proveedorId}
-              onChange={(e) => seleccionarProveedor(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/solicitudes-pago"
+              className="bg-blue-700 text-white px-4 py-2 rounded-xl hover:bg-blue-800 font-bold"
             >
-              <option value="">Seleccione proveedor</option>
-              {proveedores.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nombre_proveedor}
-                </option>
-              ))}
-            </select>
+              Ir a solicitudes
+            </Link>
 
-            {proveedores.length === 0 && (
-              <p className="text-xs text-orange-600 mt-1">
-                No hay proveedores activos registrados para este condominio.
-              </p>
-            )}
-          </div>
-
-          <input
-            type="text"
-            value={concepto}
-            onChange={(e) => setConcepto(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Concepto"
-          />
-
-          <input
-            type="number"
-            step="0.01"
-            value={monto}
-            onChange={(e) => setMonto(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Monto RD$"
-          />
-
-          <input
-            type="number"
-            step="0.01"
-            value={itbis}
-            onChange={(e) => setItbis(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="ITBIS RD$"
-          />
-
-          <input
-            type="text"
-            value={`RD$${(
-              Number(monto || 0) + Number(itbis || 0)
-            ).toLocaleString("es-DO", { minimumFractionDigits: 2 })}`}
-            readOnly
-            className="border rounded-lg px-3 py-2 w-full bg-slate-100"
-          />
-
-          <input
-            type="text"
-            value={noFactura}
-            onChange={(e) => setNoFactura(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="No. Factura"
-          />
-
-          <input
-            type="text"
-            value={ncf}
-            onChange={(e) => setNcf(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="NCF"
-          />
-
-          <select
-            value={metodoPago}
-            onChange={(e) => setMetodoPago(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          >
-            <option value="">Seleccione método</option>
-            <option value="Efectivo">Efectivo</option>
-            <option value="Transferencia">Transferencia</option>
-            <option value="Cheque">Cheque</option>
-            <option value="Depósito">Depósito</option>
-            <option value="Tarjeta">Tarjeta</option>
-            <option value="Otro">Otro</option>
-          </select>
-
-          <input
-            type="text"
-            value={cuentaBanco}
-            onChange={(e) => setCuentaBanco(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Cuenta banco"
-          />
-
-          <div className="md:col-span-2">
-            <input
-              id="facturaGasto"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp"
-              onChange={(e) => setFacturaArchivo(e.target.files?.[0] || null)}
-              className="border rounded-lg px-3 py-2 w-full bg-white"
-            />
-
-            {facturaActualUrl && (
-              <p className="text-sm mt-2">
-                Factura actual:{" "}
-                <a
-                  href={facturaActualUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 underline"
-                >
-                  Ver factura
-                </a>
-              </p>
-            )}
-          </div>
-
-          <textarea
-            value={detalleGasto}
-            onChange={(e) => setDetalleGasto(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full md:col-span-2"
-            rows={3}
-            placeholder="Detalle del gasto"
-          />
-
-          <div className="md:col-span-2 flex gap-2">
             <button
-              type="submit"
-              disabled={guardando}
-              className="bg-blue-700 text-white px-5 py-2 rounded-lg hover:bg-blue-800 disabled:opacity-50"
+              onClick={() => cargarGastos(condominioId, condominioNombre)}
+              className="bg-slate-700 text-white px-4 py-2 rounded-xl hover:bg-slate-800 font-bold"
             >
-              {guardando
-                ? "Guardando..."
-                : editandoId
-                ? "Guardar cambios"
-                : "Guardar gasto"}
+              Actualizar
             </button>
-
-            {editandoId && (
-              <button
-                type="button"
-                onClick={limpiarFormulario}
-                className="bg-slate-500 text-white px-5 py-2 rounded-lg hover:bg-slate-600"
-              >
-                Cancelar
-              </button>
-            )}
           </div>
-        </form>
+        </div>
       </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold mb-4">Últimos gastos registrados</h2>
+      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-sm text-blue-800">
+        Los gastos ya no se registran ni se aprueban desde este módulo. El ciclo
+        completo se maneja desde <strong>Solicitudes de Pago</strong>. Este
+        módulo queda como consulta financiera y contable.
+      </div>
 
-        <div className="overflow-auto border rounded-lg">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="p-2 border">Fecha</th>
-                <th className="p-2 border">Proveedor</th>
-                <th className="p-2 border">Concepto</th>
-                <th className="p-2 border">Total</th>
-                <th className="p-2 border">Estado</th>
-                <th className="p-2 border">Factura</th>
-                <th className="p-2 border">Cheque</th>
-                <th className="p-2 border">Acciones</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {gastos.map((g) => (
-                <tr key={g.id}>
-                  <td className="p-2 border">{g.fecha}</td>
-
-                  <td className="p-2 border">
-                    {g.catalogo_proveedores?.nombre_proveedor || "-"}
-                  </td>
-
-                  <td className="p-2 border">{g.concepto}</td>
-
-                  <td className="p-2 border text-right font-bold">
-                    RD$
-                    {Number(g.total).toLocaleString("es-DO", {
-                      minimumFractionDigits: 2,
-                    })}
-                  </td>
-
-                  <td className="p-2 border text-center font-semibold">
-                    {g.estado}
-                  </td>
-
-                  <td className="p-2 border text-center">
-                    {g.factura_url ? (
-                      <a
-                        href={g.factura_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-slate-900 text-white px-3 py-1 rounded-lg"
-                      >
-                        Factura
-                      </a>
-                    ) : (
-                      <span className="text-slate-400">Sin factura</span>
-                    )}
-                  </td>
-
-                  <td className="p-2 border text-center">
-                    {g.cheque_url ? (
-                      <a
-                        href={g.cheque_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-green-700 text-white px-3 py-1 rounded-lg"
-                      >
-                        Ver cheque
-                      </a>
-                    ) : g.aprobado_presidente ? (
-                      <label className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-lg text-xs cursor-pointer inline-block">
-                        Subir cheque
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png,.webp"
-                          className="hidden"
-                          onChange={(e) => {
-                            const archivo = e.target.files?.[0];
-                            if (archivo) subirCheque(g, archivo);
-                            e.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-                    ) : (
-                      <span className="text-xs text-slate-400">
-                        Pendiente aprobación
-                      </span>
-                    )}
-                  </td>
-
-                  <td className="p-2 border text-center">
-                    <div className="flex flex-wrap gap-2 justify-center">
-                      {!g.aprobado_tesorero && (
-                        <button
-                          onClick={() => aprobarTesorero(g)}
-                          className="bg-yellow-600 text-white px-3 py-1 rounded-lg text-xs"
-                        >
-                          Tesorero
-                        </button>
-                      )}
-
-                      {g.aprobado_tesorero && !g.aprobado_presidente && (
-                        <button
-                          onClick={() => aprobarPresidente(g)}
-                          className="bg-blue-700 text-white px-3 py-1 rounded-lg text-xs"
-                        >
-                          Presidente
-                        </button>
-                      )}
-
-                      {g.aprobado_presidente && !g.pagado && (
-                        <button
-                          onClick={() => marcarPagado(g)}
-                          className="bg-green-700 text-white px-3 py-1 rounded-lg text-xs"
-                        >
-                          Pagado
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => editarGasto(g)}
-                        className="bg-slate-700 text-white px-3 py-1 rounded-lg text-xs"
-                      >
-                        Editar
-                      </button>
-
-                      <button
-                        onClick={() => borrarGasto(g)}
-                        className="bg-red-700 text-white px-3 py-1 rounded-lg text-xs"
-                      >
-                        Borrar
-                      </button>
-                    </div>
-
-                    {g.numero_cheque && (
-                      <div className="text-xs text-slate-600 mt-1">
-                        Cheque: {g.numero_cheque}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-
-              {gastos.length === 0 && (
-                <tr>
-                  <td className="p-4 border text-center" colSpan={8}>
-                    No hay gastos registrados para este condominio.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
+          <p className="text-sm text-slate-500">Registros filtrados</p>
+          <h2 className="text-3xl font-black text-slate-900">
+            {gastosFiltrados.length}
+          </h2>
         </div>
+
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
+          <p className="text-sm text-slate-500">Monto total</p>
+          <h2 className="text-2xl font-black text-red-700">
+            RD$ {dinero(totalGastos)}
+          </h2>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
+          <p className="text-sm text-slate-500">Pagados</p>
+          <h2 className="text-2xl font-black text-green-700">
+            {cantidadPagados}
+          </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            RD$ {dinero(totalPagado)}
+          </p>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 shadow-sm border">
+          <p className="text-sm text-slate-500">Pendientes pago</p>
+          <h2 className="text-2xl font-black text-blue-700">
+            {cantidadPendientePago}
+          </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            RD$ {dinero(totalPendientePago)}
+          </p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm border">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-semibold mb-1">Estado</label>
+
+            <select
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value)}
+              className="border rounded-xl px-4 py-3 w-full bg-white"
+            >
+              <option value="">Todos</option>
+              <option value="pagado">Pagados</option>
+              <option value="pendiente_pago">Aprobados pendientes de pago</option>
+              <option value="pendiente_presidente">Pendientes presidente</option>
+              <option value="sin_pagar">Sin pagar</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">Buscar</label>
+
+            <input
+              type="text"
+              value={buscar}
+              onChange={(e) => setBuscar(e.target.value)}
+              className="border rounded-xl px-4 py-3 w-full"
+              placeholder="Proveedor, concepto, factura, NCF o cheque..."
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-6 shadow-sm border">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-xl font-black text-slate-900">
+              Gastos registrados
+            </h2>
+
+            <p className="text-sm text-slate-500">
+              Listado de gastos generados desde el flujo de Solicitudes de Pago.
+            </p>
+          </div>
+
+          <div className="text-lg font-black text-red-700">
+            RD$ {dinero(totalGastos)}
+          </div>
+        </div>
+
+        {loading ? (
+          <p className="text-slate-500">Cargando gastos...</p>
+        ) : (
+          <div className="overflow-auto border rounded-2xl">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="p-3 border text-left">Fecha</th>
+                  <th className="p-3 border text-left">Proveedor</th>
+                  <th className="p-3 border text-left">Categoría</th>
+                  <th className="p-3 border text-left">Concepto</th>
+                  <th className="p-3 border text-right">Total</th>
+                  <th className="p-3 border text-center">Estado</th>
+                  <th className="p-3 border text-center">Factura</th>
+                  <th className="p-3 border text-center">Cheque</th>
+                  <th className="p-3 border text-center">Pago</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {gastosFiltrados.map((g) => (
+                  <tr key={g.id} className="hover:bg-slate-50">
+                    <td className="p-3 border">{g.fecha || "-"}</td>
+
+                    <td className="p-3 border">
+                      {g.catalogo_proveedores?.nombre_proveedor || "-"}
+                    </td>
+
+                    <td className="p-3 border">
+                      {g.catalogo_categoria_gastos?.nombre_categoria || "-"}
+                    </td>
+
+                    <td className="p-3 border">
+                      <p className="font-semibold">{g.concepto || "-"}</p>
+
+                      {g.detalle_gasto && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          {g.detalle_gasto}
+                        </p>
+                      )}
+
+                      {g.no_factura && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          Factura: {g.no_factura}
+                        </p>
+                      )}
+
+                      {g.ncf && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          NCF: {g.ncf}
+                        </p>
+                      )}
+                    </td>
+
+                    <td className="p-3 border text-right font-bold">
+                      RD$ {dinero(g.total)}
+                    </td>
+
+                    <td className="p-3 border text-center">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-bold ${estadoColor(
+                          g
+                        )}`}
+                      >
+                        {etiquetaEstado(g)}
+                      </span>
+                    </td>
+
+                    <td className="p-3 border text-center">
+                      {g.factura_url ? (
+                        <a
+                          href={g.factura_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="bg-slate-900 text-white px-3 py-1 rounded-lg inline-block text-xs font-bold"
+                        >
+                          Ver factura
+                        </a>
+                      ) : (
+                        <span className="text-slate-400 text-xs">
+                          Sin factura
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="p-3 border text-center">
+                      {g.cheque_url ? (
+                        <a
+                          href={g.cheque_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="bg-green-700 text-white px-3 py-1 rounded-lg inline-block text-xs font-bold"
+                        >
+                          Ver cheque
+                        </a>
+                      ) : (
+                        <span className="text-slate-400 text-xs">
+                          Sin cheque
+                        </span>
+                      )}
+
+                      {g.numero_cheque && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          No. {g.numero_cheque}
+                        </p>
+                      )}
+                    </td>
+
+                    <td className="p-3 border text-center">
+                      {g.pagado ? (
+                        <div>
+                          <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">
+                            Pagado
+                          </span>
+
+                          {g.fecha_pago && (
+                            <p className="text-xs text-slate-500 mt-1">
+                              {g.fecha_pago}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold">
+                          Pendiente
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+
+                {gastosFiltrados.length === 0 && (
+                  <tr>
+                    <td className="p-6 border text-center" colSpan={9}>
+                      No hay gastos registrados para este condominio.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -37,11 +37,13 @@ export default function UnidadesPage() {
   }, [router]);
 
   async function cargarUnidades(id: string) {
-    setMensaje("Cargando unidades del condominio ID: " + id);
+    setMensaje("Cargando unidades de apartamentos...");
 
     const { data, error } = await supabase
       .from("unidades")
-      .select("id, condominio_id, codigo, propietario_nombre, cuota_mensual_actual, activa")
+      .select(
+        "id, condominio_id, codigo, propietario_nombre, cuota_mensual_actual, activa"
+      )
       .eq("condominio_id", Number(id))
       .order("codigo", { ascending: true });
 
@@ -52,16 +54,18 @@ export default function UnidadesPage() {
     }
 
     setUnidades(data || []);
-    setMensaje(`Condominio ID activo: ${id} | Unidades cargadas: ${data?.length || 0}`);
+    setMensaje(`Unidades cargadas: ${data?.length || 0}`);
   }
 
   return (
     <div className="space-y-6">
       <div className="bg-white border rounded-2xl shadow-sm p-5">
-        <h1 className="text-2xl font-bold text-slate-800">Unidades</h1>
+        <h1 className="text-2xl font-bold text-slate-800">
+          Unidades de Apartamentos
+        </h1>
 
         <p className="text-slate-500 mt-1">
-          Condominio activo: {condominioNombre || "Sin nombre"} — ID: {condominioId || "null"}
+          Condominio activo: {condominioNombre || "Sin nombre"}
         </p>
 
         <div className="mt-4 rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800">
@@ -71,16 +75,14 @@ export default function UnidadesPage() {
 
       <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
         <div className="p-4 border-b text-sm text-slate-600">
-          {unidades.length} unidades registradas
+          {unidades.length} apartamentos registrados
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
-                <th className="text-left px-4 py-3">ID</th>
-                <th className="text-left px-4 py-3">Condominio ID</th>
-                <th className="text-left px-4 py-3">Unidad</th>
+                <th className="text-left px-4 py-3">Apartamento</th>
                 <th className="text-left px-4 py-3">Propietario</th>
                 <th className="text-right px-4 py-3">Cuota</th>
                 <th className="text-center px-4 py-3">Activa</th>
@@ -90,23 +92,43 @@ export default function UnidadesPage() {
             <tbody>
               {unidades.map((u) => (
                 <tr key={u.id} className="border-t">
-                  <td className="px-4 py-3">{u.id}</td>
-                  <td className="px-4 py-3">{u.condominio_id}</td>
                   <td className="px-4 py-3 font-semibold">{u.codigo}</td>
-                  <td className="px-4 py-3">{u.propietario_nombre || "-"}</td>
-                  <td className="px-4 py-3 text-right">
-                    RD$ {Number(u.cuota_mensual_actual || 0).toLocaleString()}
+
+                  <td className="px-4 py-3">
+                    {u.propietario_nombre || "-"}
                   </td>
+
+                  <td className="px-4 py-3 text-right">
+                    RD${" "}
+                    {Number(u.cuota_mensual_actual || 0).toLocaleString(
+                      "es-DO",
+                      {
+                        minimumFractionDigits: 2,
+                      }
+                    )}
+                  </td>
+
                   <td className="px-4 py-3 text-center">
-                    {u.activa ? "Sí" : "No"}
+                    {u.activa ? (
+                      <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">
+                        Sí
+                      </span>
+                    ) : (
+                      <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold">
+                        No
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}
 
               {unidades.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
-                    No hay unidades para este condominio activo.
+                  <td
+                    colSpan={4}
+                    className="px-4 py-8 text-center text-slate-500"
+                  >
+                    No hay apartamentos para este condominio activo.
                   </td>
                 </tr>
               )}

@@ -338,89 +338,7 @@ export default function SolicitudesPagoPage() {
     }
 
     alert("Gasto generado correctamente.");
-    cargarTodo(condominioId);
-  }
 
-  async function subirCheque(g: GastoAprobado, archivo: File) {
-    if (!archivo) return;
-
-    const extension = archivo.name.split(".").pop();
-    const nombreArchivo = `${condominioId || "general"}/${
-      g.id
-    }-${Date.now()}.${extension}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("cheques-gastos")
-      .upload(nombreArchivo, archivo);
-
-    if (uploadError) {
-      alert("Error subiendo cheque: " + uploadError.message);
-      return;
-    }
-
-    const { data } = supabase.storage
-      .from("cheques-gastos")
-      .getPublicUrl(nombreArchivo);
-
-    const { error } = await supabase
-      .from("gastos")
-      .update({
-        cheque_url: data.publicUrl,
-      })
-      .eq("id", g.id)
-      .eq("condominio_id", Number(condominioId));
-
-    if (error) {
-      alert(
-        "Cheque subido, pero no se pudo actualizar el gasto: " + error.message
-      );
-      return;
-    }
-
-    alert("Cheque subido correctamente.");
-    cargarTodo(condominioId);
-  }
-
-  async function marcarPagado(g: GastoAprobado) {
-    if (!condominioId) {
-      alert("No hay condominio activo.");
-      return;
-    }
-
-    if (!g.aprobado_tesorero || !g.aprobado_presidente) {
-      alert("Este gasto debe estar aprobado por tesorero y presidente.");
-      return;
-    }
-
-    const numeroCheque = prompt("Número de cheque emitido:");
-    if (!numeroCheque) return;
-
-    const fechaPago = prompt("Fecha de pago en formato YYYY-MM-DD:");
-    if (!fechaPago) return;
-
-    const confirmar = confirm(
-      `¿Desea marcar como pagado el gasto #${g.id} por RD$ ${dinero(g.total)}?`
-    );
-
-    if (!confirmar) return;
-
-    const { error } = await supabase
-      .from("gastos")
-      .update({
-        pagado: true,
-        numero_cheque: numeroCheque,
-        fecha_pago: fechaPago,
-        estado: "Pagado",
-      })
-      .eq("id", g.id)
-      .eq("condominio_id", Number(condominioId));
-
-    if (error) {
-      alert("Error marcando como pagado: " + error.message);
-      return;
-    }
-
-    alert("Gasto marcado como pagado correctamente.");
     cargarTodo(condominioId);
   }
 
@@ -457,9 +375,7 @@ export default function SolicitudesPagoPage() {
     return gastosAprobados.filter((g) => {
       const texto = `${g.id || ""} ${g.fecha || ""} ${g.concepto || ""} ${
         g.detalle_gasto || ""
-      } ${g.catalogo_proveedores?.nombre_proveedor || ""} ${
-        g.numero_cheque || ""
-      }`.toLowerCase();
+      } ${g.catalogo_proveedores?.nombre_proveedor || ""}`.toLowerCase();
 
       return texto.includes(textoBuscar);
     });
@@ -520,8 +436,6 @@ export default function SolicitudesPagoPage() {
       Total: Number(g.total || 0),
       "Aprobado tesorero": g.aprobado_tesorero ? "Sí" : "No",
       "Aprobado presidente": g.aprobado_presidente ? "Sí" : "No",
-      "No. cheque": g.numero_cheque || "",
-      "Fecha pago": g.fecha_pago || "",
       Pagado: g.pagado ? "Sí" : "No",
     }));
 
@@ -547,8 +461,7 @@ export default function SolicitudesPagoPage() {
             </h1>
 
             <p className="text-slate-500 mt-2">
-              Control completo de solicitudes, aprobaciones, generación de gastos
-              y pagos.
+              Control de solicitudes, gastos aprobados y pagos pendientes.
             </p>
 
             <p className="text-sm text-blue-700 font-bold mt-3">
@@ -645,7 +558,7 @@ export default function SolicitudesPagoPage() {
               value={buscar}
               onChange={(e) => setBuscar(e.target.value)}
               className="border rounded-xl px-4 py-3 w-full"
-              placeholder="Buscar por proveedor, concepto, detalle o cheque..."
+              placeholder="Buscar por proveedor, concepto o detalle..."
             />
           </div>
         </div>
@@ -659,8 +572,8 @@ export default function SolicitudesPagoPage() {
             </h2>
 
             <p className="text-sm text-slate-500">
-              Desde aquí se sube el cheque, se registra el número y se marca el
-              gasto como pagado.
+              Se muestran registros de la tabla gastos con aprobado_tesorero = true,
+              aprobado_presidente = true y pagado = false.
             </p>
           </div>
 
@@ -678,8 +591,7 @@ export default function SolicitudesPagoPage() {
                 <th className="p-3 border text-left">Proveedor</th>
                 <th className="p-3 border text-left">Concepto</th>
                 <th className="p-3 border text-right">Total</th>
-                <th className="p-3 border text-center">Cheque</th>
-                <th className="p-3 border text-center">Pago</th>
+                <th className="p-3 border text-center">Estado</th>
               </tr>
             </thead>
 
@@ -709,69 +621,17 @@ export default function SolicitudesPagoPage() {
                   </td>
 
                   <td className="p-3 border text-center">
-                    {g.cheque_url ? (
-                      <a
-                        href={g.cheque_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-green-700 text-white px-3 py-1 rounded-lg inline-block text-xs font-bold"
-                      >
-                        Ver cheque
-                      </a>
-                    ) : (
-                      <label className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-lg text-xs cursor-pointer inline-block font-bold">
-                        Subir cheque
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png,.webp"
-                          className="hidden"
-                          onChange={(e) => {
-                            const archivo = e.target.files?.[0];
-                            if (archivo) subirCheque(g, archivo);
-                            e.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-                    )}
-
-                    {g.numero_cheque && (
-                      <div className="text-xs text-slate-500 mt-1">
-                        No. {g.numero_cheque}
-                      </div>
-                    )}
-                  </td>
-
-                  <td className="p-3 border text-center">
-                    {g.pagado ? (
-                      <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">
-                        Pagado
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => marcarPagado(g)}
-                        className="bg-red-700 hover:bg-red-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
-                      >
-                        Marcar pagado
-                      </button>
-                    )}
-
-                    {g.fecha_pago && (
-                      <div className="text-xs text-slate-500 mt-1">
-                        {g.fecha_pago}
-                      </div>
-                    )}
+                    <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">
+                      Aprobado para pago
+                    </span>
                   </td>
                 </tr>
               ))}
 
               {gastosAprobadosFiltrados.length === 0 && (
                 <tr>
-                  <td
-                    className="p-6 border text-center text-slate-500"
-                    colSpan={7}
-                  >
-                    No hay gastos aprobados pendientes de pago para este
-                    condominio.
+                  <td className="p-6 border text-center text-slate-500" colSpan={6}>
+                    No hay gastos aprobados pendientes de pago para este condominio.
                   </td>
                 </tr>
               )}
@@ -865,8 +725,7 @@ export default function SolicitudesPagoPage() {
                         <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">
                           Gasto generado
                         </span>
-                      ) : normalizarEstado(s.estado) ===
-                        "aprobado_presidente" ? (
+                      ) : normalizarEstado(s.estado) === "aprobado_presidente" ? (
                         <button
                           onClick={() => generarGasto(s)}
                           className="bg-blue-700 text-white px-3 py-1 rounded-lg hover:bg-blue-800 font-bold"
@@ -884,10 +743,7 @@ export default function SolicitudesPagoPage() {
 
                 {solicitudesFiltradas.length === 0 && (
                   <tr>
-                    <td
-                      className="p-6 border text-center text-slate-500"
-                      colSpan={7}
-                    >
+                    <td className="p-6 border text-center text-slate-500" colSpan={7}>
                       No hay solicitudes registradas para este condominio.
                     </td>
                   </tr>
