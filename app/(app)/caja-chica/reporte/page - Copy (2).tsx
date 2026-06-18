@@ -234,27 +234,26 @@ export default function ReporteCajaChicaPage() {
     });
   }
 
-  function formatoFecha(fecha?: string | null) {
-    if (!fecha) return "-";
+function formatoFecha(fecha?: string | null) {
+  if (!fecha) return "-";
 
-    const fechaLimpia = String(fecha).split("T")[0];
-    const partes = fechaLimpia.split("-");
+  const fechaLimpia = String(fecha).split("T")[0];
+  const partes = fechaLimpia.split("-");
 
-    if (partes.length === 3) {
-      const [year, month, day] = partes;
-      return `${day}/${month}/${year}`;
-    }
-
-    return fecha;
+  if (partes.length === 3) {
+    const [year, month, day] = partes;
+    return `${day}/${month}/${year}`;
   }
 
-  function fechaHoy() {
-    const hoy = new Date();
-    const day = String(hoy.getDate()).padStart(2, "0");
-    const month = String(hoy.getMonth() + 1).padStart(2, "0");
-    const year = hoy.getFullYear();
+  return fecha;
+}
 
-    return `${day}/${month}/${year}`;
+  function fechaHoy() {
+    return new Date().toLocaleDateString("es-DO", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
   }
 
   function imprimir() {
@@ -293,7 +292,7 @@ export default function ReporteCajaChicaPage() {
       Responsable: f.responsable || "",
       Estado: "",
       "Fecha registro": f.created_at
-        ? formatoFecha(f.created_at)
+        ? new Date(f.created_at).toLocaleDateString("es-DO")
         : "",
     }));
 
@@ -309,7 +308,7 @@ export default function ReporteCajaChicaPage() {
       Comprobante: g.comprobante,
       Estado: g.estado,
       "Fecha registro": g.created_at
-        ? formatoFecha(g.created_at)
+        ? new Date(g.created_at).toLocaleDateString("es-DO")
         : "",
     }));
 
@@ -416,23 +415,6 @@ export default function ReporteCajaChicaPage() {
           .resumen-compacto-monto {
             font-size: 13px !important;
           }
-
-          .bloque-firma-compacto {
-            padding: 8px !important;
-            margin-top: 10px !important;
-          }
-
-          .bloque-firma-compacto h3 {
-            font-size: 10px !important;
-          }
-
-          .bloque-firma-texto {
-            font-size: 9px !important;
-          }
-
-          .linea-firma {
-            margin-top: 26px !important;
-          }
         }
       `}</style>
 
@@ -535,7 +517,7 @@ export default function ReporteCajaChicaPage() {
             </h1>
 
             <h2 className="text-base font-black uppercase mt-1">
-              Detalle de Gastos de Caja Chica
+              Reporte General de Caja Chica
             </h2>
 
             <p className="text-xs mt-1">
@@ -703,33 +685,33 @@ export default function ReporteCajaChicaPage() {
           </div>
         </div>
 
-        <div className="border rounded-lg p-3 mt-4 page-break-inside-avoid bloque-firma-compacto">
-          <div className="flex items-center justify-between gap-3 border-b pb-1 mb-2">
-            <h3 className="font-black uppercase text-[11px]">
+        <div className="border rounded-lg p-4 mt-5 page-break-inside-avoid">
+          <div className="flex items-center justify-between gap-3 border-b pb-1 mb-4">
+            <h3 className="font-black uppercase">
               Aprobación y autorización
             </h3>
 
-            <div className="border rounded-md px-2 py-1 text-right min-w-[165px] bg-slate-50">
-              <p className="text-[8.5px] uppercase font-bold text-slate-500">
+            <div className="border rounded-md px-2 py-1 text-right min-w-[180px] bg-slate-50">
+              <p className="text-[10px] uppercase font-bold text-slate-500">
                 Período
               </p>
-              <p className="font-black text-[10px]">
+              <p className="font-black text-sm">
                 {formatoFecha(fechaDesde)} - {formatoFecha(fechaHasta)}
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-8 text-[10px] bloque-firma-texto">
+          <div className="grid grid-cols-2 gap-10">
             <div>
               <p className="font-black text-center uppercase">Tesorero</p>
 
-              <div className="mt-1 text-center min-h-[18px]">
+              <div className="mt-1 text-center min-h-[28px]">
                 <p className="font-bold">
                   {tesorero?.nombre || "No configurado"}
                 </p>
               </div>
 
-              <div className="mt-8 border-t border-slate-900 pt-1 text-center linea-firma">
+              <div className="mt-14 border-t border-slate-900 pt-1 text-center">
                 Firma del tesorero
               </div>
             </div>
@@ -737,20 +719,20 @@ export default function ReporteCajaChicaPage() {
             <div>
               <p className="font-black text-center uppercase">Presidente</p>
 
-              <div className="mt-1 text-center min-h-[18px]">
+              <div className="mt-1 text-center min-h-[28px]">
                 <p className="font-bold">
                   {presidente?.nombre || "No configurado"}
                 </p>
               </div>
 
-              <div className="mt-8 border-t border-slate-900 pt-1 text-center linea-firma">
+              <div className="mt-14 border-t border-slate-900 pt-1 text-center">
                 Firma del presidente
               </div>
             </div>
           </div>
         </div>
 
-        <div className="text-[9px] text-slate-500 flex justify-between border-t mt-4 pt-2">
+        <div className="text-[9px] text-slate-500 flex justify-between border-t mt-5 pt-2">
           <span>Reporte general de caja chica para revisión y archivo.</span>
           <span>Generado por VAM Administración de Condominios</span>
         </div>

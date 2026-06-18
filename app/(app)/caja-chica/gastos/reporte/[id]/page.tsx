@@ -1,0 +1,446 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { supabase } from "@/app/lib/supabaseClient";
+
+type CajaChicaGasto = {
+  id: number;
+  condominio: string;
+  fecha: string;
+  concepto: string;
+  detalle_gasto: string | null;
+  monto: number;
+  responsable: string | null;
+  comprobante: string | null;
+  factura_url: string | null;
+  estado: string | null;
+  created_at: string | null;
+};
+
+type DirectivaCondominio = {
+  id: number;
+  condominio_id: number;
+  nombre: string;
+  cargo: string;
+  estado: string | null;
+};
+
+export default function ReporteGastoCajaChicaPage() {
+  const params = useParams<{ id: string }>();
+  const router = useRouter();
+
+  const gastoId = String(params?.id || "");
+
+  const [loading, setLoading] = useState(true);
+  const [mensaje, setMensaje] = useState("");
+  const [gasto, setGasto] = useState<CajaChicaGasto | null>(null);
+
+  const [tesorero, setTesorero] = useState<DirectivaCondominio | null>(null);
+  const [presidente, setPresidente] =
+    useState<DirectivaCondominio | null>(null);
+
+  useEffect(() => {
+    cargarReporte();
+  }, [gastoId]);
+
+  function normalizarTexto(valor: string | null | undefined) {
+    return String(valor || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  async function buscarCondominioId(nombreCondominio: string) {
+    const idLocal = Number(localStorage.getItem("condominio_id") || 0);
+
+    if (idLocal) return idLocal;
+
+    if (!nombreCondominio) return 0;
+
+    const { data } = await supabase
+      .from("condominios")
+      .select("id, nombre")
+      .ilike("nombre", `%${nombreCondominio}%`)
+      .limit(1)
+      .maybeSingle();
+
+    return Number(data?.id || 0);
+  }
+
+  async function cargarDirectiva(condominioId: number) {
+    if (!condominioId) return;
+
+    const { data: directivaData } = await supabase
+      .from("directiva_condominio")
+      .select("id, condominio_id, nombre, cargo, estado")
+      .eq("condominio_id", Number(condominioId));
+
+    const directiva = (directivaData || []) as DirectivaCondominio[];
+
+    const miembrosActivos = directiva.filter((m) => {
+      const estado = normalizarTexto(m.estado);
+      return !estado || estado === "activo";
+    });
+
+    const tesoreroEncontrado =
+      miembrosActivos.find(
+        (m) => normalizarTexto(m.cargo) === "tesorero"
+      ) ||
+      miembrosActivos.find((m) =>
+        normalizarTexto(m.cargo).includes("tesorer")
+      );
+
+    const presidenteEncontrado =
+      miembrosActivos.find(
+        (m) => normalizarTexto(m.cargo) === "presidente"
+      ) ||
+      miembrosActivos.find((m) =>
+        normalizarTexto(m.cargo).includes("president")
+      );
+
+    setTesorero(tesoreroEncontrado || null);
+    setPresidente(presidenteEncontrado || null);
+  }
+
+  async function cargarReporte() {
+    if (!gastoId) {
+      setMensaje("No se encontró el ID del gasto de caja chica.");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setMensaje("");
+
+    const { data: gastoData, error: gastoError } = await supabase
+      .from("caja_chica")
+      .select(
+        "id, condominio, fecha, concepto, detalle_gasto, monto, responsable, comprobante, factura_url, estado, created_at"
+      )
+      .eq("id", Number(gastoId))
+      .maybeSingle();
+
+    if (gastoError || !gastoData) {
+      setMensaje(
+        "No se pudo cargar el gasto de caja chica: " +
+          (gastoError?.message || "Gasto no encontrado.")
+      );
+      setLoading(false);
+      return;
+    }
+
+    const gastoActual = gastoData as CajaChicaGasto;
+    setGasto(gastoActual);
+
+    const condominioId = await buscarCondominioId(gastoActual.condominio);
+    await cargarDirectiva(condominioId);
+
+    setLoading(false);
+  }
+
+  function formatoFecha(fecha?: string | null) {
+    if (!fecha) return "-";
+
+    const d = new Date(fecha);
+
+    if (Number.isNaN(d.getTime())) return fecha;
+
+    return d.toLocaleDateString("es-DO", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  }
+
+  function fechaHoy() {
+    return new Date().toLocaleDateString("es-DO", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  }
+
+  function dinero(valor?: number | null) {
+    return Number(valor || 0).toLocaleString("es-DO", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function imprimir() {
+    window.print();
+  }
+
+  const numeroReporte = String(gasto?.id || "").padStart(5, "0");
+
+  if (loading) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-slate-100">
+        <div className="bg-white rounded-2xl shadow p-6">
+          Cargando reporte de gasto de caja chica...
+        </div>
+      </main>
+    );
+  }
+
+  if (mensaje || !gasto) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-slate-100">
+        <div className="bg-white rounded-2xl shadow p-6 max-w-lg">
+          <p className="text-red-700 font-bold">{mensaje}</p>
+
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="mt-4 bg-slate-800 text-white px-4 py-2 rounded-xl"
+          >
+            Volver
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-200 p-4 print:bg-white print:p-0">
+      <style jsx global>{`
+        @media print {
+          @page {
+            size: letter;
+            margin: 0;
+          }
+
+          html,
+          body {
+            width: 8.5in;
+            min-height: 11in;
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          * {
+            box-sizing: border-box !important;
+          }
+
+          .no-print {
+            display: none !important;
+          }
+
+          .pagina-carta {
+            width: 8.5in !important;
+            min-height: 11in !important;
+            padding-top: 0.42in !important;
+            padding-right: 0.45in !important;
+            padding-bottom: 0.42in !important;
+            padding-left: 0.32in !important;
+            margin: 0 auto !important;
+            box-sizing: border-box !important;
+            box-shadow: none !important;
+            border: none !important;
+            border-radius: 0 !important;
+          }
+        }
+      `}</style>
+
+      <div className="no-print max-w-4xl mx-auto mb-4 flex justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold"
+        >
+          Volver
+        </button>
+
+        <button
+          type="button"
+          onClick={imprimir}
+          className="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-xl font-bold"
+        >
+          Imprimir reporte
+        </button>
+      </div>
+
+      <section className="pagina-carta max-w-[8.5in] mx-auto bg-white rounded-2xl shadow border text-[11px] text-slate-900">
+        <div className="border-b-2 border-slate-900 pb-3 flex items-center gap-3">
+          <div className="flex-1 text-center">
+            <h1 className="text-[16px] font-black uppercase leading-tight">
+              {gasto.condominio || "Condominio"}
+            </h1>
+
+            <h2 className="text-[15px] font-black uppercase mt-1">
+              Reporte de Gasto de Caja Chica
+            </h2>
+
+            <p className="text-[10px] mt-1">
+              Documento para revisión, autorización, firma y archivo
+              administrativo
+            </p>
+          </div>
+
+          <div className="w-36 text-[9.5px] border rounded-lg p-2">
+            <p>
+              <strong>No.:</strong> {numeroReporte}
+            </p>
+            <p>
+              <strong>Impresión:</strong> {fechaHoy()}
+            </p>
+            <p>
+              <strong>Estado:</strong> {gasto.estado || "-"}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <div className="border rounded-lg p-3">
+            <h3 className="font-black uppercase border-b pb-1 mb-2">
+              Datos del gasto
+            </h3>
+
+            <div className="grid grid-cols-2 gap-x-2 gap-y-2">
+              <p className="font-bold">Fecha:</p>
+              <p>{formatoFecha(gasto.fecha)}</p>
+
+              <p className="font-bold">Responsable:</p>
+              <p>{gasto.responsable || "-"}</p>
+
+              <p className="font-bold">Comprobante:</p>
+              <p>{gasto.comprobante || "-"}</p>
+
+              <p className="font-bold">Registro:</p>
+              <p>{formatoFecha(gasto.created_at)}</p>
+            </div>
+          </div>
+
+          <div className="border rounded-lg p-3">
+            <h3 className="font-black uppercase border-b pb-1 mb-2">
+              Resumen económico
+            </h3>
+
+            <div className="space-y-2">
+              <div className="flex justify-between border-b pb-1">
+                <span className="font-bold">Monto del gasto:</span>
+                <span>RD$ {dinero(gasto.monto)}</span>
+              </div>
+
+              <div className="flex justify-between text-[16px] font-black bg-red-50 rounded-md p-2">
+                <span>Total salida:</span>
+                <span>RD$ {dinero(gasto.monto)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="border rounded-lg p-3 mt-3">
+          <h3 className="font-black uppercase border-b pb-1 mb-2">
+            Concepto y detalle del gasto
+          </h3>
+
+          <p>
+            <strong>Concepto:</strong> {gasto.concepto || "-"}
+          </p>
+
+          <div className="mt-2 min-h-[95px]">
+            <p className="font-bold">Detalle:</p>
+            <p className="leading-snug whitespace-pre-wrap">
+              {gasto.detalle_gasto || "Sin detalle registrado."}
+            </p>
+          </div>
+        </div>
+
+        <div className="border rounded-lg p-3 mt-3">
+          <h3 className="font-black uppercase border-b pb-1 mb-2">
+            Soporte del gasto
+          </h3>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="font-bold">Factura / comprobante:</p>
+              <p>{gasto.comprobante || "-"}</p>
+            </div>
+
+            <div>
+              <p className="font-bold">Soporte digital:</p>
+              {gasto.factura_url ? (
+                <p className="break-all text-[9.5px]">{gasto.factura_url}</p>
+              ) : (
+                <p>Sin soporte digital registrado.</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="border rounded-lg p-3 mt-4">
+          <div className="flex items-center justify-between gap-3 border-b pb-1 mb-3">
+            <h3 className="font-black uppercase">
+              Aprobación y autorización
+            </h3>
+
+            <div className="border rounded-md px-2 py-1 text-right min-w-[150px] bg-slate-50">
+              <p className="text-[8.5px] uppercase font-bold text-slate-500">
+                Fecha gasto
+              </p>
+              <p className="font-black">{formatoFecha(gasto.fecha)}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-8">
+            <div>
+              <p className="font-black text-center uppercase">Tesorero</p>
+
+              <div className="mt-1 text-center min-h-[28px]">
+                <p className="font-bold">
+                  {tesorero?.nombre || "No configurado"}
+                </p>
+              </div>
+
+              <div className="mt-14 border-t border-slate-900 pt-1 text-center">
+                Firma del tesorero
+              </div>
+            </div>
+
+            <div>
+              <p className="font-black text-center uppercase">Presidente</p>
+
+              <div className="mt-1 text-center min-h-[28px]">
+                <p className="font-bold">
+                  {presidente?.nombre || "No configurado"}
+                </p>
+              </div>
+
+              <div className="mt-14 border-t border-slate-900 pt-1 text-center">
+                Firma del presidente
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="border rounded-lg p-3 mt-4">
+          <h3 className="font-black uppercase border-b pb-1 mb-2">
+            Confirmación de recepción / revisión
+          </h3>
+
+          <div className="grid grid-cols-2 gap-8">
+            <div>
+              <p className="font-bold">Revisado por:</p>
+              <div className="border-b border-slate-900 h-9" />
+            </div>
+
+            <div>
+              <p className="font-bold">Fecha de revisión:</p>
+              <div className="border-b border-slate-900 h-9" />
+            </div>
+          </div>
+        </div>
+
+        <div className="text-[8.5px] text-slate-500 flex justify-between border-t mt-5 pt-2">
+          <span>Soporte físico de revisión y archivo.</span>
+          <span>Generado por VAM Administración de Condominios</span>
+        </div>
+      </section>
+    </main>
+  );
+}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { supabase } from "@/app/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
@@ -592,7 +591,6 @@ export default function PagosMantenimientoPage() {
                   <th className="text-left px-4 py-3">Origen</th>
                   <th className="text-left px-4 py-3">Referencia</th>
                   <th className="text-left px-4 py-3">Comprobante</th>
-                  <th className="text-left px-4 py-3">Recibo</th>
                 </tr>
               </thead>
 
@@ -625,20 +623,11 @@ export default function PagosMantenimientoPage() {
                           rel="noopener noreferrer"
                           className="text-blue-600 hover:underline"
                         >
-                          Ver comprobante
+                          Ver recibo
                         </a>
                       ) : (
-                        "Sin comprobante"
+                        "Sin recibo"
                       )}
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/recibos/pago/pagos/${p.id}`}
-                        className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-1 rounded-lg text-xs font-bold inline-block"
-                      >
-                        Recibo
-                      </Link>
                     </td>
                   </tr>
                 ))}
@@ -646,7 +635,7 @@ export default function PagosMantenimientoPage() {
                 {!loading && pagos.length === 0 && (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={8}
                       className="px-4 py-8 text-center text-slate-500"
                     >
                       No hay pagos registrados.

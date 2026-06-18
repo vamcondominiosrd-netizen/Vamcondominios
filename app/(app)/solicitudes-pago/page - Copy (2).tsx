@@ -547,8 +547,8 @@ export default function SolicitudesPagoPage() {
             </h1>
 
             <p className="text-slate-500 mt-2">
-              Control completo de solicitudes, aprobaciones, generación de
-              gastos y pagos.
+              Control completo de solicitudes, aprobaciones, generación de gastos
+              y pagos.
             </p>
 
             <p className="text-sm text-blue-700 font-bold mt-3">
@@ -563,9 +563,11 @@ export default function SolicitudesPagoPage() {
             >
               Nueva solicitud
             </Link>
+            <Link href={`/solicitudes-pago/reporte/${s.id}`}>
+            Reporte para firma
+            </Link>
 
             <button
-              type="button"
               onClick={() => cargarTodo(condominioId)}
               className="bg-slate-700 text-white px-4 py-2 rounded-xl hover:bg-slate-800 font-bold"
             >
@@ -573,7 +575,6 @@ export default function SolicitudesPagoPage() {
             </button>
 
             <button
-              type="button"
               onClick={exportarExcel}
               className="bg-green-700 text-white px-4 py-2 rounded-xl hover:bg-green-800 font-bold"
             >
@@ -750,7 +751,6 @@ export default function SolicitudesPagoPage() {
                       </span>
                     ) : (
                       <button
-                        type="button"
                         onClick={() => marcarPagado(g)}
                         className="bg-red-700 hover:bg-red-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
                       >
@@ -864,33 +864,23 @@ export default function SolicitudesPagoPage() {
                     </td>
 
                     <td className="p-3 border text-center">
-                      <div className="flex flex-wrap justify-center gap-2">
-                        <Link
-                          href={`/solicitudes-pago/reporte/${s.id}`}
-                          className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                      {s.gasto_generado_id ? (
+                        <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">
+                          Gasto generado
+                        </span>
+                      ) : normalizarEstado(s.estado) ===
+                        "aprobado_presidente" ? (
+                        <button
+                          onClick={() => generarGasto(s)}
+                          className="bg-blue-700 text-white px-3 py-1 rounded-lg hover:bg-blue-800 font-bold"
                         >
-                          Reporte para firma
-                        </Link>
-
-                        {s.gasto_generado_id ? (
-                          <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">
-                            Gasto generado
-                          </span>
-                        ) : normalizarEstado(s.estado) ===
-                          "aprobado_presidente" ? (
-                          <button
-                            type="button"
-                            onClick={() => generarGasto(s)}
-                            className="bg-blue-700 text-white px-3 py-1 rounded-lg hover:bg-blue-800 text-xs font-bold"
-                          >
-                            Generar gasto
-                          </button>
-                        ) : (
-                          <span className="text-slate-400 text-xs">
-                            Pendiente aprobación
-                          </span>
-                        )}
-                      </div>
+                          Generar gasto
+                        </button>
+                      ) : (
+                        <span className="text-slate-400">
+                          Pendiente aprobación
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

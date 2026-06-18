@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/app/lib/supabaseClient";
 
@@ -17,10 +18,25 @@ type CajaChica = {
   created_at: string;
 };
 
+type CajaChicaFondo = {
+  id: number;
+  condominio_id: number | null;
+  numero_fondo: number | null;
+  condominio: string;
+  fecha: string;
+  tipo: string;
+  monto: number;
+  descripcion: string | null;
+  responsable: string | null;
+  created_at: string | null;
+};
+
 export default function CajaChicaPage() {
   const [gastos, setGastos] = useState<CajaChica[]>([]);
+  const [fondos, setFondos] = useState<CajaChicaFondo[]>([]);
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [guardandoFondo, setGuardandoFondo] = useState(false);
 
   const [condominio, setCondominio] = useState("");
   const [condominioId, setCondominioId] = useState("");
@@ -32,6 +48,11 @@ export default function CajaChicaPage() {
   const [responsable, setResponsable] = useState("");
   const [comprobante, setComprobante] = useState("");
   const [facturaArchivo, setFacturaArchivo] = useState<File | null>(null);
+
+  const [fechaFondo, setFechaFondo] = useState("");
+  const [montoFondo, setMontoFondo] = useState("");
+  const [responsableFondo, setResponsableFondo] = useState("");
+  const [descripcionFondo, setDescripcionFondo] = useState("");
 
   useEffect(() => {
     const idGuardado = localStorage.getItem("condominio_id") || "";
@@ -47,8 +68,11 @@ export default function CajaChicaPage() {
     setCondominioId(idGuardado);
     setCondominio(nombreGuardado || `Condominio ID ${idGuardado}`);
     setFecha(hoy);
+    setFechaFondo(hoy);
+    setDescripcionFondo("Fondo inicial de caja chica");
 
     cargarGastos(nombreGuardado || `Condominio ID ${idGuardado}`);
+    cargarFondos(idGuardado, nombreGuardado || `Condominio ID ${idGuardado}`);
   }, []);
 
   async function cargarGastos(condominioActivo: string) {
@@ -72,6 +96,118 @@ export default function CajaChicaPage() {
     }
 
     setGastos(data || []);
+  }
+
+  async function cargarFondos(idCondominio: string, nombreCondominio?: string) {
+    if (!idCondominio && !nombreCondominio) return;
+
+    let fondosData: CajaChicaFondo[] = [];
+
+    if (idCondominio) {
+      const { data, error } = await supabase
+        .from("caja_chica_fondos")
+        .select(
+          "id, condominio_id, numero_fondo, condominio, fecha, tipo, monto, descripcion, responsable, created_at"
+        )
+        .eq("condominio_id", Number(idCondominio))
+        .order("fecha", { ascending: false });
+
+      if (error) {
+        alert("Error cargando fondos de caja chica: " + error.message);
+        setFondos([]);
+        return;
+      }
+
+      fondosData = (data || []) as CajaChicaFondo[];
+    }
+
+    if (fondosData.length === 0 && nombreCondominio) {
+      const { data, error } = await supabase
+        .from("caja_chica_fondos")
+        .select(
+          "id, condominio_id, numero_fondo, condominio, fecha, tipo, monto, descripcion, responsable, created_at"
+        )
+        .ilike("condominio", `%${nombreCondominio}%`)
+        .order("fecha", { ascending: false });
+
+      if (error) {
+        alert("Error cargando fondos de caja chica: " + error.message);
+        setFondos([]);
+        return;
+      }
+
+      fondosData = (data || []) as CajaChicaFondo[];
+    }
+
+    setFondos(fondosData);
+  }
+
+  async function obtenerNumeroFondo() {
+    const { data, error } = await supabase.rpc(
+      "obtener_proximo_numero_fondo_caja_chica",
+      {
+        p_condominio_id: Number(condominioId),
+      }
+    );
+
+    if (error) {
+      throw new Error("Error generando número de fondo: " + error.message);
+    }
+
+    return Number(data || 1);
+  }
+
+  async function guardarFondo(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!condominioId || !condominio || !fechaFondo || !montoFondo) {
+      alert("Debe completar condominio, fecha y monto del fondo inicial.");
+      return;
+    }
+
+    try {
+      setGuardandoFondo(true);
+
+      const numeroFondo = await obtenerNumeroFondo();
+
+      const { error } = await supabase.from("caja_chica_fondos").insert([
+        {
+          condominio_id: Number(condominioId),
+          numero_fondo: numeroFondo,
+          condominio,
+          fecha: fechaFondo,
+          tipo: "fondo_inicial",
+          monto: Number(montoFondo || 0),
+          descripcion: descripcionFondo || "Fondo inicial de caja chica",
+          responsable: responsableFondo,
+        },
+      ]);
+
+      setGuardandoFondo(false);
+
+      if (error) {
+        alert("Error guardando fondo inicial: " + error.message);
+        return;
+      }
+
+      alert(
+        `Fondo inicial registrado correctamente. No. ${String(
+          numeroFondo
+        ).padStart(5, "0")}`
+      );
+
+      const hoy = new Date().toISOString().split("T")[0];
+
+      setFechaFondo(hoy);
+      setMontoFondo("");
+      setResponsableFondo("");
+      setDescripcionFondo("Fondo inicial de caja chica");
+
+      cargarFondos(condominioId, condominio);
+    } catch (err: any) {
+      setGuardandoFondo(false);
+      alert(err.message || "Error guardando fondo inicial.");
+    }
   }
 
   async function subirFactura() {
@@ -168,23 +304,41 @@ export default function CajaChicaPage() {
     0
   );
 
+  const totalFondos = fondos.reduce(
+    (sum, f) => sum + Number(f.monto || 0),
+    0
+  );
+
+  const disponibleCajaChica = totalFondos - totalGastos;
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Caja Chica</h1>
         <p className="text-slate-500">
-          Registro y control de gastos menores del condominio activo.
+          Registro y control de fondos iniciales y gastos menores del
+          condominio activo.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Gastos registrados</p>
-          <h2 className="text-2xl font-bold">{gastos.length}</h2>
+          <p className="text-sm text-slate-500">Fondos registrados</p>
+          <h2 className="text-2xl font-bold">{fondos.length}</h2>
         </div>
 
         <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Monto total gastado</p>
+          <p className="text-sm text-slate-500">Total fondos</p>
+          <h2 className="text-2xl font-bold text-green-700">
+            RD$
+            {totalFondos.toLocaleString("es-DO", {
+              minimumFractionDigits: 2,
+            })}
+          </h2>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <p className="text-sm text-slate-500">Total gastado</p>
           <h2 className="text-2xl font-bold text-red-700">
             RD$
             {totalGastos.toLocaleString("es-DO", {
@@ -194,10 +348,158 @@ export default function CajaChicaPage() {
         </div>
 
         <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Condominio activo</p>
-          <h2 className="text-lg font-bold text-blue-700">
-            {condominio || "No seleccionado"}
+          <p className="text-sm text-slate-500">Disponible</p>
+          <h2
+            className={`text-2xl font-bold ${
+              disponibleCajaChica >= 0 ? "text-blue-700" : "text-red-700"
+            }`}
+          >
+            RD$
+            {disponibleCajaChica.toLocaleString("es-DO", {
+              minimumFractionDigits: 2,
+            })}
           </h2>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-6 shadow-sm">
+        <h2 className="text-xl font-bold mb-4">
+          Registrar fondo inicial de caja chica
+        </h2>
+
+        <form
+          onSubmit={guardarFondo}
+          className="grid grid-cols-1 md:grid-cols-2 gap-4"
+        >
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Condominio *
+            </label>
+            <input
+              type="text"
+              value={condominio}
+              disabled
+              className="border rounded-lg px-3 py-2 w-full bg-slate-100 text-slate-700"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">Fecha *</label>
+            <input
+              type="date"
+              value={fechaFondo}
+              onChange={(e) => setFechaFondo(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Monto fondo inicial RD$ *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              value={montoFondo}
+              onChange={(e) => setMontoFondo(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+              placeholder="0.00"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Responsable
+            </label>
+            <input
+              type="text"
+              value={responsableFondo}
+              onChange={(e) => setResponsableFondo(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+              placeholder="Persona responsable del fondo"
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-sm font-semibold mb-1">
+              Descripción
+            </label>
+            <textarea
+              value={descripcionFondo}
+              onChange={(e) => setDescripcionFondo(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-full"
+              rows={2}
+              placeholder="Descripción del fondo inicial"
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <button
+              type="submit"
+              disabled={guardandoFondo}
+              className="bg-green-700 text-white px-5 py-2 rounded-lg hover:bg-green-800 disabled:opacity-50"
+            >
+              {guardandoFondo ? "Guardando..." : "Guardar fondo inicial"}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div className="bg-white rounded-2xl p-6 shadow-sm">
+        <h2 className="text-xl font-bold mb-4">
+          Fondos iniciales registrados
+        </h2>
+
+        <div className="overflow-auto border rounded-lg">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="p-2 border">No.</th>
+                <th className="p-2 border">Fecha</th>
+                <th className="p-2 border">Condominio</th>
+                <th className="p-2 border">Monto</th>
+                <th className="p-2 border">Responsable</th>
+                <th className="p-2 border">Descripción</th>
+                <th className="p-2 border">Reporte</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {fondos.map((f) => (
+                <tr key={f.id}>
+                  <td className="p-2 border font-bold text-center">
+                    {String(f.numero_fondo || f.id).padStart(5, "0")}
+                  </td>
+                  <td className="p-2 border">{f.fecha}</td>
+                  <td className="p-2 border">{f.condominio}</td>
+                  <td className="p-2 border text-right">
+                    RD$
+                    {Number(f.monto).toLocaleString("es-DO", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </td>
+                  <td className="p-2 border">{f.responsable || "-"}</td>
+                  <td className="p-2 border">{f.descripcion || "-"}</td>
+                  <td className="p-2 border text-center">
+                    <Link
+                      href={`/caja-chica/fondos/reporte/${f.id}`}
+                      className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-1 rounded-lg text-xs font-bold inline-block"
+                    >
+                      Reporte para firma
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+
+              {fondos.length === 0 && (
+                <tr>
+                  <td className="p-4 border text-center" colSpan={7}>
+                    No hay fondos iniciales registrados para este condominio.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -350,6 +652,7 @@ export default function CajaChicaPage() {
                   <th className="p-2 border">Comprobante</th>
                   <th className="p-2 border">Factura</th>
                   <th className="p-2 border">Estado</th>
+                  <th className="p-2 border">Reporte</th>
                 </tr>
               </thead>
 
@@ -387,12 +690,20 @@ export default function CajaChicaPage() {
                     <td className="p-2 border text-green-700 font-semibold">
                       {g.estado}
                     </td>
+                    <td className="p-2 border text-center">
+                      <Link
+                        href={`/caja-chica/gastos/reporte/${g.id}`}
+                        className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-1 rounded-lg text-xs font-bold inline-block"
+                      >
+                        Reporte para firma
+                      </Link>
+                    </td>
                   </tr>
                 ))}
 
                 {gastos.length === 0 && (
                   <tr>
-                    <td className="p-4 border text-center" colSpan={9}>
+                    <td className="p-4 border text-center" colSpan={10}>
                       No hay gastos registrados para este condominio.
                     </td>
                   </tr>

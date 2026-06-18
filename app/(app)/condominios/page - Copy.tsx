@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/app/lib/supabaseClient";
 
 type Condominio = {
@@ -599,7 +599,7 @@ export default function CondominiosPage() {
 
               <tbody>
                 {condominiosFiltrados.map((c) => (
-                  <Fragment key={c.id}>
+                  <tbody key={c.id}>
                     <tr className="border-t bg-blue-50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
@@ -761,7 +761,7 @@ export default function CondominiosPage() {
                         </td>
                       </tr>
                     )}
-                  </Fragment>
+                  </tbody>
                 ))}
 
                 {condominiosFiltrados.length === 0 && (

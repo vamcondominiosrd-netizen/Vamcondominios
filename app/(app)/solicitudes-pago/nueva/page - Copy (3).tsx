@@ -14,20 +14,10 @@ type Categoria = {
   nombre_categoria: string;
 };
 
-type CajaChicaPendiente = {
-  id: number;
-  fecha: string;
-  concepto: string;
-  detalle_gasto: string | null;
-  monto: number;
-  repuesto: boolean | null;
-};
-
 export default function NuevaSolicitudPagoPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [guardando, setGuardando] = useState(false);
-  const [calculandoCajaChica, setCalculandoCajaChica] = useState(false);
 
   const [condominioId, setCondominioId] = useState("");
   const [condominio, setCondominio] = useState("");
@@ -46,10 +36,6 @@ export default function NuevaSolicitudPagoPage() {
   const [prioridad, setPrioridad] = useState("Normal");
   const [soporteArchivo, setSoporteArchivo] = useState<File | null>(null);
 
-  const [montoPendienteCajaChica, setMontoPendienteCajaChica] = useState(0);
-  const [cantidadGastosPendientes, setCantidadGastosPendientes] = useState(0);
-  const [mensajeCajaChica, setMensajeCajaChica] = useState("");
-
   useEffect(() => {
     const idGuardado = localStorage.getItem("condominio_id") || "";
     const nombreGuardado = localStorage.getItem("condominio_nombre") || "";
@@ -67,53 +53,6 @@ export default function NuevaSolicitudPagoPage() {
 
     cargarCatalogos(idGuardado);
   }, []);
-
-  useEffect(() => {
-    verificarReposicionCajaChica();
-  }, [proveedorId, categoriaId, proveedores, categorias, condominio]);
-
-  function normalizarTexto(valor: string | null | undefined) {
-    return String(valor || "")
-      .trim()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-  }
-
-  function dinero(valor: number) {
-    return Number(valor || 0).toLocaleString("es-DO", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-  }
-
-  function formatoFecha(fecha?: string | null) {
-    if (!fecha) return "-";
-
-    const fechaLimpia = String(fecha).split("T")[0];
-    const partes = fechaLimpia.split("-");
-
-    if (partes.length === 3) {
-      const [year, month, day] = partes;
-      return `${day}/${month}/${year}`;
-    }
-
-    return fecha;
-  }
-
-  function esReposicionCajaChicaActual() {
-    const proveedor = proveedores.find((p) => String(p.id) === proveedorId);
-    const categoria = categorias.find((c) => String(c.id) === categoriaId);
-
-    const nombreProveedor = normalizarTexto(proveedor?.nombre_proveedor);
-    const nombreCategoria = normalizarTexto(categoria?.nombre_categoria);
-
-    return (
-      nombreProveedor.includes("caja chica") &&
-      nombreCategoria.includes("reposicion") &&
-      nombreCategoria.includes("caja chica")
-    );
-  }
 
   async function cargarCatalogos(id: string) {
     if (!id) {
@@ -137,7 +76,6 @@ export default function NuevaSolicitudPagoPage() {
       .from("catalogo_categoria_gastos")
       .select("id, nombre_categoria")
       .eq("estado", "activo")
-      .eq("condominio_id", Number(id))
       .order("nombre_categoria", { ascending: true });
 
     if (categoriasError) {
@@ -158,93 +96,6 @@ export default function NuevaSolicitudPagoPage() {
       setCuentaBanco(proveedor.cuenta_banco);
     } else {
       setCuentaBanco("");
-    }
-  }
-
-  async function verificarReposicionCajaChica() {
-    setMensajeCajaChica("");
-    setMontoPendienteCajaChica(0);
-    setCantidadGastosPendientes(0);
-
-    if (!proveedorId || !categoriaId || !condominio) return;
-
-    if (!esReposicionCajaChicaActual()) return;
-
-    await calcularMontoPendienteCajaChica();
-  }
-
-  async function calcularMontoPendienteCajaChica() {
-    try {
-      setCalculandoCajaChica(true);
-      setMensajeCajaChica("");
-
-      const { data, error } = await supabase
-        .from("caja_chica")
-        .select("id, fecha, concepto, detalle_gasto, monto, repuesto")
-        .ilike("condominio", `%${condominio}%`)
-        .or("repuesto.eq.false,repuesto.is.null")
-        .order("fecha", { ascending: true });
-
-      setCalculandoCajaChica(false);
-
-      if (error) {
-        setMensajeCajaChica(
-          "No se pudo calcular la reposición de caja chica: " + error.message
-        );
-        return;
-      }
-
-      const gastosPendientes = (data || []) as CajaChicaPendiente[];
-
-      const totalPendiente = gastosPendientes.reduce(
-        (sum, g) => sum + Number(g.monto || 0),
-        0
-      );
-
-      setMontoPendienteCajaChica(totalPendiente);
-      setCantidadGastosPendientes(gastosPendientes.length);
-
-      if (totalPendiente <= 0) {
-        setMensajeCajaChica(
-          "No hay gastos de caja chica pendientes de reposición para este condominio."
-        );
-        return;
-      }
-
-      setMonto(String(totalPendiente.toFixed(2)));
-      setItbis("0");
-
-      if (!metodoPago) {
-        setMetodoPago("Cheque");
-      }
-
-      if (!concepto.trim()) {
-        setConcepto("Reposición de caja chica");
-      }
-
-      const primerGasto = gastosPendientes[0];
-      const ultimoGasto = gastosPendientes[gastosPendientes.length - 1];
-
-      if (!detalle.trim()) {
-        setDetalle(
-          `Reposición de caja chica correspondiente a ${gastosPendientes.length} gasto(s) pendiente(s) de reposición. Período aproximado: ${formatoFecha(
-            primerGasto?.fecha
-          )} al ${formatoFecha(
-            ultimoGasto?.fecha
-          )}. Monto sugerido: RD$ ${dinero(totalPendiente)}.`
-        );
-      }
-
-      setMensajeCajaChica(
-        `Monto sugerido cargado desde caja chica: RD$ ${dinero(
-          totalPendiente
-        )}. Puede modificarlo si es necesario.`
-      );
-    } catch (error: any) {
-      setCalculandoCajaChica(false);
-      setMensajeCajaChica(
-        error.message || "Error calculando reposición de caja chica."
-      );
     }
   }
 
@@ -314,12 +165,6 @@ export default function NuevaSolicitudPagoPage() {
       const itbisNumero = Number(itbis || 0);
       const totalNumero = montoNumero + itbisNumero;
 
-      if (montoNumero <= 0) {
-        setGuardando(false);
-        alert("El monto debe ser mayor que cero.");
-        return;
-      }
-
       const numeroSolicitud = await obtenerNumeroSolicitud();
 
       let soporteUrl = "";
@@ -387,9 +232,6 @@ export default function NuevaSolicitudPagoPage() {
       setCuentaBanco("");
       setPrioridad("Normal");
       setSoporteArchivo(null);
-      setMontoPendienteCajaChica(0);
-      setCantidadGastosPendientes(0);
-      setMensajeCajaChica("");
 
       const inputFile = document.getElementById(
         "soporteSolicitudPago"
@@ -403,7 +245,6 @@ export default function NuevaSolicitudPagoPage() {
   }
 
   const totalCalculado = Number(monto || 0) + Number(itbis || 0);
-  const esReposicionCajaChica = esReposicionCajaChicaActual();
 
   return (
     <div className="space-y-6">
@@ -485,55 +326,7 @@ export default function NuevaSolicitudPagoPage() {
                 </option>
               ))}
             </select>
-
-            {categorias.length === 0 && (
-              <p className="text-xs text-orange-600 mt-1">
-                No hay categorías activas registradas para este condominio.
-              </p>
-            )}
           </div>
-
-          {esReposicionCajaChica && (
-            <div className="md:col-span-2 border rounded-xl p-4 bg-blue-50">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <div>
-                  <h3 className="font-black text-blue-900">
-                    Reposición de Caja Chica detectada
-                  </h3>
-
-                  <p className="text-sm text-blue-800 mt-1">
-                    El sistema calculó los gastos de caja chica pendientes de
-                    reposición. El monto fue colocado automáticamente, pero
-                    puede ser modificado.
-                  </p>
-
-                  {calculandoCajaChica && (
-                    <p className="text-sm text-blue-700 mt-2 font-semibold">
-                      Calculando monto pendiente...
-                    </p>
-                  )}
-
-                  {mensajeCajaChica && (
-                    <p className="text-sm text-blue-700 mt-2 font-semibold">
-                      {mensajeCajaChica}
-                    </p>
-                  )}
-                </div>
-
-                <div className="bg-white border rounded-lg p-3 min-w-[220px] text-center">
-                  <p className="text-xs text-slate-500 font-bold uppercase">
-                    Pendiente sugerido
-                  </p>
-                  <p className="text-xl font-black text-blue-800">
-                    RD$ {dinero(montoPendienteCajaChica)}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {cantidadGastosPendientes} gasto(s) pendiente(s)
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
 
           <div>
             <label className="block text-sm font-semibold mb-1">
@@ -575,13 +368,6 @@ export default function NuevaSolicitudPagoPage() {
               className="border rounded-lg px-3 py-2 w-full"
               placeholder="0.00"
             />
-
-            {esReposicionCajaChica && (
-              <p className="text-xs text-slate-500 mt-1">
-                Monto sugerido cargado desde caja chica. Puede cambiarlo si es
-                necesario.
-              </p>
-            )}
           </div>
 
           <div>

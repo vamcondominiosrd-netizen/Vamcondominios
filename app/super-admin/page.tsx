@@ -10,6 +10,7 @@ import {
   ArrowRight,
   RefreshCcw,
   UserPlus,
+  KeyRound,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -261,6 +262,50 @@ export default function SuperAdminPage() {
     cargarUsuarios();
   }
 
+  async function cambiarPasswordUsuario(usuario: UsuarioAdmin) {
+    const nuevaClave = prompt(
+      `Digite la nueva clave temporal para ${usuario.nombre}:`
+    );
+
+    if (!nuevaClave) return;
+
+    if (nuevaClave.length < 6) {
+      alert("La clave debe tener al menos 6 caracteres.");
+      return;
+    }
+
+    const confirmar = confirm(
+      `¿Desea cambiar la clave del usuario ${usuario.nombre}?`
+    );
+
+    if (!confirmar) return;
+
+    setGuardando(true);
+    setMensaje("");
+
+    const response = await fetch("/api/super-admin/cambiar-password", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: usuario.user_id,
+        password: nuevaClave,
+      }),
+    });
+
+    const result = await response.json();
+
+    setGuardando(false);
+
+    if (!response.ok || !result.ok) {
+      setMensaje(result.error || "No se pudo cambiar la clave.");
+      return;
+    }
+
+    alert("Clave actualizada correctamente.");
+  }
+
   async function cerrarSesion() {
     localStorage.removeItem("condominio_id");
     localStorage.removeItem("condominio_nombre");
@@ -306,7 +351,7 @@ export default function SuperAdminPage() {
 
               <p className="text-sm text-slate-500 mt-2">
                 Bienvenido, {superNombre}. Desde aquí puede crear condominios,
-                crear usuarios y asociarlos a cada condominio.
+                crear usuarios, cambiar claves y asociarlos a cada condominio.
               </p>
             </div>
 
@@ -686,13 +731,24 @@ export default function SuperAdminPage() {
                     </td>
 
                     <td className="px-4 py-3 text-center">
-                      <button
-                        type="button"
-                        onClick={() => cambiarEstadoUsuario(u)}
-                        className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-bold"
-                      >
-                        {u.estado === "Activo" ? "Desactivar" : "Activar"}
-                      </button>
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        <button
+                          type="button"
+                          onClick={() => cambiarPasswordUsuario(u)}
+                          className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1"
+                        >
+                          <KeyRound className="h-4 w-4" />
+                          Cambiar clave
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => cambiarEstadoUsuario(u)}
+                          className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-bold"
+                        >
+                          {u.estado === "Activo" ? "Desactivar" : "Activar"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
