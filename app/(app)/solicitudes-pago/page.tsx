@@ -217,6 +217,15 @@ export default function SolicitudesPagoPage() {
       return "rechazado";
     }
 
+    if (
+      valor === "cancelada" ||
+      valor === "cancelado" ||
+      valor === "anulada" ||
+      valor === "anulado"
+    ) {
+      return "cancelado";
+    }
+
     return valor || "sin_estado";
   }
 
@@ -228,6 +237,7 @@ export default function SolicitudesPagoPage() {
     if (normalizado === "aprobado_presidente") return "Aprobado presidente";
     if (normalizado === "gasto_generado") return "Gasto generado";
     if (normalizado === "rechazado") return estado || "Rechazado";
+    if (normalizado === "cancelado") return estado || "Cancelado";
 
     return estado || "Sin estado";
   }
@@ -255,6 +265,10 @@ export default function SolicitudesPagoPage() {
       return "bg-red-100 text-red-800";
     }
 
+    if (normalizado === "cancelado") {
+      return "bg-slate-200 text-slate-700";
+    }
+
     return "bg-slate-100 text-slate-700";
   }
 
@@ -262,6 +276,51 @@ export default function SolicitudesPagoPage() {
     return Number(valor || 0).toLocaleString("es-DO", {
       minimumFractionDigits: 2,
     });
+  }
+
+  function puedeEditarOBorrar(s: SolicitudPago) {
+    const estadoNormalizado = normalizarEstado(s.estado);
+
+    return (
+      !s.gasto_generado_id &&
+      (estadoNormalizado === "pendiente_tesorero" ||
+        estadoNormalizado === "sin_estado" ||
+        !s.estado)
+    );
+  }
+
+  async function borrarSolicitud(s: SolicitudPago) {
+    if (!condominioId) {
+      alert("No hay condominio activo.");
+      return;
+    }
+
+    if (!puedeEditarOBorrar(s)) {
+      alert(
+        "Esta solicitud no puede borrarse porque ya fue aprobada o procesada."
+      );
+      return;
+    }
+
+    const confirmar = confirm(
+      `¿Está seguro que desea borrar la solicitud #${s.id}? Esta acción no se puede deshacer.`
+    );
+
+    if (!confirmar) return;
+
+    const { error } = await supabase
+      .from("solicitudes_pago")
+      .delete()
+      .eq("id", s.id)
+      .eq("condominio_id", Number(condominioId));
+
+    if (error) {
+      alert("Error borrando solicitud: " + error.message);
+      return;
+    }
+
+    alert("Solicitud borrada correctamente.");
+    cargarTodo(condominioId);
   }
 
   async function generarGasto(s: SolicitudPago) {
@@ -636,6 +695,7 @@ export default function SolicitudesPagoPage() {
               <option value="pendiente_gasto">Pendiente generar gasto</option>
               <option value="gasto_generado">Gasto generado</option>
               <option value="rechazado">Rechazado</option>
+              <option value="cancelado">Cancelado</option>
             </select>
           </div>
 
@@ -871,6 +931,25 @@ export default function SolicitudesPagoPage() {
                         >
                           Reporte para firma
                         </Link>
+
+                        {puedeEditarOBorrar(s) && (
+                          <>
+                            <Link
+                              href={`/solicitudes-pago/editar/${s.id}`}
+                              className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                            >
+                              Editar
+                            </Link>
+
+                            <button
+                              type="button"
+                              onClick={() => borrarSolicitud(s)}
+                              className="bg-red-700 hover:bg-red-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                            >
+                              Borrar
+                            </button>
+                          </>
+                        )}
 
                         {s.gasto_generado_id ? (
                           <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">

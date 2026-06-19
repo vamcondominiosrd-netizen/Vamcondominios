@@ -1,16 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
 import * as XLSX from "xlsx";
-
-type Banco = {
-  id: number;
-  nombre_banco: string;
-  codigo_banco: string | null;
-  activo: boolean | null;
-};
 
 type Propietario = {
   id: number;
@@ -22,13 +15,7 @@ type Propietario = {
   correo: string | null;
   direccion: string | null;
   cuenta_banco: string | null;
-  banco_id: number | null;
-  tipo_cuenta: string | null;
-  titular_cuenta: string | null;
   estado: string;
-  catalogo_bancos?: {
-    nombre_banco: string | null;
-  } | null;
 };
 
 export default function PropietariosPage() {
@@ -39,8 +26,6 @@ export default function PropietariosPage() {
   const [clientId, setClientId] = useState<number | null>(null);
 
   const [propietarios, setPropietarios] = useState<Propietario[]>([]);
-  const [bancos, setBancos] = useState<Banco[]>([]);
-
   const [buscar, setBuscar] = useState("");
   const [loading, setLoading] = useState(false);
   const [importando, setImportando] = useState(false);
@@ -53,9 +38,6 @@ export default function PropietariosPage() {
   const [correo, setCorreo] = useState("");
   const [direccion, setDireccion] = useState("");
   const [cuentaBanco, setCuentaBanco] = useState("");
-  const [bancoId, setBancoId] = useState("");
-  const [tipoCuenta, setTipoCuenta] = useState("");
-  const [titularCuenta, setTitularCuenta] = useState("");
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id");
@@ -70,7 +52,6 @@ export default function PropietariosPage() {
     setCondominioNombre(nombre);
 
     cargarCondominio(id);
-    cargarBancos();
     cargarPropietarios(id);
   }, [router]);
 
@@ -84,45 +65,14 @@ export default function PropietariosPage() {
     setClientId(data?.client_id ?? null);
   }
 
-  async function cargarBancos() {
-    const { data, error } = await supabase
-      .from("catalogo_bancos")
-      .select("id, nombre_banco, codigo_banco, activo")
-      .eq("activo", true)
-      .order("nombre_banco", { ascending: true });
-
-    if (error) {
-      alert("Error cargando bancos: " + error.message);
-      setBancos([]);
-      return;
-    }
-
-    setBancos((data as Banco[]) || []);
-  }
-
   async function cargarPropietarios(id: string) {
     setLoading(true);
 
     const { data, error } = await supabase
       .from("propietarios_apartamentos")
-      .select(`
-        id,
-        condominio_id,
-        no_apartamento,
-        nombre_propietario,
-        cedula,
-        telefono,
-        correo,
-        direccion,
-        cuenta_banco,
-        banco_id,
-        tipo_cuenta,
-        titular_cuenta,
-        estado,
-        catalogo_bancos (
-          nombre_banco
-        )
-      `)
+      .select(
+        "id, condominio_id, no_apartamento, nombre_propietario, cedula, telefono, correo, direccion, cuenta_banco, estado"
+      )
       .eq("condominio_id", Number(id))
       .order("no_apartamento", { ascending: true });
 
@@ -134,7 +84,7 @@ export default function PropietariosPage() {
       return;
     }
 
-    setPropietarios((data as Propietario[]) || []);
+    setPropietarios(data || []);
   }
 
   async function actualizarUnidadesDesdePropietarios(id: string) {
@@ -159,9 +109,6 @@ export default function PropietariosPage() {
     setCorreo("");
     setDireccion("");
     setCuentaBanco("");
-    setBancoId("");
-    setTipoCuenta("");
-    setTitularCuenta("");
   }
 
   function editarPropietario(p: Propietario) {
@@ -173,25 +120,7 @@ export default function PropietariosPage() {
     setCorreo(p.correo || "");
     setDireccion(p.direccion || "");
     setCuentaBanco(p.cuenta_banco || "");
-    setBancoId(p.banco_id ? String(p.banco_id) : "");
-    setTipoCuenta(p.tipo_cuenta || "");
-    setTitularCuenta(p.titular_cuenta || "");
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function buscarBancoPorNombreONcodigo(valor: string) {
-    const texto = String(valor || "").trim().toLowerCase();
-
-    if (!texto) return null;
-
-    return (
-      bancos.find((b) => {
-        const nombre = String(b.nombre_banco || "").trim().toLowerCase();
-        const codigo = String(b.codigo_banco || "").trim().toLowerCase();
-
-        return nombre === texto || codigo === texto;
-      }) || null
-    );
   }
 
   async function guardarPropietario(e: React.FormEvent) {
@@ -212,14 +141,11 @@ export default function PropietariosPage() {
       condominio: condominioNombre,
       no_apartamento: noApartamento.trim().toUpperCase(),
       nombre_propietario: nombrePropietario.trim(),
-      cedula: cedula.trim() || null,
-      telefono: telefono.trim() || null,
-      correo: correo.trim() || null,
-      direccion: direccion.trim() || null,
-      cuenta_banco: cuentaBanco.trim() || null,
-      banco_id: bancoId ? Number(bancoId) : null,
-      tipo_cuenta: tipoCuenta || null,
-      titular_cuenta: titularCuenta.trim() || null,
+      cedula,
+      telefono,
+      correo,
+      direccion,
+      cuenta_banco: cuentaBanco,
       estado: "activo",
     };
 
@@ -332,19 +258,6 @@ export default function PropietariosPage() {
 
           if (!apartamento || !propietario) return null;
 
-          const bancoTexto =
-            fila["Banco"] ||
-            fila["BANCO"] ||
-            fila["Nombre Banco"] ||
-            fila["Nombre del Banco"] ||
-            fila["codigo_banco"] ||
-            fila["Código Banco"] ||
-            "";
-
-          const bancoEncontrado = buscarBancoPorNombreONcodigo(
-            String(bancoTexto)
-          );
-
           const registro: any = {
             condominio_id: Number(condominioId),
             condominio: condominioNombre,
@@ -352,7 +265,7 @@ export default function PropietariosPage() {
             nombre_propietario: String(propietario).trim(),
             cedula: String(
               fila["Cedula"] || fila["Cédula"] || fila["CEDULA"] || ""
-            ).trim(),
+            ),
             telefono: String(
               fila["Telefono"] ||
                 fila["Teléfono"] ||
@@ -361,7 +274,7 @@ export default function PropietariosPage() {
                 fila["WhatsApp"] ||
                 fila["Whatsapp"] ||
                 ""
-            ).trim(),
+            ),
             correo: String(
               fila["Correo"] ||
                 fila["CORREO"] ||
@@ -370,32 +283,17 @@ export default function PropietariosPage() {
                 fila["E-mail"] ||
                 fila["Mail"] ||
                 ""
-            ).trim(),
+            ),
             cuenta_banco: String(
               fila["Cuenta Banco"] ||
-                fila["No. Cuenta"] ||
-                fila["No Cuenta"] ||
                 fila["Cuenta"] ||
                 fila["CUENTA BANCO"] ||
                 fila["Cuenta Bancaria"] ||
                 ""
-            ).trim(),
-            banco_id: bancoEncontrado?.id || null,
-            tipo_cuenta: String(
-              fila["Tipo Cuenta"] ||
-                fila["Tipo de Cuenta"] ||
-                fila["TIPO CUENTA"] ||
-                ""
-            ).trim() || null,
-            titular_cuenta: String(
-              fila["Titular Cuenta"] ||
-                fila["Titular de la Cuenta"] ||
-                fila["TITULAR CUENTA"] ||
-                ""
-            ).trim() || null,
+            ),
             direccion: String(
               fila["Direccion"] || fila["Dirección"] || fila["DIRECCION"] || ""
-            ).trim(),
+            ),
             estado: "activo",
           };
 
@@ -443,10 +341,7 @@ export default function PropietariosPage() {
         Cedula: "000-0000000-0",
         Telefono: "809-000-0000",
         Correo: "correo@ejemplo.com",
-        Banco: "Banco Popular Dominicano",
-        "Tipo Cuenta": "Ahorro",
-        "Cuenta Banco": "000000000",
-        "Titular Cuenta": "Nombre del titular",
+        "Cuenta Banco": "",
         Direccion: "",
       },
     ];
@@ -469,10 +364,7 @@ export default function PropietariosPage() {
       Cedula: p.cedula || "",
       Telefono: p.telefono || "",
       Correo: p.correo || "",
-      Banco: p.catalogo_bancos?.nombre_banco || "",
-      "Tipo Cuenta": p.tipo_cuenta || "",
       "Cuenta Banco": p.cuenta_banco || "",
-      "Titular Cuenta": p.titular_cuenta || "",
       Direccion: p.direccion || "",
       Estado: p.estado,
     }));
@@ -487,19 +379,15 @@ export default function PropietariosPage() {
     );
   }
 
-  const propietariosFiltrados = useMemo(() => {
-    return propietarios.filter((p) => {
-      const texto = `${p.no_apartamento} ${p.nombre_propietario} ${
-        p.cedula || ""
-      } ${p.telefono || ""} ${p.correo || ""} ${
-        p.catalogo_bancos?.nombre_banco || ""
-      } ${p.tipo_cuenta || ""} ${p.cuenta_banco || ""} ${
-        p.titular_cuenta || ""
-      }`.toLowerCase();
+  const propietariosFiltrados = propietarios.filter((p) => {
+    const texto = `${p.no_apartamento} ${p.nombre_propietario} ${
+      p.cedula || ""
+    } ${p.telefono || ""} ${p.correo || ""} ${
+      p.cuenta_banco || ""
+    }`.toLowerCase();
 
-      return texto.includes(buscar.toLowerCase());
-    });
-  }, [propietarios, buscar]);
+    return texto.includes(buscar.toLowerCase());
+  });
 
   const totalActivos = propietariosFiltrados.filter(
     (p) => p.estado === "activo"
@@ -517,7 +405,6 @@ export default function PropietariosPage() {
 
         <div className="flex flex-wrap gap-2">
           <button
-            type="button"
             onClick={descargarPlantilla}
             className="bg-slate-700 text-white px-4 py-2 rounded-lg"
           >
@@ -536,7 +423,6 @@ export default function PropietariosPage() {
           </label>
 
           <button
-            type="button"
             onClick={exportarExcel}
             className="bg-green-700 text-white px-4 py-2 rounded-lg"
           >
@@ -606,45 +492,12 @@ export default function PropietariosPage() {
             placeholder="Correo"
           />
 
-          <select
-            value={bancoId}
-            onChange={(e) => setBancoId(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full bg-white"
-          >
-            <option value="">Seleccione banco</option>
-            {bancos.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.nombre_banco}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={tipoCuenta}
-            onChange={(e) => setTipoCuenta(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full bg-white"
-          >
-            <option value="">Tipo de cuenta</option>
-            <option value="Ahorro">Ahorro</option>
-            <option value="Corriente">Corriente</option>
-            <option value="Nómina">Nómina</option>
-            <option value="Otro">Otro</option>
-          </select>
-
           <input
             type="text"
             value={cuentaBanco}
             onChange={(e) => setCuentaBanco(e.target.value)}
             className="border rounded-lg px-3 py-2 w-full"
-            placeholder="No. cuenta bancaria"
-          />
-
-          <input
-            type="text"
-            value={titularCuenta}
-            onChange={(e) => setTitularCuenta(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full md:col-span-2"
-            placeholder="Titular de la cuenta"
+            placeholder="Cuenta banco"
           />
 
           <textarea
@@ -706,10 +559,7 @@ export default function PropietariosPage() {
                   <th className="p-2 border">Cédula</th>
                   <th className="p-2 border">Teléfono</th>
                   <th className="p-2 border">Correo</th>
-                  <th className="p-2 border">Banco</th>
-                  <th className="p-2 border">Tipo cuenta</th>
                   <th className="p-2 border">Cuenta Banco</th>
-                  <th className="p-2 border">Titular</th>
                   <th className="p-2 border">Dirección</th>
                   <th className="p-2 border">Estado</th>
                   <th className="p-2 border">Acciones</th>
@@ -726,12 +576,7 @@ export default function PropietariosPage() {
                     <td className="p-2 border">{p.cedula}</td>
                     <td className="p-2 border">{p.telefono}</td>
                     <td className="p-2 border">{p.correo}</td>
-                    <td className="p-2 border">
-                      {p.catalogo_bancos?.nombre_banco || "-"}
-                    </td>
-                    <td className="p-2 border">{p.tipo_cuenta || "-"}</td>
-                    <td className="p-2 border">{p.cuenta_banco || "-"}</td>
-                    <td className="p-2 border">{p.titular_cuenta || "-"}</td>
+                    <td className="p-2 border">{p.cuenta_banco}</td>
                     <td className="p-2 border">{p.direccion}</td>
                     <td className="p-2 border text-green-700 font-semibold">
                       {p.estado}
@@ -739,7 +584,6 @@ export default function PropietariosPage() {
                     <td className="p-2 border">
                       <div className="flex gap-2">
                         <button
-                          type="button"
                           onClick={() => editarPropietario(p)}
                           className="bg-blue-600 text-white px-3 py-1 rounded"
                         >
@@ -747,7 +591,6 @@ export default function PropietariosPage() {
                         </button>
 
                         <button
-                          type="button"
                           onClick={() => borrarPropietario(p)}
                           className="bg-red-600 text-white px-3 py-1 rounded"
                         >
@@ -760,7 +603,7 @@ export default function PropietariosPage() {
 
                 {propietariosFiltrados.length === 0 && (
                   <tr>
-                    <td className="p-4 border text-center" colSpan={12}>
+                    <td className="p-4 border text-center" colSpan={9}>
                       No hay propietarios registrados.
                     </td>
                   </tr>

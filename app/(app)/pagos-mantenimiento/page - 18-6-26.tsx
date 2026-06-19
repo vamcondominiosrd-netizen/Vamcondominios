@@ -8,10 +8,6 @@ import { useRouter } from "next/navigation";
 type Unidad = {
   id: number;
   codigo: string;
-  propietario_nombre: string | null;
-  propietario_cedula: string | null;
-  propietario_telefono: string | null;
-  cuota_mensual_actual: number | null;
 };
 
 type CuentaBancaria = {
@@ -38,7 +34,6 @@ type Pago = {
   comprobante_url: string | null;
   unidades: {
     codigo: string;
-    propietario_nombre?: string | null;
   } | null;
 };
 
@@ -87,9 +82,7 @@ export default function PagosMantenimientoPage() {
   async function cargarUnidades(id: string) {
     const { data, error } = await supabase
       .from("unidades")
-      .select(
-        "id, codigo, propietario_nombre, propietario_cedula, propietario_telefono, cuota_mensual_actual"
-      )
+      .select("id, codigo")
       .eq("condominio_id", Number(id))
       .eq("activa", true)
       .order("codigo", {
@@ -101,7 +94,7 @@ export default function PagosMantenimientoPage() {
       return;
     }
 
-    setUnidades((data as Unidad[]) || []);
+    setUnidades(data || []);
   }
 
   async function cargarCuentas(id: string) {
@@ -146,8 +139,7 @@ export default function PagosMantenimientoPage() {
         descripcion,
         comprobante_url,
         unidades (
-          codigo,
-          propietario_nombre
+          codigo
         )
       `)
       .eq("condominio_id", Number(id))
@@ -171,27 +163,6 @@ export default function PagosMantenimientoPage() {
   const cuentaAsignada = useMemo(() => {
     return cuentas.find((c) => c.fondo_tipo === tipoFondo) || null;
   }, [cuentas, tipoFondo]);
-
-  const unidadSeleccionada = useMemo(() => {
-    return unidades.find((u) => String(u.id) === unidadId) || null;
-  }, [unidades, unidadId]);
-
-  function seleccionarUnidad(idUnidad: string) {
-    setUnidadId(idUnidad);
-
-    const unidad = unidades.find((u) => String(u.id) === idUnidad);
-
-    if (!unidad) {
-      setMonto("");
-      return;
-    }
-
-    const cuota = Number(unidad.cuota_mensual_actual || 0);
-
-    if (cuota > 0) {
-      setMonto(String(cuota));
-    }
-  }
 
   async function subirComprobante(unidadIdPago: number) {
     if (!comprobante || !condominioId) {
@@ -453,7 +424,10 @@ export default function PagosMantenimientoPage() {
     });
   }
 
-  const totalPagado = pagos.reduce((sum, p) => sum + Number(p.monto || 0), 0);
+  const totalPagado = pagos.reduce(
+    (sum, p) => sum + Number(p.monto || 0),
+    0
+  );
 
   return (
     <div className="space-y-6">
@@ -463,8 +437,7 @@ export default function PagosMantenimientoPage() {
         </h1>
 
         <p className="text-slate-500 mt-2">
-          Registro de pagos de mantenimiento, aplicación a cargos y
-          actualización automática del banco.
+          Registro de pagos de mantenimiento, aplicación a cargos y actualización automática del banco.
         </p>
 
         <p className="text-sm text-blue-700 font-bold mt-3">
@@ -485,79 +458,29 @@ export default function PagosMantenimientoPage() {
           onSubmit={guardarPago}
           className="grid grid-cols-1 md:grid-cols-2 gap-4"
         >
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Unidad / Propietario
-            </label>
+          <select
+            value={unidadId}
+            onChange={(e) => setUnidadId(e.target.value)}
+            className="w-full border rounded-xl px-4 py-3"
+          >
+            <option value="">Seleccione unidad</option>
 
-            <select
-              value={unidadId}
-              onChange={(e) => seleccionarUnidad(e.target.value)}
-              className="w-full border rounded-xl px-4 py-3 bg-white"
-            >
-              <option value="">Seleccione unidad</option>
+            {unidades.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.codigo}
+              </option>
+            ))}
+          </select>
 
-              {unidades.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.codigo} - {u.propietario_nombre || "Sin propietario"}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Fondo
-            </label>
-
-            <select
-              value={tipoFondo}
-              onChange={(e) => setTipoFondo(e.target.value)}
-              className="w-full border rounded-xl px-4 py-3 bg-white"
-            >
-              <option value="ORDINARIO">Fondo Ordinario</option>
-              <option value="EXTRAORDINARIO">Fondo Extraordinario</option>
-              <option value="RESERVA">Fondo Reserva</option>
-            </select>
-          </div>
-
-          {unidadSeleccionada && (
-            <div className="md:col-span-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
-              <p className="text-xs text-blue-700 font-bold mb-1">
-                Información de la unidad seleccionada
-              </p>
-
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
-                <div>
-                  <span className="text-slate-500">Unidad:</span>
-                  <p className="font-black text-slate-800">
-                    {unidadSeleccionada.codigo}
-                  </p>
-                </div>
-
-                <div>
-                  <span className="text-slate-500">Propietario:</span>
-                  <p className="font-black text-slate-800">
-                    {unidadSeleccionada.propietario_nombre || "Sin propietario"}
-                  </p>
-                </div>
-
-                <div>
-                  <span className="text-slate-500">Teléfono:</span>
-                  <p className="font-black text-slate-800">
-                    {unidadSeleccionada.propietario_telefono || "-"}
-                  </p>
-                </div>
-
-                <div>
-                  <span className="text-slate-500">Cuota mensual:</span>
-                  <p className="font-black text-green-700">
-                    RD$ {dinero(unidadSeleccionada.cuota_mensual_actual)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
+          <select
+            value={tipoFondo}
+            onChange={(e) => setTipoFondo(e.target.value)}
+            className="w-full border rounded-xl px-4 py-3"
+          >
+            <option value="ORDINARIO">Fondo Ordinario</option>
+            <option value="EXTRAORDINARIO">Fondo Extraordinario</option>
+            <option value="RESERVA">Fondo Reserva</option>
+          </select>
 
           <div className="md:col-span-2 bg-slate-50 border rounded-xl px-4 py-3">
             <p className="text-xs text-slate-500 mb-1">
@@ -581,65 +504,35 @@ export default function PagosMantenimientoPage() {
             )}
           </div>
 
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Fecha pago
-            </label>
+          <input
+            type="date"
+            value={fechaPago}
+            onChange={(e) => setFechaPago(e.target.value)}
+            className="w-full border rounded-xl px-4 py-3"
+          />
 
-            <input
-              type="date"
-              value={fechaPago}
-              onChange={(e) => setFechaPago(e.target.value)}
-              className="w-full border rounded-xl px-4 py-3"
-            />
-          </div>
+          <input
+            type="number"
+            step="0.01"
+            value={monto}
+            onChange={(e) => setMonto(e.target.value)}
+            placeholder="Monto"
+            className="w-full border rounded-xl px-4 py-3"
+          />
 
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Monto
-            </label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={monto}
-              onChange={(e) => setMonto(e.target.value)}
-              placeholder="Monto"
-              className="w-full border rounded-xl px-4 py-3"
-            />
-
-            {unidadSeleccionada?.cuota_mensual_actual && (
-              <p className="text-xs text-slate-500 mt-1">
-                Monto sugerido por cuota mensual: RD${" "}
-                {dinero(unidadSeleccionada.cuota_mensual_actual)}. Puede
-                modificarlo si el pago es parcial, adicional o adelantado.
-              </p>
-            )}
-          </div>
+          <select
+            value={metodoPago}
+            onChange={(e) => setMetodoPago(e.target.value)}
+            className="w-full border rounded-xl px-4 py-3"
+          >
+            <option value="">Método pago</option>
+            <option value="Transferencia">Transferencia</option>
+            <option value="Depósito">Depósito</option>
+            <option value="Efectivo">Efectivo</option>
+            <option value="Cheque">Cheque</option>
+          </select>
 
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Método pago
-            </label>
-
-            <select
-              value={metodoPago}
-              onChange={(e) => setMetodoPago(e.target.value)}
-              className="w-full border rounded-xl px-4 py-3 bg-white"
-            >
-              <option value="">Método pago</option>
-              <option value="Transferencia">Transferencia</option>
-              <option value="Depósito">Depósito</option>
-              <option value="Efectivo">Efectivo</option>
-              <option value="Cheque">Cheque</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Referencia
-            </label>
-
             <input
               type="text"
               value={referencia}
@@ -650,10 +543,6 @@ export default function PagosMantenimientoPage() {
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Comprobante
-            </label>
-
             <input
               id="comprobante"
               type="file"
@@ -696,7 +585,6 @@ export default function PagosMantenimientoPage() {
               <thead className="bg-slate-50">
                 <tr>
                   <th className="text-left px-4 py-3">Unidad</th>
-                  <th className="text-left px-4 py-3">Propietario</th>
                   <th className="text-left px-4 py-3">Fecha</th>
                   <th className="text-right px-4 py-3">Monto</th>
                   <th className="text-left px-4 py-3">Fondo</th>
@@ -713,10 +601,6 @@ export default function PagosMantenimientoPage() {
                   <tr key={p.id} className="border-t hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium">
                       {p.unidades?.codigo || "N/A"}
-                    </td>
-
-                    <td className="px-4 py-3">
-                      {p.unidades?.propietario_nombre || "-"}
                     </td>
 
                     <td className="px-4 py-3">{p.fecha_pago}</td>
@@ -762,7 +646,7 @@ export default function PagosMantenimientoPage() {
                 {!loading && pagos.length === 0 && (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={9}
                       className="px-4 py-8 text-center text-slate-500"
                     >
                       No hay pagos registrados.
