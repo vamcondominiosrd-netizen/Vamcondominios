@@ -1,23 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
 
 type PagoRow = {
   id: number;
-  condominio: string | null;
-  no_apartamento: string | null;
+  condominio_id: number;
+  unidad_id: number | null;
+  monto: number | null;
   fecha_pago: string | null;
-  mes_pagado: string | null;
-  monto_pagado: number | null;
+  referencia: string | null;
+  metodo: string | null;
   metodo_pago: string | null;
-  no_referencia: string | null;
+  origen: string | null;
+  tipo_fondo: string | null;
   descripcion: string | null;
-  estado: string | null;
-  created_at: string | null;
   comprobante_url: string | null;
+  created_at: string | null;
+  unidades?: {
+    codigo: string | null;
+  } | null;
 };
 
 function obtenerMesActual() {
@@ -35,10 +39,31 @@ function formatearMoneda(valor: number) {
   }).format(Number(valor || 0));
 }
 
+function fechaCorta(fecha: string | null) {
+  if (!fecha) return "-";
+
+  const d = new Date(`${fecha}T00:00:00`);
+
+  if (Number.isNaN(d.getTime())) return fecha;
+
+  return d.toLocaleDateString("es-DO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function obtenerPeriodoDesdeFecha(fecha: string | null) {
+  if (!fecha || fecha.length < 7) return "";
+  return fecha.slice(0, 7);
+}
+
 export default function MobileAdminPagosPage() {
   const router = useRouter();
 
+  const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
+
   const [pagos, setPagos] = useState<PagoRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -47,37 +72,65 @@ export default function MobileAdminPagosPage() {
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
-    const nombre = localStorage.getItem("condominio_nombre") || "";
+    const nombre =
+      localStorage.getItem("condominio_nombre") ||
+      localStorage.getItem("condominio") ||
+      "";
 
-    if (!id || !nombre) {
+    if (!id) {
       router.push("/mobile");
       return;
     }
 
-    setCondominioNombre(nombre);
-    cargarPagos(nombre, obtenerMesActual());
+    setCondominioId(id);
+    setCondominioNombre(nombre || `Condominio ID ${id}`);
+    cargarPagos(id, obtenerMesActual());
   }, [router]);
 
   useEffect(() => {
-    if (condominioNombre) {
-      cargarPagos(condominioNombre, mesFiltro);
+    if (condominioId) {
+      cargarPagos(condominioId, mesFiltro);
     }
-  }, [mesFiltro, condominioNombre]);
+  }, [mesFiltro, condominioId]);
 
-  async function cargarPagos(nombreCondominio: string, mes: string) {
+  async function cargarPagos(idCondominio: string, mes: string) {
     setLoading(true);
 
     let query = supabase
-      .from("pagos_mantenimiento")
+      .from("pagos")
       .select(
-        "id, condominio, no_apartamento, fecha_pago, mes_pagado, monto_pagado, metodo_pago, no_referencia, descripcion, estado, created_at, comprobante_url"
+        `
+        id,
+        condominio_id,
+        unidad_id,
+        monto,
+        fecha_pago,
+        referencia,
+        metodo,
+        metodo_pago,
+        origen,
+        tipo_fondo,
+        descripcion,
+        comprobante_url,
+        created_at,
+        unidades (
+          codigo
+        )
+      `
       )
-      .eq("condominio", nombreCondominio)
+      .eq("condominio_id", Number(idCondominio))
       .order("fecha_pago", { ascending: false })
       .order("id", { ascending: false });
 
     if (mes) {
-      query = query.eq("mes_pagado", mes);
+      const desde = `${mes}-01`;
+      const [anio, mesNumero] = mes.split("-").map(Number);
+      const hastaDate = new Date(anio, mesNumero, 0);
+      const hasta = `${anio}-${String(mesNumero).padStart(2, "0")}-${String(
+        hastaDate.getDate()
+      ).padStart(2, "0")}`;
+
+      query = query.gte("fecha_pago", desde).lte("fecha_pago", hasta);
     }
 
     const { data, error } = await query;
@@ -86,6 +139,7 @@ export default function MobileAdminPagosPage() {
 
     if (error) {
       alert("Error cargando pagos: " + error.message);
+      setPagos([]);
       return;
     }
 
@@ -99,38 +153,41 @@ export default function MobileAdminPagosPage() {
     localStorage.removeItem("usuario_nombre");
     localStorage.removeItem("usuario_rol");
     localStorage.removeItem("usuario_admin_id");
+    localStorage.removeItem("super_admin_id");
 
     router.push("/mobile");
   }
 
-  const pagosFiltrados = pagos.filter((p) => {
-    const texto = `${p.condominio || ""} ${p.no_apartamento || ""} ${
-      p.fecha_pago || ""
-    } ${p.mes_pagado || ""} ${p.monto_pagado || ""} ${
-      p.metodo_pago || ""
-    } ${p.no_referencia || ""} ${p.descripcion || ""} ${
-      p.estado || ""
-    }`
-      .toLowerCase()
-      .trim();
+  const pagosFiltrados = useMemo(() => {
+    return pagos.filter((p) => {
+      const apartamento = p.unidades?.codigo || "";
 
-    return texto.includes(busqueda.toLowerCase().trim());
-  });
+      const texto = `${apartamento} ${p.fecha_pago || ""} ${p.monto || ""} ${
+        p.referencia || ""
+      } ${p.metodo_pago || ""} ${p.metodo || ""} ${p.origen || ""} ${
+        p.tipo_fondo || ""
+      } ${p.descripcion || ""} ${obtenerPeriodoDesdeFecha(p.fecha_pago)}`
+        .toLowerCase()
+        .trim();
+
+      return texto.includes(busqueda.toLowerCase().trim());
+    });
+  }, [pagos, busqueda]);
 
   const totalPagos = pagosFiltrados.length;
 
   const montoTotal = pagosFiltrados.reduce(
-    (total, item) => total + Number(item.monto_pagado || 0),
+    (total, item) => total + Number(item.monto || 0),
     0
   );
 
-  const pagosConfirmados = pagosFiltrados.filter((p) => {
-    const estado = String(p.estado || "").toLowerCase();
-    return (
-      estado.includes("confirm") ||
-      estado.includes("pagado") ||
-      estado.includes("registrado")
-    );
+  const pagosManual = pagosFiltrados.filter(
+    (p) => String(p.origen || p.metodo || "").toUpperCase() === "MANUAL"
+  ).length;
+
+  const pagosBanco = pagosFiltrados.filter((p) => {
+    const origen = String(p.origen || p.metodo || "").toUpperCase();
+    return origen.includes("BANCO") || origen.includes("IMPORT");
   }).length;
 
   return (
@@ -147,7 +204,7 @@ export default function MobileAdminPagosPage() {
         </p>
 
         <p className="text-sm opacity-90 mt-2">
-          Consulta móvil de pagos de mantenimiento.
+          Consulta móvil de pagos registrados en la tabla nueva de pagos.
         </p>
       </section>
 
@@ -159,24 +216,47 @@ export default function MobileAdminPagosPage() {
           </div>
 
           <div className="bg-white rounded-2xl border shadow-sm p-4">
-            <p className="text-xs text-slate-500">Confirmados</p>
+            <p className="text-xs text-slate-500">Manual</p>
             <h2 className="text-2xl font-black text-green-700">
-              {pagosConfirmados}
+              {pagosManual}
             </h2>
           </div>
 
           <div className="bg-white rounded-2xl border shadow-sm p-4">
-            <p className="text-xs text-slate-500">Monto</p>
-            <h2 className="text-sm font-black text-blue-700">
-              {formatearMoneda(montoTotal)}
+            <p className="text-xs text-slate-500">Banco</p>
+            <h2 className="text-2xl font-black text-purple-700">
+              {pagosBanco}
             </h2>
           </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <p className="text-xs text-slate-500">Monto total visible</p>
+          <h2 className="text-2xl font-black text-blue-700 mt-1">
+            {formatearMoneda(montoTotal)}
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+         <Link
+  href="/mobile/admin/pagos/nuevo"
+  className="bg-green-700 text-white rounded-2xl p-4 shadow-sm text-center font-bold"
+>
+  Registrar pago
+</Link>
+
+          <Link
+            href="/mobile/admin/banco"
+            className="bg-slate-900 text-white rounded-2xl p-4 shadow-sm text-center font-bold"
+          >
+            Banco
+          </Link>
         </div>
 
         <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
           <div>
             <label className="block text-sm font-semibold mb-1">
-              Mes pagado
+              Mes del pago
             </label>
 
             <input
@@ -193,13 +273,13 @@ export default function MobileAdminPagosPage() {
             <input
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Apartamento, referencia, descripción..."
+              placeholder="Apartamento, referencia, método, descripción..."
               className="w-full border rounded-xl px-4 py-3"
             />
           </div>
 
           <button
-            onClick={() => cargarPagos(condominioNombre, mesFiltro)}
+            onClick={() => cargarPagos(condominioId, mesFiltro)}
             className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold"
           >
             Actualizar
@@ -213,6 +293,8 @@ export default function MobileAdminPagosPage() {
         ) : (
           <div className="space-y-3">
             {pagosFiltrados.map((pago) => {
+              const apartamento = pago.unidades?.codigo || "Sin unidad";
+
               return (
                 <div
                   key={pago.id}
@@ -222,14 +304,14 @@ export default function MobileAdminPagosPage() {
                     <div>
                       <p className="text-xs text-slate-500">Apartamento</p>
                       <h2 className="text-xl font-black text-slate-900">
-                        {pago.no_apartamento || "-"}
+                        {apartamento}
                       </h2>
                     </div>
 
                     <div className="text-right">
                       <p className="text-xs text-slate-500">Monto</p>
                       <p className="font-black text-blue-700">
-                        {formatearMoneda(Number(pago.monto_pagado || 0))}
+                        {formatearMoneda(Number(pago.monto || 0))}
                       </p>
                     </div>
                   </div>
@@ -237,51 +319,75 @@ export default function MobileAdminPagosPage() {
                   <div className="grid grid-cols-2 gap-3 mt-3 text-sm">
                     <div>
                       <p className="text-xs text-slate-500">Fecha pago</p>
-                      <p className="font-bold">{pago.fecha_pago || "-"}</p>
+                      <p className="font-bold">{fechaCorta(pago.fecha_pago)}</p>
                     </div>
 
                     <div>
-                      <p className="text-xs text-slate-500">Mes pagado</p>
-                      <p className="font-bold">{pago.mes_pagado || "-"}</p>
+                      <p className="text-xs text-slate-500">Periodo</p>
+                      <p className="font-bold">
+                        {obtenerPeriodoDesdeFecha(pago.fecha_pago) || "-"}
+                      </p>
                     </div>
 
                     <div>
-                      <p className="text-xs text-slate-500">Método</p>
-                      <p className="font-bold">{pago.metodo_pago || "-"}</p>
+                      <p className="text-xs text-slate-500">Método pago</p>
+                      <p className="font-bold">
+                        {pago.metodo_pago || pago.metodo || "-"}
+                      </p>
                     </div>
 
                     <div>
-                      <p className="text-xs text-slate-500">Referencia</p>
-                      <p className="font-bold">{pago.no_referencia || "-"}</p>
+                      <p className="text-xs text-slate-500">Fondo</p>
+                      <p className="font-bold">{pago.tipo_fondo || "-"}</p>
                     </div>
                   </div>
+
+                  {pago.referencia && (
+                    <div className="mt-3">
+                      <p className="text-xs text-slate-500">Referencia</p>
+                      <p className="text-sm font-semibold">
+                        {pago.referencia}
+                      </p>
+                    </div>
+                  )}
 
                   {pago.descripcion && (
                     <div className="mt-3">
                       <p className="text-xs text-slate-500">Descripción</p>
-                      <p className="text-sm">{pago.descripcion}</p>
+                      <p className="text-sm line-clamp-3">
+                        {pago.descripcion}
+                      </p>
                     </div>
                   )}
 
                   <div className="mt-4 flex justify-between items-center">
                     <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold">
-                      {pago.estado || "Registrado"}
+                      {pago.origen || pago.metodo || "Registrado"}
                     </span>
 
-                    {pago.comprobante_url ? (
-                      <a
-                        href={pago.comprobante_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-blue-700 font-bold underline"
+                    <div className="flex items-center gap-3">
+                      {pago.comprobante_url ? (
+                        <a
+                          href={pago.comprobante_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-blue-700 font-bold underline"
+                        >
+                          Comprobante
+                        </a>
+                      ) : (
+                        <span className="text-xs text-slate-400">
+                          Sin comprobante
+                        </span>
+                      )}
+
+                      <Link
+                        href={`/recibos/pago/pagos/${pago.id}`}
+                        className="text-xs text-purple-700 font-bold underline"
                       >
-                        Ver comprobante
-                      </a>
-                    ) : (
-                      <span className="text-xs text-slate-400">
-                        Sin comprobante
-                      </span>
-                    )}
+                        Recibo
+                      </Link>
+                    </div>
                   </div>
                 </div>
               );
@@ -296,40 +402,38 @@ export default function MobileAdminPagosPage() {
         )}
       </section>
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg">
-        <div className="max-w-md mx-auto grid grid-cols-4 text-center">
-          <Link
-            href="/mobile/admin"
-            className="py-3 text-xs font-bold text-slate-700"
-          >
-            <div className="text-xl">🏠</div>
-            Inicio
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg z-50">
+        <div className="grid grid-cols-5 text-xs text-center">
+          <Link href="/mobile/admin" className="py-3 text-slate-600">
+            <div>🏠</div>
+            <span className="block mt-1">Inicio</span>
           </Link>
 
-          <Link
-            href="/mobile/admin/banco"
-            className="py-3 text-xs font-bold text-slate-700"
-          >
-            <div className="text-xl">🏦</div>
-            Banco
+          <Link href="/mobile/admin/banco" className="py-3 text-slate-600">
+            <div>🏦</div>
+            <span className="block mt-1">Banco</span>
           </Link>
 
           <Link
             href="/mobile/admin/pagos"
-            className="py-3 text-xs font-bold text-blue-700"
+            className="py-3 font-bold text-blue-700"
           >
-            <div className="text-xl">💳</div>
-            Pagos
+            <div>💳</div>
+            <span className="block mt-1">Pagos</span>
           </Link>
 
-          <button
-            type="button"
-            onClick={cerrarSesion}
-            className="py-3 text-xs font-bold text-red-600"
+          <Link
+            href="/mobile/admin/solicitudes-pagos"
+            className="py-3 text-slate-600"
           >
-            <div className="text-xl">🚪</div>
-            Salir
-          </button>
+            <div>💼</div>
+            <span className="block mt-1">Solicitudes</span>
+          </Link>
+
+          <Link href="/mobile/admin/mas" className="py-3 text-slate-600">
+            <div>☰</div>
+            <span className="block mt-1">Más</span>
+          </Link>
         </div>
       </nav>
     </main>

@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
 
 type Proveedor = {
@@ -17,44 +19,70 @@ type Categoria = {
 type Gasto = {
   id: number;
   condominio_id?: number;
-  condominio: string;
-  fecha: string;
-  concepto: string;
-  detalle_gasto: string;
-  monto: number;
-  itbis: number;
-  total: number;
-  no_factura: string;
-  ncf: string;
-  metodo_pago: string;
-  cuenta_banco: string;
-  factura_url: string;
-  estado: string;
-  categoria_id?: number;
-  proveedor_id?: number;
-  aprobado_tesorero?: boolean;
-  aprobado_presidente?: boolean;
-  fecha_aprobacion_tesorero?: string;
-  fecha_aprobacion_presidente?: string;
-  cheque_url?: string;
-  numero_cheque?: string;
-  fecha_pago?: string;
-  pagado?: boolean;
-  catalogo_proveedores?: { nombre_proveedor: string };
-  catalogo_categoria_gastos?: { nombre_categoria: string };
+  condominio: string | null;
+  fecha: string | null;
+  concepto: string | null;
+  detalle_gasto: string | null;
+  monto: number | null;
+  itbis: number | null;
+  total: number | null;
+  no_factura: string | null;
+  ncf: string | null;
+  metodo_pago: string | null;
+  cuenta_banco: string | null;
+  factura_url: string | null;
+  estado: string | null;
+  categoria_id?: number | null;
+  proveedor_id?: number | null;
+  aprobado_tesorero?: boolean | null;
+  aprobado_presidente?: boolean | null;
+  fecha_aprobacion_tesorero?: string | null;
+  fecha_aprobacion_presidente?: string | null;
+  cheque_url?: string | null;
+  numero_cheque?: string | null;
+  fecha_pago?: string | null;
+  pagado?: boolean | null;
+  catalogo_proveedores?: { nombre_proveedor: string | null } | null;
+  catalogo_categoria_gastos?: { nombre_categoria: string | null } | null;
 };
 
-export default function GastosPage() {
+function formatearMoneda(valor: number | null | undefined) {
+  return new Intl.NumberFormat("es-DO", {
+    style: "currency",
+    currency: "DOP",
+    minimumFractionDigits: 2,
+  }).format(Number(valor || 0));
+}
+
+function fechaHoy() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function estadoColor(g: Gasto) {
+  if (g.pagado) return "bg-green-100 text-green-700";
+  if (g.aprobado_presidente) return "bg-blue-100 text-blue-700";
+  if (g.aprobado_tesorero) return "bg-yellow-100 text-yellow-700";
+  return "bg-slate-100 text-slate-700";
+}
+
+export default function MobileGastosPage() {
+  const router = useRouter();
+
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [gastos, setGastos] = useState<Gasto[]>([]);
+
+  const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [editandoId, setEditandoId] = useState<number | null>(null);
 
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
 
-  const [fecha, setFecha] = useState("");
+  const [mostrarFormulario, setMostrarFormulario] = useState(false);
+  const [buscar, setBuscar] = useState("");
+
+  const [fecha, setFecha] = useState(fechaHoy());
   const [categoriaId, setCategoriaId] = useState("");
   const [proveedorId, setProveedorId] = useState("");
   const [concepto, setConcepto] = useState("");
@@ -73,20 +101,24 @@ export default function GastosPage() {
     const nombre = localStorage.getItem("condominio_nombre") || "";
 
     if (!id) {
-      alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
+      router.push("/mobile");
       return;
     }
 
     const nombreFinal = nombre || `Condominio ID ${id}`;
-    const hoy = new Date().toISOString().split("T")[0];
 
     setCondominioId(id);
     setCondominioNombre(nombreFinal);
-    setFecha(hoy);
+    setFecha(fechaHoy());
 
-    cargarCatalogos(id);
-    cargarGastos(id, nombreFinal);
-  }, []);
+    cargarInicial(id, nombreFinal);
+  }, [router]);
+
+  async function cargarInicial(id: string, nombreCondominio: string) {
+    setLoading(true);
+    await Promise.all([cargarCatalogos(id), cargarGastos(id, nombreCondominio)]);
+    setLoading(false);
+  }
 
   async function cargarCatalogos(id: string) {
     if (!id) return;
@@ -152,7 +184,8 @@ export default function GastosPage() {
         catalogo_proveedores(nombre_proveedor),
         catalogo_categoria_gastos(nombre_categoria)
       `)
-      .order("fecha", { ascending: false });
+      .order("fecha", { ascending: false })
+      .order("id", { ascending: false });
 
     if (id) {
       query = query.eq("condominio_id", Number(id));
@@ -195,10 +228,7 @@ export default function GastosPage() {
 
   function limpiarFormulario() {
     setEditandoId(null);
-
-    const hoy = new Date().toISOString().split("T")[0];
-
-    setFecha(hoy);
+    setFecha(fechaHoy());
     setCategoriaId("");
     setProveedorId("");
     setConcepto("");
@@ -213,7 +243,7 @@ export default function GastosPage() {
     setFacturaActualUrl("");
 
     const inputFile = document.getElementById(
-      "facturaGasto"
+      "facturaGastoMobile"
     ) as HTMLInputElement | null;
 
     if (inputFile) inputFile.value = "";
@@ -233,7 +263,7 @@ export default function GastosPage() {
 
   function editarGasto(g: Gasto) {
     setEditandoId(g.id);
-    setFecha(g.fecha || "");
+    setFecha(g.fecha || fechaHoy());
     setCategoriaId(g.categoria_id ? String(g.categoria_id) : "");
     setProveedorId(g.proveedor_id ? String(g.proveedor_id) : "");
     setConcepto(g.concepto || "");
@@ -246,13 +276,14 @@ export default function GastosPage() {
     setCuentaBanco(g.cuenta_banco || "");
     setFacturaActualUrl(g.factura_url || "");
     setFacturaArchivo(null);
+    setMostrarFormulario(true);
 
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function borrarGasto(g: Gasto) {
     const confirmar = confirm(
-      `¿Seguro que desea borrar el gasto "${g.concepto}"?`
+      `¿Seguro que desea borrar el gasto "${g.concepto || "sin concepto"}"?`
     );
 
     if (!confirmar) return;
@@ -273,6 +304,9 @@ export default function GastosPage() {
   }
 
   async function aprobarTesorero(g: Gasto) {
+    const confirmar = confirm(`¿Aprobar por tesorero el gasto #${g.id}?`);
+    if (!confirmar) return;
+
     const { error } = await supabase
       .from("gastos")
       .update({
@@ -288,6 +322,7 @@ export default function GastosPage() {
       return;
     }
 
+    alert("Gasto aprobado por tesorero.");
     cargarGastos(condominioId, condominioNombre);
   }
 
@@ -296,6 +331,9 @@ export default function GastosPage() {
       alert("Primero debe aprobar el tesorero.");
       return;
     }
+
+    const confirmar = confirm(`¿Aprobar por presidente el gasto #${g.id}?`);
+    if (!confirmar) return;
 
     const { error } = await supabase
       .from("gastos")
@@ -312,6 +350,7 @@ export default function GastosPage() {
       return;
     }
 
+    alert("Gasto aprobado por presidente.");
     cargarGastos(condominioId, condominioNombre);
   }
 
@@ -324,7 +363,7 @@ export default function GastosPage() {
     const numeroCheque = prompt("Número de cheque emitido:");
     if (!numeroCheque) return;
 
-    const fechaPago = prompt("Fecha de pago en formato YYYY-MM-DD:");
+    const fechaPago = prompt("Fecha de pago en formato YYYY-MM-DD:", fechaHoy());
     if (!fechaPago) return;
 
     const { error } = await supabase
@@ -343,6 +382,7 @@ export default function GastosPage() {
       return;
     }
 
+    alert("Gasto marcado como pagado.");
     cargarGastos(condominioId, condominioNombre);
   }
 
@@ -376,7 +416,9 @@ export default function GastosPage() {
       .eq("condominio_id", Number(condominioId));
 
     if (error) {
-      alert("Cheque subido, pero no se pudo actualizar el gasto: " + error.message);
+      alert(
+        "Cheque subido, pero no se pudo actualizar el gasto: " + error.message
+      );
       return;
     }
 
@@ -402,10 +444,16 @@ export default function GastosPage() {
       return;
     }
 
+    const montoNumero = Number(monto || 0);
+
+    if (montoNumero <= 0) {
+      alert("El monto debe ser mayor que cero.");
+      return;
+    }
+
     try {
       setGuardando(true);
 
-      const montoNumero = Number(monto || 0);
       const itbisNumero = Number(itbis || 0);
       const totalNumero = montoNumero + itbisNumero;
       const facturaUrl = await subirFactura();
@@ -462,6 +510,7 @@ export default function GastosPage() {
       }
 
       limpiarFormulario();
+      setMostrarFormulario(false);
       cargarGastos(condominioId, condominioNombre);
     } catch (err: any) {
       setGuardando(false);
@@ -469,390 +518,549 @@ export default function GastosPage() {
     }
   }
 
-  const totalGastos = gastos.reduce((sum, g) => sum + Number(g.total || 0), 0);
+  function cerrarSesion() {
+    localStorage.removeItem("condominio_id");
+    localStorage.removeItem("condominio_nombre");
+    localStorage.removeItem("condominio_logo_url");
+    localStorage.removeItem("usuario_nombre");
+    localStorage.removeItem("usuario_rol");
+    localStorage.removeItem("usuario_admin_id");
+
+    router.push("/mobile");
+  }
+
+  const gastosFiltrados = useMemo(() => {
+    const q = buscar.trim().toLowerCase();
+
+    if (!q) return gastos;
+
+    return gastos.filter((g) => {
+      const texto = `${g.id || ""} ${g.fecha || ""} ${g.concepto || ""} ${
+        g.detalle_gasto || ""
+      } ${g.no_factura || ""} ${g.ncf || ""} ${
+        g.numero_cheque || ""
+      } ${g.catalogo_proveedores?.nombre_proveedor || ""} ${
+        g.catalogo_categoria_gastos?.nombre_categoria || ""
+      } ${g.estado || ""}`.toLowerCase();
+
+      return texto.includes(q);
+    });
+  }, [gastos, buscar]);
+
+  const totalGastos = gastosFiltrados.reduce(
+    (sum, g) => sum + Number(g.total || 0),
+    0
+  );
+
+  const totalPagados = gastosFiltrados.filter((g) => g.pagado).length;
+  const totalPendientes = gastosFiltrados.filter((g) => !g.pagado).length;
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-4">
+        <div className="bg-white rounded-2xl border shadow-sm p-5">
+          Cargando gastos...
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Gastos Profesionales</h1>
-        <p className="text-slate-500">
-          Registro, aprobación y pago de gastos del condominio activo.
-        </p>
-      </div>
+    <main className="min-h-screen bg-slate-100 pb-24">
+      <section className="bg-red-700 text-white rounded-b-3xl p-5 shadow">
+        <Link href="/mobile/admin" className="text-sm opacity-90">
+          ← Volver al menú principal
+        </Link>
 
-      <div className="bg-white rounded-2xl p-5 shadow-sm border">
-        <p className="text-xs uppercase tracking-wide text-slate-500">
-          Condominio activo
-        </p>
-        <p className="font-bold text-slate-800 mt-1">
-          {condominioNombre || "No seleccionado"}
-        </p>
-      </div>
+        <h1 className="text-2xl font-black mt-3">Gastos Mobile</h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Total registros</p>
-          <h2 className="text-2xl font-bold">{gastos.length}</h2>
+        <p className="text-sm opacity-90 mt-1">
+          {condominioNombre || "Condominio no seleccionado"}
+        </p>
+
+        <p className="text-sm opacity-90 mt-2">
+          Registro, aprobación, cheque y pago de gastos.
+        </p>
+      </section>
+
+      <section className="p-4 space-y-4">
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-white rounded-2xl border shadow-sm p-4">
+            <p className="text-xs text-slate-500">Registros</p>
+            <h2 className="text-2xl font-black text-slate-800">
+              {gastosFiltrados.length}
+            </h2>
+          </div>
+
+          <div className="bg-white rounded-2xl border shadow-sm p-4">
+            <p className="text-xs text-slate-500">Pagados</p>
+            <h2 className="text-2xl font-black text-green-700">
+              {totalPagados}
+            </h2>
+          </div>
+
+          <div className="bg-white rounded-2xl border shadow-sm p-4">
+            <p className="text-xs text-slate-500">Pend.</p>
+            <h2 className="text-2xl font-black text-red-700">
+              {totalPendientes}
+            </h2>
+          </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Monto total gastos</p>
-          <h2 className="text-2xl font-bold text-red-700">
-            RD$
-            {totalGastos.toLocaleString("es-DO", {
-              minimumFractionDigits: 2,
-            })}
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <p className="text-xs text-slate-500">Monto total filtrado</p>
+          <h2 className="text-2xl font-black text-red-700">
+            {formatearMoneda(totalGastos)}
           </h2>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Modo</p>
-          <h2 className="text-2xl font-bold text-blue-700">
-            {editandoId ? "Editando" : "Nuevo"}
-          </h2>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => {
+              limpiarFormulario();
+              setMostrarFormulario(!mostrarFormulario);
+            }}
+            className="bg-red-700 text-white py-3 rounded-xl font-bold"
+          >
+            {mostrarFormulario ? "Cerrar formulario" : "Nuevo gasto"}
+          </button>
+
+          <button
+            onClick={() => cargarGastos(condominioId, condominioNombre)}
+            className="bg-slate-900 text-white py-3 rounded-xl font-bold"
+          >
+            Actualizar
+          </button>
         </div>
-      </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold mb-4">
-          {editandoId ? "Modificar gasto" : "Registrar gasto"}
-        </h2>
+        {mostrarFormulario && (
+          <div className="bg-white rounded-2xl border shadow-sm p-4">
+            <h2 className="text-lg font-black text-slate-900 mb-4">
+              {editandoId ? "Modificar gasto" : "Registrar gasto"}
+            </h2>
 
-        <form
-          onSubmit={guardarGasto}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
-          <div className="md:col-span-2 bg-slate-50 border rounded-lg px-3 py-3">
-            <label className="block text-sm font-semibold mb-1">
-              Condominio
-            </label>
-            <p className="font-semibold text-slate-800">
-              {condominioNombre || "No seleccionado"}
-            </p>
-          </div>
+            <form onSubmit={guardarGasto} className="space-y-3">
+              <div className="bg-slate-50 border rounded-xl px-4 py-3">
+                <p className="text-xs text-slate-500">Condominio</p>
+                <p className="font-bold">{condominioNombre}</p>
+              </div>
 
-          <input
-            type="date"
-            value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          />
+              <input
+                type="date"
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
+                className="border rounded-xl px-4 py-3 w-full bg-white"
+              />
 
-          <select
-            value={categoriaId}
-            onChange={(e) => setCategoriaId(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          >
-            <option value="">Seleccione categoría</option>
-            {categorias.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nombre_categoria}
-              </option>
-            ))}
-          </select>
-
-          <div>
-            <select
-              value={proveedorId}
-              onChange={(e) => seleccionarProveedor(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-            >
-              <option value="">Seleccione proveedor</option>
-              {proveedores.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nombre_proveedor}
-                </option>
-              ))}
-            </select>
-
-            {proveedores.length === 0 && (
-              <p className="text-xs text-orange-600 mt-1">
-                No hay proveedores activos registrados para este condominio.
-              </p>
-            )}
-          </div>
-
-          <input
-            type="text"
-            value={concepto}
-            onChange={(e) => setConcepto(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Concepto"
-          />
-
-          <input
-            type="number"
-            step="0.01"
-            value={monto}
-            onChange={(e) => setMonto(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Monto RD$"
-          />
-
-          <input
-            type="number"
-            step="0.01"
-            value={itbis}
-            onChange={(e) => setItbis(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="ITBIS RD$"
-          />
-
-          <input
-            type="text"
-            value={`RD$${(
-              Number(monto || 0) + Number(itbis || 0)
-            ).toLocaleString("es-DO", { minimumFractionDigits: 2 })}`}
-            readOnly
-            className="border rounded-lg px-3 py-2 w-full bg-slate-100"
-          />
-
-          <input
-            type="text"
-            value={noFactura}
-            onChange={(e) => setNoFactura(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="No. Factura"
-          />
-
-          <input
-            type="text"
-            value={ncf}
-            onChange={(e) => setNcf(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="NCF"
-          />
-
-          <select
-            value={metodoPago}
-            onChange={(e) => setMetodoPago(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          >
-            <option value="">Seleccione método</option>
-            <option value="Efectivo">Efectivo</option>
-            <option value="Transferencia">Transferencia</option>
-            <option value="Cheque">Cheque</option>
-            <option value="Depósito">Depósito</option>
-            <option value="Tarjeta">Tarjeta</option>
-            <option value="Otro">Otro</option>
-          </select>
-
-          <input
-            type="text"
-            value={cuentaBanco}
-            onChange={(e) => setCuentaBanco(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Cuenta banco"
-          />
-
-          <div className="md:col-span-2">
-            <input
-              id="facturaGasto"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp"
-              onChange={(e) => setFacturaArchivo(e.target.files?.[0] || null)}
-              className="border rounded-lg px-3 py-2 w-full bg-white"
-            />
-
-            {facturaActualUrl && (
-              <p className="text-sm mt-2">
-                Factura actual:{" "}
-                <a
-                  href={facturaActualUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 underline"
-                >
-                  Ver factura
-                </a>
-              </p>
-            )}
-          </div>
-
-          <textarea
-            value={detalleGasto}
-            onChange={(e) => setDetalleGasto(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full md:col-span-2"
-            rows={3}
-            placeholder="Detalle del gasto"
-          />
-
-          <div className="md:col-span-2 flex gap-2">
-            <button
-              type="submit"
-              disabled={guardando}
-              className="bg-blue-700 text-white px-5 py-2 rounded-lg hover:bg-blue-800 disabled:opacity-50"
-            >
-              {guardando
-                ? "Guardando..."
-                : editandoId
-                ? "Guardar cambios"
-                : "Guardar gasto"}
-            </button>
-
-            {editandoId && (
-              <button
-                type="button"
-                onClick={limpiarFormulario}
-                className="bg-slate-500 text-white px-5 py-2 rounded-lg hover:bg-slate-600"
+              <select
+                value={categoriaId}
+                onChange={(e) => setCategoriaId(e.target.value)}
+                className="border rounded-xl px-4 py-3 w-full bg-white"
               >
-                Cancelar
-              </button>
-            )}
-          </div>
-        </form>
-      </div>
+                <option value="">Seleccione categoría</option>
+                {categorias.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre_categoria}
+                  </option>
+                ))}
+              </select>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold mb-4">Últimos gastos registrados</h2>
+              <select
+                value={proveedorId}
+                onChange={(e) => seleccionarProveedor(e.target.value)}
+                className="border rounded-xl px-4 py-3 w-full bg-white"
+              >
+                <option value="">Seleccione proveedor</option>
+                {proveedores.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre_proveedor}
+                  </option>
+                ))}
+              </select>
 
-        <div className="overflow-auto border rounded-lg">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="p-2 border">Fecha</th>
-                <th className="p-2 border">Proveedor</th>
-                <th className="p-2 border">Concepto</th>
-                <th className="p-2 border">Total</th>
-                <th className="p-2 border">Estado</th>
-                <th className="p-2 border">Factura</th>
-                <th className="p-2 border">Cheque</th>
-                <th className="p-2 border">Acciones</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {gastos.map((g) => (
-                <tr key={g.id}>
-                  <td className="p-2 border">{g.fecha}</td>
-
-                  <td className="p-2 border">
-                    {g.catalogo_proveedores?.nombre_proveedor || "-"}
-                  </td>
-
-                  <td className="p-2 border">{g.concepto}</td>
-
-                  <td className="p-2 border text-right font-bold">
-                    RD$
-                    {Number(g.total).toLocaleString("es-DO", {
-                      minimumFractionDigits: 2,
-                    })}
-                  </td>
-
-                  <td className="p-2 border text-center font-semibold">
-                    {g.estado}
-                  </td>
-
-                  <td className="p-2 border text-center">
-                    {g.factura_url ? (
-                      <a
-                        href={g.factura_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-slate-900 text-white px-3 py-1 rounded-lg"
-                      >
-                        Factura
-                      </a>
-                    ) : (
-                      <span className="text-slate-400">Sin factura</span>
-                    )}
-                  </td>
-
-                  <td className="p-2 border text-center">
-                    {g.cheque_url ? (
-                      <a
-                        href={g.cheque_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-green-700 text-white px-3 py-1 rounded-lg"
-                      >
-                        Ver cheque
-                      </a>
-                    ) : g.aprobado_presidente ? (
-                      <label className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-lg text-xs cursor-pointer inline-block">
-                        Subir cheque
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png,.webp"
-                          className="hidden"
-                          onChange={(e) => {
-                            const archivo = e.target.files?.[0];
-                            if (archivo) subirCheque(g, archivo);
-                            e.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-                    ) : (
-                      <span className="text-xs text-slate-400">
-                        Pendiente aprobación
-                      </span>
-                    )}
-                  </td>
-
-                  <td className="p-2 border text-center">
-                    <div className="flex flex-wrap gap-2 justify-center">
-                      {!g.aprobado_tesorero && (
-                        <button
-                          onClick={() => aprobarTesorero(g)}
-                          className="bg-yellow-600 text-white px-3 py-1 rounded-lg text-xs"
-                        >
-                          Tesorero
-                        </button>
-                      )}
-
-                      {g.aprobado_tesorero && !g.aprobado_presidente && (
-                        <button
-                          onClick={() => aprobarPresidente(g)}
-                          className="bg-blue-700 text-white px-3 py-1 rounded-lg text-xs"
-                        >
-                          Presidente
-                        </button>
-                      )}
-
-                      {g.aprobado_presidente && !g.pagado && (
-                        <button
-                          onClick={() => marcarPagado(g)}
-                          className="bg-green-700 text-white px-3 py-1 rounded-lg text-xs"
-                        >
-                          Pagado
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => editarGasto(g)}
-                        className="bg-slate-700 text-white px-3 py-1 rounded-lg text-xs"
-                      >
-                        Editar
-                      </button>
-
-                      <button
-                        onClick={() => borrarGasto(g)}
-                        className="bg-red-700 text-white px-3 py-1 rounded-lg text-xs"
-                      >
-                        Borrar
-                      </button>
-                    </div>
-
-                    {g.numero_cheque && (
-                      <div className="text-xs text-slate-600 mt-1">
-                        Cheque: {g.numero_cheque}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-
-              {gastos.length === 0 && (
-                <tr>
-                  <td className="p-4 border text-center" colSpan={8}>
-                    No hay gastos registrados para este condominio.
-                  </td>
-                </tr>
+              {proveedores.length === 0 && (
+                <p className="text-xs text-orange-600">
+                  No hay proveedores activos registrados para este condominio.
+                </p>
               )}
-            </tbody>
-          </table>
+
+              <input
+                type="text"
+                value={concepto}
+                onChange={(e) => setConcepto(e.target.value)}
+                className="border rounded-xl px-4 py-3 w-full"
+                placeholder="Concepto"
+              />
+
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="number"
+                  step="0.01"
+                  value={monto}
+                  onChange={(e) => setMonto(e.target.value)}
+                  className="border rounded-xl px-4 py-3 w-full"
+                  placeholder="Monto"
+                />
+
+                <input
+                  type="number"
+                  step="0.01"
+                  value={itbis}
+                  onChange={(e) => setItbis(e.target.value)}
+                  className="border rounded-xl px-4 py-3 w-full"
+                  placeholder="ITBIS"
+                />
+              </div>
+
+              <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                <p className="text-xs text-red-600 font-bold">Total</p>
+                <p className="text-2xl font-black text-red-700">
+                  {formatearMoneda(Number(monto || 0) + Number(itbis || 0))}
+                </p>
+              </div>
+
+              <select
+                value={metodoPago}
+                onChange={(e) => setMetodoPago(e.target.value)}
+                className="border rounded-xl px-4 py-3 w-full bg-white"
+              >
+                <option value="">Seleccione método</option>
+                <option value="Efectivo">Efectivo</option>
+                <option value="Transferencia">Transferencia</option>
+                <option value="Cheque">Cheque</option>
+                <option value="Depósito">Depósito</option>
+                <option value="Tarjeta">Tarjeta</option>
+                <option value="Otro">Otro</option>
+              </select>
+
+              <input
+                type="text"
+                value={cuentaBanco}
+                onChange={(e) => setCuentaBanco(e.target.value)}
+                className="border rounded-xl px-4 py-3 w-full"
+                placeholder="Cuenta banco"
+              />
+
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  value={noFactura}
+                  onChange={(e) => setNoFactura(e.target.value)}
+                  className="border rounded-xl px-4 py-3 w-full"
+                  placeholder="No. Factura"
+                />
+
+                <input
+                  type="text"
+                  value={ncf}
+                  onChange={(e) => setNcf(e.target.value)}
+                  className="border rounded-xl px-4 py-3 w-full"
+                  placeholder="NCF"
+                />
+              </div>
+
+              <input
+                id="facturaGastoMobile"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                onChange={(e) => setFacturaArchivo(e.target.files?.[0] || null)}
+                className="border rounded-xl px-4 py-3 w-full bg-white"
+              />
+
+              {facturaActualUrl && (
+                <p className="text-sm">
+                  Factura actual:{" "}
+                  <a
+                    href={facturaActualUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 underline font-bold"
+                  >
+                    Ver factura
+                  </a>
+                </p>
+              )}
+
+              <textarea
+                value={detalleGasto}
+                onChange={(e) => setDetalleGasto(e.target.value)}
+                className="border rounded-xl px-4 py-3 w-full"
+                rows={3}
+                placeholder="Detalle del gasto"
+              />
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="submit"
+                  disabled={guardando}
+                  className="bg-blue-700 text-white py-3 rounded-xl font-bold disabled:opacity-50"
+                >
+                  {guardando
+                    ? "Guardando..."
+                    : editandoId
+                    ? "Guardar cambios"
+                    : "Guardar gasto"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    limpiarFormulario();
+                    setMostrarFormulario(false);
+                  }}
+                  className="bg-slate-500 text-white py-3 rounded-xl font-bold"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <label className="block text-sm font-semibold mb-1">Buscar</label>
+
+          <input
+            type="text"
+            value={buscar}
+            onChange={(e) => setBuscar(e.target.value)}
+            className="border rounded-xl px-4 py-3 w-full"
+            placeholder="Proveedor, concepto, factura, NCF, cheque o estado..."
+          />
         </div>
-      </div>
-    </div>
+
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <h2 className="text-lg font-black text-slate-900">
+            Últimos gastos registrados
+          </h2>
+
+          <p className="text-sm text-slate-500 mt-1">
+            Gestión completa desde el celular.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          {gastosFiltrados.map((g) => (
+            <div key={g.id} className="bg-white rounded-2xl border shadow-sm p-4">
+              <div className="flex justify-between items-start gap-3">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-xl font-black text-slate-900">
+                      Gasto #{g.id}
+                    </h2>
+
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-bold ${estadoColor(
+                        g
+                      )}`}
+                    >
+                      {g.estado || "Pendiente"}
+                    </span>
+                  </div>
+
+                  <p className="font-bold text-slate-700 mt-2">
+                    {g.concepto || "-"}
+                  </p>
+
+                  <p className="text-xs text-slate-500 mt-1">
+                    Fecha: {g.fecha || "-"}
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-xs text-slate-500">Total</p>
+                  <p className="text-lg font-black text-red-700">
+                    {formatearMoneda(g.total)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
+                <div>
+                  <p className="text-xs text-slate-500">Proveedor</p>
+                  <p className="font-bold">
+                    {g.catalogo_proveedores?.nombre_proveedor || "-"}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-slate-500">Categoría</p>
+                  <p className="font-bold">
+                    {g.catalogo_categoria_gastos?.nombre_categoria || "-"}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-slate-500">Factura</p>
+                  <p className="font-bold">{g.no_factura || "-"}</p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-slate-500">NCF</p>
+                  <p className="font-bold">{g.ncf || "-"}</p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-slate-500">Método</p>
+                  <p className="font-bold">{g.metodo_pago || "-"}</p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-slate-500">Cheque</p>
+                  <p className="font-bold">{g.numero_cheque || "-"}</p>
+                </div>
+              </div>
+
+              {g.detalle_gasto && (
+                <div className="mt-4 bg-slate-50 border rounded-xl p-3">
+                  <p className="text-xs text-slate-500">Detalle</p>
+                  <p className="text-sm mt-1">{g.detalle_gasto}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                {g.factura_url ? (
+                  <a
+                    href={g.factura_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-slate-900 text-white py-3 rounded-xl text-center text-sm font-bold"
+                  >
+                    Ver factura
+                  </a>
+                ) : (
+                  <div className="bg-slate-100 text-slate-400 py-3 rounded-xl text-center text-sm font-bold">
+                    Sin factura
+                  </div>
+                )}
+
+                {g.cheque_url ? (
+                  <a
+                    href={g.cheque_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-green-700 text-white py-3 rounded-xl text-center text-sm font-bold"
+                  >
+                    Ver cheque
+                  </a>
+                ) : g.aprobado_presidente ? (
+                  <label className="bg-blue-700 text-white py-3 rounded-xl text-center text-sm font-bold cursor-pointer">
+                    Subir cheque
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const archivo = e.target.files?.[0];
+                        if (archivo) subirCheque(g, archivo);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                ) : (
+                  <div className="bg-slate-100 text-slate-400 py-3 rounded-xl text-center text-sm font-bold">
+                    Pend. aprobación
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                {!g.aprobado_tesorero && (
+                  <button
+                    onClick={() => aprobarTesorero(g)}
+                    className="bg-yellow-600 text-white py-3 rounded-xl text-sm font-bold"
+                  >
+                    Aprobar tesorero
+                  </button>
+                )}
+
+                {g.aprobado_tesorero && !g.aprobado_presidente && (
+                  <button
+                    onClick={() => aprobarPresidente(g)}
+                    className="bg-blue-700 text-white py-3 rounded-xl text-sm font-bold"
+                  >
+                    Aprobar presidente
+                  </button>
+                )}
+
+                {g.aprobado_presidente && !g.pagado && (
+                  <button
+                    onClick={() => marcarPagado(g)}
+                    className="bg-green-700 text-white py-3 rounded-xl text-sm font-bold"
+                  >
+                    Marcar pagado
+                  </button>
+                )}
+
+                <button
+                  onClick={() => editarGasto(g)}
+                  className="bg-slate-700 text-white py-3 rounded-xl text-sm font-bold"
+                >
+                  Editar
+                </button>
+
+                <button
+                  onClick={() => borrarGasto(g)}
+                  className="bg-red-700 text-white py-3 rounded-xl text-sm font-bold"
+                >
+                  Borrar
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {gastosFiltrados.length === 0 && (
+            <div className="bg-white rounded-2xl border shadow-sm p-6 text-center text-slate-500">
+              No hay gastos registrados para este condominio.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg">
+        <div className="max-w-md mx-auto grid grid-cols-5 text-center">
+          <Link
+            href="/mobile/admin"
+            className="py-3 text-xs font-bold text-slate-700"
+          >
+            <div className="text-xl">🏠</div>
+            Inicio
+          </Link>
+
+          <Link
+            href="/mobile/admin/banco"
+            className="py-3 text-xs font-bold text-slate-700"
+          >
+            <div className="text-xl">🏦</div>
+            Banco
+          </Link>
+
+          <Link
+            href="/mobile/admin/pagos"
+            className="py-3 text-xs font-bold text-slate-700"
+          >
+            <div className="text-xl">💳</div>
+            Pagos
+          </Link>
+
+          <Link
+            href="/mobile/admin/solicitudes-pagos"
+            className="py-3 text-xs font-bold text-slate-700"
+          >
+            <div className="text-xl">💼</div>
+            Solicitudes
+          </Link>
+
+          <button
+            type="button"
+            onClick={cerrarSesion}
+            className="py-3 text-xs font-bold text-red-600"
+          >
+            <div className="text-xl">🚪</div>
+            Salir
+          </button>
+        </div>
+      </nav>
+    </main>
   );
 }

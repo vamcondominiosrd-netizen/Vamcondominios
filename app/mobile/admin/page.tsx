@@ -81,6 +81,14 @@ export default function MobileAdminPage() {
       color: "from-orange-700 to-amber-500",
       activo: true,
     },
+{
+  titulo: "Caja Chica",
+  descripcion: "Control de fondos, desembolsos y recibos de caja chica.",
+  href: "/mobile/admin/caja-chica",
+  icono: "💵",
+  color: "from-blue-800 to-cyan-600",
+  activo: true,
+},
     {
       titulo: "Propietarios",
       descripcion: "Administrar propietarios y apartamentos.",

@@ -24,7 +24,7 @@ type ModuloAdministracion = {
 export default function AdministracionPage() {
   const modulos: ModuloAdministracion[] = [
     {
-      titulo: "Condominios",
+      titulo: "Condominios RD",
       descripcion:
         "Crear, editar y administrar los condominios registrados en el sistema.",
       href: "/condominios",
