@@ -573,6 +573,7 @@ export default function SuperAdminPage() {
                   <option value="tesorero">Tesorero</option>
                   <option value="secretario">Secretario</option>
                   <option value="supervisor">Supervisor</option>
+                  <option value="tecnico">Técnico VAM</option>
                 </select>
               </div>
 

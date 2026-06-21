@@ -93,7 +93,7 @@ export default function ReportePagosPropietariosPage() {
   const [condominioNombre, setCondominioNombre] = useState("");
 
   const [anio, setAnio] = useState(new Date().getFullYear());
-  const [buscar, setBuscar] = useState("");
+  const [apartamentoSeleccionado, setApartamentoSeleccionado] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("TODOS");
 
   const [unidades, setUnidades] = useState<Unidad[]>([]);
@@ -222,6 +222,7 @@ export default function ReportePagosPropietariosPage() {
     const nuevoAnio = Number(valor);
 
     setAnio(nuevoAnio);
+    setApartamentoSeleccionado("");
 
     if (condominioId) {
       cargarDatos(condominioId, nuevoAnio);
@@ -372,21 +373,23 @@ export default function ReportePagosPropietariosPage() {
     return unidades.map((u) => crearFilaEstado(u));
   }, [unidades, propietarios, cargos, pagos]);
 
-  const filasFiltradas = useMemo(() => {
-    const texto = buscar.toLowerCase().trim();
+  const filaSeleccionada = useMemo(() => {
+    if (!apartamentoSeleccionado) return null;
 
+    return (
+      filas.find(
+        (f) => normalizar(f.apartamento) === normalizar(apartamentoSeleccionado)
+      ) || null
+    );
+  }, [filas, apartamentoSeleccionado]);
+
+  const filasFiltradas = useMemo(() => {
     let lista = filas;
 
-    if (texto) {
-      lista = lista.filter((f) => {
-        const combinado = `
-          ${f.apartamento}
-          ${f.propietario}
-          ${f.telefono}
-        `.toLowerCase();
-
-        return combinado.includes(texto);
-      });
+    if (apartamentoSeleccionado) {
+      lista = lista.filter(
+        (f) => normalizar(f.apartamento) === normalizar(apartamentoSeleccionado)
+      );
     }
 
     if (filtroEstado === "CON_DEUDA") {
@@ -402,15 +405,13 @@ export default function ReportePagosPropietariosPage() {
     }
 
     return lista;
-  }, [filas, buscar, filtroEstado]);
+  }, [filas, apartamentoSeleccionado, filtroEstado]);
 
   const resumenMeses = useMemo(() => {
     return meses.map((mesInfo, index) => {
       const numeroMes = index + 1;
 
-      const cargosMes = cargos.filter(
-        (c) => obtenerMesCargo(c) === numeroMes
-      );
+      const cargosMes = cargos.filter((c) => obtenerMesCargo(c) === numeroMes);
 
       const facturado = cargosMes.reduce(
         (sum, c) => sum + Number(c.monto || 0),
@@ -568,16 +569,62 @@ export default function ReportePagosPropietariosPage() {
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">Buscar</label>
-            <input
-              type="text"
-              value={buscar}
-              onChange={(e) => setBuscar(e.target.value)}
-              className="border rounded-xl px-3 py-2 w-full text-sm"
-              placeholder="Apartamento, propietario o teléfono..."
-            />
+            <label className="block text-sm font-semibold mb-1">
+              Apartamento
+            </label>
+
+            <select
+              value={apartamentoSeleccionado}
+              onChange={(e) => setApartamentoSeleccionado(e.target.value)}
+              className="border rounded-xl px-3 py-2 w-full bg-white text-sm"
+            >
+              <option value="">Todos los apartamentos</option>
+
+              {filas.map((fila) => (
+                <option key={fila.unidad_id} value={fila.apartamento}>
+                  {fila.apartamento} - {fila.propietario}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
+
+        {filaSeleccionada && (
+          <div className="mt-4 bg-blue-50 border border-blue-200 rounded-2xl p-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+              <div>
+                <p className="text-xs text-blue-700 font-bold">
+                  Apartamento seleccionado
+                </p>
+                <p className="text-xl font-black text-slate-900">
+                  {filaSeleccionada.apartamento}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs text-blue-700 font-bold">Propietario</p>
+                <p className="font-black text-slate-900">
+                  {filaSeleccionada.propietario}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs text-blue-700 font-bold">Teléfono</p>
+                <p className="font-black text-slate-900">
+                  {filaSeleccionada.telefono}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setApartamentoSeleccionado("")}
+                className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl font-bold"
+              >
+                Limpiar apartamento
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

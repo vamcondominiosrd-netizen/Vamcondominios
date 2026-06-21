@@ -101,7 +101,7 @@ export default function ReportePagosPropietariosPage() {
   const [condominioNombre, setCondominioNombre] = useState("");
 
   const [anio, setAnio] = useState(new Date().getFullYear());
-  const [apartamentoSeleccionado, setApartamentoSeleccionado] = useState("");
+  const [buscar, setBuscar] = useState("");
 
   const [unidades, setUnidades] = useState<Unidad[]>([]);
   const [propietarios, setPropietarios] = useState<PropietarioApartamento[]>(
@@ -176,6 +176,11 @@ export default function ReportePagosPropietariosPage() {
   }
 
   async function cargarCargos(id: string, anioSeleccionado: number) {
+    /*
+      Cargamos los cargos del condominio y filtramos el año en JavaScript.
+      Esto evita que se pierdan cargos si anio o mes vienen vacíos, pero periodo
+      sí viene correcto, por ejemplo: 2026-02.
+    */
     const { data, error } = await supabase
       .from("cargos_periodicos")
       .select(
@@ -229,7 +234,6 @@ export default function ReportePagosPropietariosPage() {
     const nuevoAnio = Number(valor);
 
     setAnio(nuevoAnio);
-    setApartamentoSeleccionado("");
 
     if (condominioId) {
       cargarDatos(condominioId, nuevoAnio);
@@ -379,29 +383,29 @@ export default function ReportePagosPropietariosPage() {
     return unidades.map((u) => crearFilaEstado(u));
   }, [unidades, propietarios, cargos, pagos]);
 
-  const filaSeleccionada = useMemo(() => {
-    if (!apartamentoSeleccionado) return null;
-
-    return (
-      filas.find(
-        (f) => normalizar(f.apartamento) === normalizar(apartamentoSeleccionado)
-      ) || null
-    );
-  }, [filas, apartamentoSeleccionado]);
-
   const filasFiltradas = useMemo(() => {
-    if (!apartamentoSeleccionado) return filas;
+    const texto = buscar.toLowerCase().trim();
 
-    return filas.filter(
-      (f) => normalizar(f.apartamento) === normalizar(apartamentoSeleccionado)
-    );
-  }, [filas, apartamentoSeleccionado]);
+    if (!texto) return filas;
+
+    return filas.filter((f) => {
+      const combinado = `
+        ${f.apartamento}
+        ${f.propietario}
+        ${f.telefono}
+      `.toLowerCase();
+
+      return combinado.includes(texto);
+    });
+  }, [filas, buscar]);
 
   const resumenMeses = useMemo<ResumenMes[]>(() => {
     return meses.map((nombreMes, index) => {
       const numeroMes = index + 1;
 
-      const cargosMes = cargos.filter((c) => obtenerMesCargo(c) === numeroMes);
+      const cargosMes = cargos.filter(
+        (c) => obtenerMesCargo(c) === numeroMes
+      );
 
       const facturado = cargosMes.reduce(
         (sum, c) => sum + Number(c.monto || 0),
@@ -518,65 +522,16 @@ export default function ReportePagosPropietariosPage() {
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-2">
-              Seleccionar apartamento
-            </label>
-
-            <select
-              value={apartamentoSeleccionado}
-              onChange={(e) => setApartamentoSeleccionado(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
-            >
-              <option value="">Todos los apartamentos</option>
-
-              {filas.map((fila) => (
-                <option key={fila.unidad_id} value={fila.apartamento}>
-                  {fila.apartamento} - {fila.propietario}
-                </option>
-              ))}
-            </select>
+            <label className="block text-sm font-semibold mb-2">Buscar</label>
+            <input
+              type="text"
+              value={buscar}
+              onChange={(e) => setBuscar(e.target.value)}
+              className="border rounded-xl px-4 py-3 w-full"
+              placeholder="Buscar por apartamento, propietario o teléfono..."
+            />
           </div>
         </div>
-
-        {filaSeleccionada && (
-          <div className="mt-4 bg-blue-50 border border-blue-200 rounded-2xl p-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
-              <div>
-                <p className="text-xs text-blue-700 font-bold">
-                  Apartamento seleccionado
-                </p>
-
-                <h2 className="text-xl font-black text-slate-900 mt-1">
-                  {filaSeleccionada.apartamento}
-                </h2>
-              </div>
-
-              <div>
-                <p className="text-xs text-blue-700 font-bold">Propietario</p>
-
-                <p className="font-black text-slate-900 mt-1">
-                  {filaSeleccionada.propietario}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs text-blue-700 font-bold">Teléfono</p>
-
-                <p className="font-black text-slate-900 mt-1">
-                  {filaSeleccionada.telefono}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setApartamentoSeleccionado("")}
-                className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-3 rounded-xl font-bold"
-              >
-                Limpiar filtro
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

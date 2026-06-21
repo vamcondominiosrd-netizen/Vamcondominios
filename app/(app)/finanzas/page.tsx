@@ -73,6 +73,16 @@ export default function FinanzasPage() {
           iconoColor: "text-slate-700",
         },
         {
+         titulo: "Saldos a Favor",
+         descripcion:
+          "Consulta y aplicación de créditos generados por pagos adelantados o excedentes de propietarios.",
+         href: "/creditos-propietarios",
+         icono: ReceiptText,
+         fondo: "from-red-600 to-red-800",
+         iconoColor: "text-red-700",
+         activo: true,
+        },
+        {
           titulo: "Reporte Financiero",
           descripcion:
             "Consultar ingresos, gastos, balances y estados financieros.",

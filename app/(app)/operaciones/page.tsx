@@ -61,8 +61,8 @@ export default function OperacionesPage() {
     {
       titulo: "Mantenimiento",
       descripcion:
-        "Controlar trabajos, reparaciones y mantenimiento de áreas comunes.",
-      href: "/mantenimiento",
+        "Asignar trabajos, reparaciones y mantenimiento de áreas comunes.",
+      href: "/trabajos-tecnicos",
       icono: Wrench,
       fondo: "from-emerald-600 to-emerald-800",
       iconoColor: "text-emerald-700",

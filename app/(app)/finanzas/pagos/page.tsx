@@ -72,6 +72,23 @@ export default function FinanzasPagosPage() {
       fondo: "from-pink-600 to-rose-800",
       iconoColor: "text-pink-700",
     },
+   {
+      titulo: "Resumen Solicitudes de Pago",
+      descripcion:
+        "Crear solicitudes de pago y dar seguimiento al flujo de aprobación.",
+      href: "/solicitudes-pago/resumen",
+      icono: ClipboardCheck,
+      fondo: "from-sky-600 to-sky-800",
+      iconoColor: "text-sky-700",
+    },
+   {
+      titulo: "Modulo del Recibo del Gas",
+      descripcion:"Recepción, precios, tanques y facturas de gas.",
+      href: "/gas",
+      icono: ClipboardCheck,
+      fondo: "from-sky-600 to-sky-800",
+      iconoColor: "text-sky-700",
+    },
   ];
 
   return (

@@ -52,7 +52,6 @@ type GastoRelacionado = {
   numero_cheque: string | null;
   fecha_pago: string | null;
   cuenta_banco: string | null;
-  cheque_url: string | null;
 };
 
 export default function ReporteSolicitudPagoPage() {
@@ -166,9 +165,7 @@ export default function ReporteSolicitudPagoPage() {
     if (solicitudActual.gasto_generado_id) {
       const { data: gastoData } = await supabase
         .from("gastos")
-        .select(
-          "id, estado, pagado, numero_cheque, fecha_pago, cuenta_banco, cheque_url"
-        )
+        .select("id, estado, pagado, numero_cheque, fecha_pago, cuenta_banco")
         .eq("id", solicitudActual.gasto_generado_id)
         .maybeSingle();
 
@@ -233,20 +230,6 @@ export default function ReporteSolicitudPagoPage() {
     window.print();
   }
 
-  function esImagenCheque(url: string | null | undefined) {
-    if (!url) return false;
-
-    const limpio = url.split("?")[0].toLowerCase();
-
-    return (
-      limpio.endsWith(".jpg") ||
-      limpio.endsWith(".jpeg") ||
-      limpio.endsWith(".png") ||
-      limpio.endsWith(".webp") ||
-      limpio.endsWith(".gif")
-    );
-  }
-
   const fechaSolicitud =
     solicitud?.fecha_solicitud || solicitud?.fecha || solicitud?.created_at;
 
@@ -260,7 +243,6 @@ export default function ReporteSolicitudPagoPage() {
     gastoRelacionado?.cuenta_banco || solicitud?.cuenta_banco || "-";
   const estadoFinal =
     gastoRelacionado?.estado || solicitud?.estado || "Sin estado";
-  const chequeUrlFinal = gastoRelacionado?.cheque_url || null;
 
   const numeroReporte = String(
     solicitud?.numero_solicitud || solicitud?.id || ""
@@ -349,19 +331,6 @@ export default function ReporteSolicitudPagoPage() {
             height: 3in !important;
             min-height: 3in !important;
             max-height: 3in !important;
-            overflow: hidden !important;
-          }
-
-          .cheque-final {
-            height: 2.85in !important;
-            max-height: 2.85in !important;
-            overflow: hidden !important;
-          }
-
-          .imagen-cheque-final {
-            max-height: 2.15in !important;
-            max-width: 6.8in !important;
-            object-fit: contain !important;
           }
 
           .pie-reporte {
@@ -564,45 +533,7 @@ export default function ReporteSolicitudPagoPage() {
           </div>
         </div>
 
-        <div className="espacio-blanco-final h-[3in]">
-          {chequeUrlFinal ? (
-            <div className="cheque-final border rounded-lg p-2 mt-2">
-              <div className="flex items-center justify-between border-b pb-1 mb-2">
-                <h3 className="font-black uppercase">
-                  Imagen del cheque emitido
-                </h3>
-
-                <div className="text-right text-[9px]">
-                  <p>
-                    <strong>No. cheque:</strong> {numeroChequeFinal}
-                  </p>
-                  <p>
-                    <strong>Fecha pago:</strong> {formatoFecha(fechaPagoFinal)}
-                  </p>
-                </div>
-              </div>
-
-              {esImagenCheque(chequeUrlFinal) ? (
-                <div className="flex justify-center items-center">
-                  <img
-                    src={chequeUrlFinal}
-                    alt={`Cheque solicitud ${solicitud.id}`}
-                    className="imagen-cheque-final w-full object-contain border rounded bg-white"
-                  />
-                </div>
-              ) : (
-                <div className="h-[2.1in] flex flex-col items-center justify-center border rounded bg-slate-50 text-slate-700">
-                  <p className="font-black uppercase">Cheque adjunto en PDF</p>
-                  <p className="text-[9px] mt-1">
-                    El archivo del cheque está disponible digitalmente.
-                  </p>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="h-full" />
-          )}
-        </div>
+        <div className="espacio-blanco-final h-[3in]" />
 
         <div className="pie-reporte text-[8px] text-slate-500 flex justify-between border-t pt-1">
           <span>Soporte físico de autorización y archivo.</span>

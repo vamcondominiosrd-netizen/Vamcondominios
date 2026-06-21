@@ -78,10 +78,10 @@ export default function CatalogosPage() {
       iconoColor: "text-slate-700",
     },
     {
-      titulo: "Importaciones",
+      titulo: "Catalogo de Tecnicos",
       descripcion:
-        "Importar catálogos o datos base desde archivos de Excel.",
-      href: "/catalogos/importaciones",
+        "Crear Catálogos de los Tecnicos.",
+      href: "/catalogo-tecnicos",
       icono: FileSpreadsheet,
       fondo: "from-indigo-600 to-indigo-900",
       iconoColor: "text-indigo-700",

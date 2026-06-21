@@ -51,6 +51,7 @@ type Pago = {
 type MesEstado = {
   mes: number;
   nombre: string;
+  corto: string;
   estado: "PAGADO" | "PARCIAL" | "PENDIENTE" | "SIN_CARGO";
   monto: number;
   pagado: number;
@@ -72,28 +73,19 @@ type FilaEstado = {
   mesesPendientes: number;
 };
 
-type ResumenMes = {
-  mes: number;
-  nombre: string;
-  cantidad: number;
-  facturado: number;
-  pagado: number;
-  pendiente: number;
-};
-
 const meses = [
-  "Enero",
-  "Febrero",
-  "Marzo",
-  "Abril",
-  "Mayo",
-  "Junio",
-  "Julio",
-  "Agosto",
-  "Septiembre",
-  "Octubre",
-  "Noviembre",
-  "Diciembre",
+  { nombre: "Enero", corto: "Ene" },
+  { nombre: "Febrero", corto: "Feb" },
+  { nombre: "Marzo", corto: "Mar" },
+  { nombre: "Abril", corto: "Abr" },
+  { nombre: "Mayo", corto: "May" },
+  { nombre: "Junio", corto: "Jun" },
+  { nombre: "Julio", corto: "Jul" },
+  { nombre: "Agosto", corto: "Ago" },
+  { nombre: "Septiembre", corto: "Sep" },
+  { nombre: "Octubre", corto: "Oct" },
+  { nombre: "Noviembre", corto: "Nov" },
+  { nombre: "Diciembre", corto: "Dic" },
 ];
 
 export default function ReportePagosPropietariosPage() {
@@ -101,7 +93,8 @@ export default function ReportePagosPropietariosPage() {
   const [condominioNombre, setCondominioNombre] = useState("");
 
   const [anio, setAnio] = useState(new Date().getFullYear());
-  const [apartamentoSeleccionado, setApartamentoSeleccionado] = useState("");
+  const [buscar, setBuscar] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState("TODOS");
 
   const [unidades, setUnidades] = useState<Unidad[]>([]);
   const [propietarios, setPropietarios] = useState<PropietarioApartamento[]>(
@@ -229,7 +222,6 @@ export default function ReportePagosPropietariosPage() {
     const nuevoAnio = Number(valor);
 
     setAnio(nuevoAnio);
-    setApartamentoSeleccionado("");
 
     if (condominioId) {
       cargarDatos(condominioId, nuevoAnio);
@@ -267,16 +259,15 @@ export default function ReportePagosPropietariosPage() {
     const codigoUnidad = normalizar(unidad.codigo);
 
     return (
-      propietarios.find(
-        (p) => normalizar(p.no_apartamento) === codigoUnidad
-      ) || null
+      propietarios.find((p) => normalizar(p.no_apartamento) === codigoUnidad) ||
+      null
     );
   }
 
   function crearFilaEstado(unidad: Unidad): FilaEstado {
     const propietario = buscarPropietarioPorUnidad(unidad);
 
-    const mesesEstado: MesEstado[] = meses.map((nombreMes, index) => {
+    const mesesEstado: MesEstado[] = meses.map((mesInfo, index) => {
       const numeroMes = index + 1;
 
       const cargosMes = cargos.filter((c) => {
@@ -291,7 +282,8 @@ export default function ReportePagosPropietariosPage() {
       if (cargosMes.length === 0) {
         return {
           mes: numeroMes,
-          nombre: nombreMes,
+          nombre: mesInfo.nombre,
+          corto: mesInfo.corto,
           estado: "SIN_CARGO",
           monto: 0,
           pagado: 0,
@@ -326,7 +318,8 @@ export default function ReportePagosPropietariosPage() {
 
       return {
         mes: numeroMes,
-        nombre: nombreMes,
+        nombre: mesInfo.nombre,
+        corto: mesInfo.corto,
         estado,
         monto,
         pagado,
@@ -379,29 +372,45 @@ export default function ReportePagosPropietariosPage() {
     return unidades.map((u) => crearFilaEstado(u));
   }, [unidades, propietarios, cargos, pagos]);
 
-  const filaSeleccionada = useMemo(() => {
-    if (!apartamentoSeleccionado) return null;
-
-    return (
-      filas.find(
-        (f) => normalizar(f.apartamento) === normalizar(apartamentoSeleccionado)
-      ) || null
-    );
-  }, [filas, apartamentoSeleccionado]);
-
   const filasFiltradas = useMemo(() => {
-    if (!apartamentoSeleccionado) return filas;
+    const texto = buscar.toLowerCase().trim();
 
-    return filas.filter(
-      (f) => normalizar(f.apartamento) === normalizar(apartamentoSeleccionado)
-    );
-  }, [filas, apartamentoSeleccionado]);
+    let lista = filas;
 
-  const resumenMeses = useMemo<ResumenMes[]>(() => {
-    return meses.map((nombreMes, index) => {
+    if (texto) {
+      lista = lista.filter((f) => {
+        const combinado = `
+          ${f.apartamento}
+          ${f.propietario}
+          ${f.telefono}
+        `.toLowerCase();
+
+        return combinado.includes(texto);
+      });
+    }
+
+    if (filtroEstado === "CON_DEUDA") {
+      lista = lista.filter((f) => f.totalPendiente > 0);
+    }
+
+    if (filtroEstado === "AL_DIA") {
+      lista = lista.filter((f) => f.totalPendiente <= 0 && f.totalFacturado > 0);
+    }
+
+    if (filtroEstado === "SIN_CARGOS") {
+      lista = lista.filter((f) => f.totalFacturado <= 0);
+    }
+
+    return lista;
+  }, [filas, buscar, filtroEstado]);
+
+  const resumenMeses = useMemo(() => {
+    return meses.map((mesInfo, index) => {
       const numeroMes = index + 1;
 
-      const cargosMes = cargos.filter((c) => obtenerMesCargo(c) === numeroMes);
+      const cargosMes = cargos.filter(
+        (c) => obtenerMesCargo(c) === numeroMes
+      );
 
       const facturado = cargosMes.reduce(
         (sum, c) => sum + Number(c.monto || 0),
@@ -420,7 +429,8 @@ export default function ReportePagosPropietariosPage() {
 
       return {
         mes: numeroMes,
-        nombre: nombreMes,
+        nombre: mesInfo.nombre,
+        corto: mesInfo.corto,
         cantidad: cargosMes.length,
         facturado,
         pagado,
@@ -448,6 +458,10 @@ export default function ReportePagosPropietariosPage() {
     (f) => f.totalPendiente > 0
   ).length;
 
+  const unidadesAlDia = filasFiltradas.filter(
+    (f) => f.totalPendiente <= 0 && f.totalFacturado > 0
+  ).length;
+
   function dinero(valor: number | null | undefined) {
     return Number(valor || 0).toLocaleString("es-DO", {
       minimumFractionDigits: 2,
@@ -467,10 +481,17 @@ export default function ReportePagosPropietariosPage() {
       return "bg-red-100 text-red-700 border-red-200";
     }
 
-    return "bg-slate-100 text-slate-500 border-slate-200";
+    return "bg-slate-100 text-slate-400 border-slate-200";
   }
 
   function textoEstado(estado: MesEstado["estado"]) {
+    if (estado === "PAGADO") return "P";
+    if (estado === "PARCIAL") return "PA";
+    if (estado === "PENDIENTE") return "PD";
+    return "-";
+  }
+
+  function descripcionEstado(estado: MesEstado["estado"]) {
     if (estado === "PAGADO") return "Pagado";
     if (estado === "PARCIAL") return "Parcial";
     if (estado === "PENDIENTE") return "Pendiente";
@@ -478,20 +499,35 @@ export default function ReportePagosPropietariosPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-3xl font-black text-slate-900">
-          Relación de Pagos por Propietario
-        </h1>
+    <div className="space-y-5">
+      <div className="bg-white rounded-2xl border shadow-sm p-5">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-black text-slate-900">
+              Pagos por Propietario
+            </h1>
 
-        <p className="text-slate-500 mt-2">
-          Vista mensual de pagos realizados, pagos parciales y meses pendientes
-          por apartamento.
-        </p>
+            <p className="text-slate-500 text-sm mt-1">
+              Relación compacta de meses pagados, parciales y pendientes.
+            </p>
 
-        <p className="text-sm text-blue-700 font-bold mt-3">
-          Condominio activo: {condominioNombre || "No seleccionado"}
-        </p>
+            <p className="text-sm text-blue-700 font-bold mt-2">
+              Condominio activo: {condominioNombre || "No seleccionado"}
+            </p>
+          </div>
+
+          <div className="flex gap-2 text-xs">
+            <span className="bg-green-100 text-green-700 border border-green-200 rounded-full px-3 py-1 font-bold">
+              P = Pagado
+            </span>
+            <span className="bg-blue-100 text-blue-700 border border-blue-200 rounded-full px-3 py-1 font-bold">
+              PA = Parcial
+            </span>
+            <span className="bg-red-100 text-red-700 border border-red-200 rounded-full px-3 py-1 font-bold">
+              PD = Pendiente
+            </span>
+          </div>
+        </div>
       </div>
 
       {mensaje && (
@@ -500,14 +536,14 @@ export default function ReportePagosPropietariosPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+      <div className="bg-white rounded-2xl border shadow-sm p-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
           <div>
-            <label className="block text-sm font-semibold mb-2">Año</label>
+            <label className="block text-sm font-semibold mb-1">Año</label>
             <select
               value={anio}
               onChange={(e) => cambiarAnio(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
+              className="border rounded-xl px-3 py-2 w-full bg-white text-sm"
             >
               {[2024, 2025, 2026, 2027, 2028].map((y) => (
                 <option key={y} value={y}>
@@ -517,138 +553,105 @@ export default function ReportePagosPropietariosPage() {
             </select>
           </div>
 
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-2">
-              Seleccionar apartamento
-            </label>
-
+          <div>
+            <label className="block text-sm font-semibold mb-1">Estado</label>
             <select
-              value={apartamentoSeleccionado}
-              onChange={(e) => setApartamentoSeleccionado(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value)}
+              className="border rounded-xl px-3 py-2 w-full bg-white text-sm"
             >
-              <option value="">Todos los apartamentos</option>
-
-              {filas.map((fila) => (
-                <option key={fila.unidad_id} value={fila.apartamento}>
-                  {fila.apartamento} - {fila.propietario}
-                </option>
-              ))}
+              <option value="TODOS">Todos</option>
+              <option value="CON_DEUDA">Con deuda</option>
+              <option value="AL_DIA">Al día</option>
+              <option value="SIN_CARGOS">Sin cargos</option>
             </select>
           </div>
-        </div>
 
-        {filaSeleccionada && (
-          <div className="mt-4 bg-blue-50 border border-blue-200 rounded-2xl p-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
-              <div>
-                <p className="text-xs text-blue-700 font-bold">
-                  Apartamento seleccionado
-                </p>
-
-                <h2 className="text-xl font-black text-slate-900 mt-1">
-                  {filaSeleccionada.apartamento}
-                </h2>
-              </div>
-
-              <div>
-                <p className="text-xs text-blue-700 font-bold">Propietario</p>
-
-                <p className="font-black text-slate-900 mt-1">
-                  {filaSeleccionada.propietario}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs text-blue-700 font-bold">Teléfono</p>
-
-                <p className="font-black text-slate-900 mt-1">
-                  {filaSeleccionada.telefono}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setApartamentoSeleccionado("")}
-                className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-3 rounded-xl font-bold"
-              >
-                Limpiar filtro
-              </button>
-            </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-semibold mb-1">Buscar</label>
+            <input
+              type="text"
+              value={buscar}
+              onChange={(e) => setBuscar(e.target.value)}
+              className="border rounded-xl px-3 py-2 w-full text-sm"
+              placeholder="Apartamento, propietario o teléfono..."
+            />
           </div>
-        )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <ResumenCard
-          titulo="Total facturado"
+          titulo="Facturado"
           valor={totalFacturadoGeneral}
           color="text-blue-700"
         />
 
         <ResumenCard
-          titulo="Total pagado"
+          titulo="Pagado"
           valor={totalPagadoGeneral}
           color="text-green-700"
         />
 
         <ResumenCard
-          titulo="Total pendiente"
+          titulo="Pendiente"
           valor={totalPendienteGeneral}
           color="text-red-700"
         />
 
         <ResumenCard
-          titulo="Unidades con deuda"
+          titulo="Con deuda"
           valor={unidadesConDeuda}
           color="text-amber-700"
           esCantidad
         />
+
+        <ResumenCard
+          titulo="Al día"
+          valor={unidadesAlDia}
+          color="text-emerald-700"
+          esCantidad
+        />
+      </div>
+
+      <div className="bg-white rounded-2xl border shadow-sm p-4">
+        <h2 className="font-black text-sm mb-3">Resumen por mes</h2>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          {resumenMeses.map((r) => (
+            <div
+              key={r.mes}
+              className="border rounded-xl p-3 bg-slate-50 text-xs"
+            >
+              <div className="flex items-center justify-between">
+                <p className="font-black text-slate-800">{r.corto}</p>
+                <span className="text-slate-500">{r.cantidad} cargos</span>
+              </div>
+
+              <p className="text-blue-700 font-bold mt-2">
+                RD$ {dinero(r.facturado)}
+              </p>
+
+              <p className="text-green-700 mt-1">
+                Pagado: RD$ {dinero(r.pagado)}
+              </p>
+
+              <p className="text-red-700 mt-1">
+                Pend.: RD$ {dinero(r.pendiente)}
+              </p>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
-        <div className="p-4 border-b">
-          <h2 className="font-black text-lg">Resumen de cargos por mes</h2>
-        </div>
+        <div className="p-4 border-b flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+          <h2 className="font-black text-lg">Detalle compacto</h2>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-xs">
-            <thead className="bg-slate-100">
-              <tr>
-                <th className="p-3 border text-left">Mes</th>
-                <th className="p-3 border text-center">Cantidad cargos</th>
-                <th className="p-3 border text-right">Facturado</th>
-                <th className="p-3 border text-right">Pagado</th>
-                <th className="p-3 border text-right">Pendiente</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {resumenMeses.map((r) => (
-                <tr key={r.mes}>
-                  <td className="p-3 border font-bold">{r.nombre}</td>
-                  <td className="p-3 border text-center">{r.cantidad}</td>
-                  <td className="p-3 border text-right">
-                    RD$ {dinero(r.facturado)}
-                  </td>
-                  <td className="p-3 border text-right text-green-700">
-                    RD$ {dinero(r.pagado)}
-                  </td>
-                  <td className="p-3 border text-right text-red-700 font-bold">
-                    RD$ {dinero(r.pendiente)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
-        <div className="p-4 border-b">
-          <h2 className="font-black text-lg">
-            Pagos mes por mes de propietarios
-          </h2>
+          <p className="text-xs text-slate-500">
+            Cada columna muestra el estado del mes. Coloca el cursor encima para
+            ver monto, pagado y balance.
+          </p>
         </div>
 
         {loading ? (
@@ -658,45 +661,50 @@ export default function ReportePagosPropietariosPage() {
             <table className="min-w-full text-xs">
               <thead className="bg-slate-100">
                 <tr>
-                  <th className="p-3 border text-left sticky left-0 bg-slate-100 z-10">
-                    Apartamento
+                  <th className="p-2 border text-left sticky left-0 bg-slate-100 z-20 min-w-24">
+                    Apto
                   </th>
-                  <th className="p-3 border text-left">Propietario</th>
-                  <th className="p-3 border text-left">Teléfono</th>
+                  <th className="p-2 border text-left min-w-52">
+                    Propietario
+                  </th>
 
                   {meses.map((m) => (
-                    <th key={m} className="p-3 border text-center">
-                      {m.slice(0, 3)}
+                    <th key={m.corto} className="p-2 border text-center">
+                      {m.corto}
                     </th>
                   ))}
 
-                  <th className="p-3 border text-right">Facturado</th>
-                  <th className="p-3 border text-right">Pagado</th>
-                  <th className="p-3 border text-right">Pendiente</th>
-                  <th className="p-3 border text-center">Meses Pend.</th>
+                  <th className="p-2 border text-right min-w-24">Pagado</th>
+                  <th className="p-2 border text-right min-w-24">Pend.</th>
+                  <th className="p-2 border text-center min-w-20">Meses</th>
                 </tr>
               </thead>
 
               <tbody>
                 {filasFiltradas.map((fila) => (
                   <tr key={fila.unidad_id} className="hover:bg-slate-50">
-                    <td className="p-3 border font-black sticky left-0 bg-white z-10">
+                    <td className="p-2 border font-black sticky left-0 bg-white z-10">
                       {fila.apartamento}
                     </td>
 
-                    <td className="p-3 border min-w-52">
-                      {fila.propietario}
+                    <td className="p-2 border">
+                      <div className="font-semibold text-slate-800">
+                        {fila.propietario}
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        {fila.telefono}
+                      </div>
                     </td>
 
-                    <td className="p-3 border">{fila.telefono}</td>
-
                     {fila.meses.map((mes) => (
-                      <td key={mes.mes} className="p-2 border text-center">
+                      <td key={mes.mes} className="p-1 border text-center">
                         <div
-                          className={`border rounded-lg px-2 py-1 font-bold ${claseEstado(
+                          className={`inline-flex items-center justify-center w-8 h-7 border rounded-lg text-[10px] font-black ${claseEstado(
                             mes.estado
                           )}`}
-                          title={`Monto: RD$ ${dinero(
+                          title={`${mes.nombre} - ${descripcionEstado(
+                            mes.estado
+                          )} | Monto: RD$ ${dinero(
                             mes.monto
                           )} | Pagado: RD$ ${dinero(
                             mes.pagado
@@ -704,28 +712,18 @@ export default function ReportePagosPropietariosPage() {
                         >
                           {textoEstado(mes.estado)}
                         </div>
-
-                        {mes.estado !== "SIN_CARGO" && (
-                          <div className="text-[10px] text-slate-500 mt-1">
-                            RD$ {dinero(mes.pagado)}
-                          </div>
-                        )}
                       </td>
                     ))}
 
-                    <td className="p-3 border text-right font-bold">
-                      RD$ {dinero(fila.totalFacturado)}
-                    </td>
-
-                    <td className="p-3 border text-right font-bold text-green-700">
+                    <td className="p-2 border text-right font-bold text-green-700">
                       RD$ {dinero(fila.totalPagado)}
                     </td>
 
-                    <td className="p-3 border text-right font-bold text-red-700">
+                    <td className="p-2 border text-right font-bold text-red-700">
                       RD$ {dinero(fila.totalPendiente)}
                     </td>
 
-                    <td className="p-3 border text-center font-black text-red-700">
+                    <td className="p-2 border text-center font-black text-red-700">
                       {fila.mesesPendientes}
                     </td>
                   </tr>
@@ -734,7 +732,7 @@ export default function ReportePagosPropietariosPage() {
                 {filasFiltradas.length === 0 && (
                   <tr>
                     <td
-                      colSpan={19}
+                      colSpan={18}
                       className="p-6 border text-center text-slate-500"
                     >
                       No hay información para mostrar.
@@ -747,14 +745,12 @@ export default function ReportePagosPropietariosPage() {
         )}
       </div>
 
-      <div className="bg-slate-50 border rounded-xl p-4 text-sm text-slate-600">
+      <div className="bg-slate-50 border rounded-xl p-4 text-xs text-slate-600">
         <p>
-          <strong>Nota:</strong> Este reporte se basa en los cargos generados en{" "}
-          <strong>cargos_periodicos</strong>. Un mes aparecerá como pagado
-          cuando el balance del cargo esté en cero. También toma como cargos de
-          mantenimiento los tipos <strong>ORDINARIO</strong> y{" "}
-          <strong>MANTENIMIENTO</strong>. Si el campo <strong>mes</strong> viene
-          vacío, el sistema obtiene el mes desde <strong>periodo</strong>.
+          <strong>Nota:</strong> Este reporte toma cargos tipo{" "}
+          <strong>MANTENIMIENTO</strong> y <strong>ORDINARIO</strong>. Si el
+          campo <strong>mes</strong> está vacío, el sistema calcula el mes desde{" "}
+          <strong>periodo</strong>.
         </p>
       </div>
     </div>
@@ -773,10 +769,10 @@ function ResumenCard({
   esCantidad?: boolean;
 }) {
   return (
-    <div className="bg-white rounded-2xl border shadow-sm p-5">
-      <p className="text-sm text-slate-500">{titulo}</p>
+    <div className="bg-white rounded-2xl border shadow-sm p-4">
+      <p className="text-xs text-slate-500">{titulo}</p>
 
-      <h2 className={`text-2xl font-black mt-2 ${color}`}>
+      <h2 className={`text-xl font-black mt-1 ${color}`}>
         {esCantidad
           ? Number(valor || 0).toLocaleString("es-DO")
           : `RD$ ${Number(valor || 0).toLocaleString("es-DO", {
