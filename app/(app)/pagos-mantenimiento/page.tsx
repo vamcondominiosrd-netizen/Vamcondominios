@@ -1,52 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { supabase } from "@/app/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/app/lib/supabaseClient";
+import { generarAsientoPagoMantenimiento } from "@/app/lib/contabilidad/generarAsientoPagoMantenimiento";
 
-type Unidad = {
-  id: number;
-  codigo: string;
-  propietario_nombre: string | null;
-  propietario_cedula: string | null;
-  propietario_telefono: string | null;
-  cuota_mensual_actual: number | null;
-};
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import PagoMantenimientoToolbar from "./components/PagoMantenimientoToolbar";
+import PagoResumen from "./components/PagoResumen";
+import PagoForm from "./components/PagoForm";
+import PagoHistorial from "./components/PagoHistorial";
 
-type CuentaBancaria = {
-  id: number;
-  nombre_banco: string;
-  numero_cuenta: string;
-  fondo_tipo: string | null;
-  balance_actual: number | null;
-  fondo_ordinario: number | null;
-  fondo_extraordinario: number | null;
-  fondo_reserva: number | null;
-};
-
-type Pago = {
-  id: number;
-  monto: number;
-  fecha_pago: string;
-  referencia: string | null;
-  metodo_pago: string | null;
-  metodo?: string | null;
-  origen?: string | null;
-  tipo_fondo: string | null;
-  descripcion?: string | null;
-  comprobante_url: string | null;
-  unidades: {
-    codigo: string;
-    propietario_nombre?: string | null;
-  } | null;
-};
+import type { CuentaBancaria, Pago, Unidad } from "./types";
 
 export default function PagosMantenimientoPage() {
   const router = useRouter();
 
   const [condominioId, setCondominioId] = useState<string>("");
   const [condominioNombre, setCondominioNombre] = useState("");
+  const [cuotaOrdinaria, setCuotaOrdinaria] = useState<number>(0);
 
   const [unidades, setUnidades] = useState<Unidad[]>([]);
   const [cuentas, setCuentas] = useState<CuentaBancaria[]>([]);
@@ -63,6 +35,13 @@ export default function PagosMantenimientoPage() {
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState("");
+  const [bitacoraProceso, setBitacoraProceso] = useState<string[]>([]);
+
+  function agregarBitacora(texto: string) {
+    const linea = `${new Date().toLocaleTimeString()} - ${texto}`;
+    console.log("[Pagos Mantenimiento]", linea);
+    setBitacoraProceso((prev) => [...prev, linea]);
+  }
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
@@ -79,22 +58,40 @@ export default function PagosMantenimientoPage() {
     setCondominioNombre(nombre);
     setFechaPago(hoy);
 
+    cargarConfiguracionCargos(id);
     cargarUnidades(id);
     cargarCuentas(id);
     cargarPagos(id);
   }, [router]);
 
+  async function cargarConfiguracionCargos(id: string) {
+    const { data, error } = await supabase
+      .from("configuracion_cargos")
+      .select("cuota_ordinaria")
+      .eq("condominio_id", Number(id))
+      .eq("activa", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error cargando configuración de cargos:", error.message);
+      setCuotaOrdinaria(0);
+      return;
+    }
+
+    setCuotaOrdinaria(Number(data?.cuota_ordinaria || 0));
+  }
+
   async function cargarUnidades(id: string) {
     const { data, error } = await supabase
       .from("unidades")
       .select(
-        "id, codigo, propietario_nombre, propietario_cedula, propietario_telefono, cuota_mensual_actual"
+        "id, client_id, codigo, propietario_id, propietario_nombre, propietario_cedula, propietario_telefono, cuota_mensual_actual",
       )
       .eq("condominio_id", Number(id))
       .eq("activa", true)
-      .order("codigo", {
-        ascending: true,
-      });
+      .order("codigo", { ascending: true });
 
     if (error) {
       alert("Error cargando unidades: " + error.message);
@@ -107,7 +104,8 @@ export default function PagosMantenimientoPage() {
   async function cargarCuentas(id: string) {
     const { data, error } = await supabase
       .from("cuentas_bancarias")
-      .select(`
+      .select(
+        `
         id,
         nombre_banco,
         numero_cuenta,
@@ -116,7 +114,8 @@ export default function PagosMantenimientoPage() {
         fondo_ordinario,
         fondo_extraordinario,
         fondo_reserva
-      `)
+      `,
+      )
       .eq("condominio_id", Number(id))
       .eq("activa", true)
       .order("nombre_banco", { ascending: true });
@@ -134,8 +133,10 @@ export default function PagosMantenimientoPage() {
 
     const { data, error } = await supabase
       .from("pagos")
-      .select(`
+      .select(
+        `
         id,
+        unidad_id,
         monto,
         fecha_pago,
         referencia,
@@ -144,19 +145,17 @@ export default function PagosMantenimientoPage() {
         origen,
         tipo_fondo,
         descripcion,
+        periodo,
         comprobante_url,
         unidades (
           codigo,
           propietario_nombre
         )
-      `)
+      `,
+      )
       .eq("condominio_id", Number(id))
-      .order("fecha_pago", {
-        ascending: false,
-      })
-      .order("id", {
-        ascending: false,
-      });
+      .order("fecha_pago", { ascending: false })
+      .order("id", { ascending: false });
 
     setLoading(false);
 
@@ -168,6 +167,17 @@ export default function PagosMantenimientoPage() {
     setPagos((data || []) as Pago[]);
   }
 
+  async function refrescarDatos() {
+    if (!condominioId) return;
+
+    await Promise.all([
+      cargarConfiguracionCargos(condominioId),
+      cargarUnidades(condominioId),
+      cargarCuentas(condominioId),
+      cargarPagos(condominioId),
+    ]);
+  }
+
   const cuentaAsignada = useMemo(() => {
     return cuentas.find((c) => c.fondo_tipo === tipoFondo) || null;
   }, [cuentas, tipoFondo]);
@@ -175,6 +185,12 @@ export default function PagosMantenimientoPage() {
   const unidadSeleccionada = useMemo(() => {
     return unidades.find((u) => String(u.id) === unidadId) || null;
   }, [unidades, unidadId]);
+
+  const pagosUnidadSeleccionada = useMemo(() => {
+    if (!unidadId) return [];
+
+    return pagos.filter((p: any) => String(p.unidad_id || "") === String(unidadId));
+  }, [pagos, unidadId]);
 
   function seleccionarUnidad(idUnidad: string) {
     setUnidadId(idUnidad);
@@ -186,7 +202,9 @@ export default function PagosMantenimientoPage() {
       return;
     }
 
-    const cuota = Number(unidad.cuota_mensual_actual || 0);
+    const cuotaConfigurada = Number(cuotaOrdinaria || 0);
+    const cuotaUnidad = Number(unidad.cuota_mensual_actual || 0);
+    const cuota = cuotaConfigurada > 0 ? cuotaConfigurada : cuotaUnidad;
 
     if (cuota > 0) {
       setMonto(String(cuota));
@@ -194,23 +212,16 @@ export default function PagosMantenimientoPage() {
   }
 
   async function subirComprobante(unidadIdPago: number) {
-    if (!comprobante || !condominioId) {
-      return null;
-    }
+    if (!comprobante || !condominioId) return null;
 
     const extension = comprobante.name.split(".").pop();
-
     const nombreArchivo = `${condominioId}/${Date.now()}-unidad-${unidadIdPago}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from("comprobantes-pagos")
-      .upload(nombreArchivo, comprobante, {
-        upsert: true,
-      });
+      .upload(nombreArchivo, comprobante, { upsert: true });
 
-    if (uploadError) {
-      throw new Error(uploadError.message);
-    }
+    if (uploadError) throw new Error(uploadError.message);
 
     const { data } = supabase.storage
       .from("comprobantes-pagos")
@@ -219,76 +230,9 @@ export default function PagosMantenimientoPage() {
     return data.publicUrl;
   }
 
-  async function actualizarBalanceCuenta(
-    cuentaId: number,
-    fondo: string,
-    montoPago: number
-  ) {
-    const { data: cuentaActual, error: errorCuenta } = await supabase
-      .from("cuentas_bancarias")
-      .select(`
-        id,
-        balance_actual,
-        fondo_ordinario,
-        fondo_extraordinario,
-        fondo_reserva
-      `)
-      .eq("id", cuentaId)
-      .eq("condominio_id", Number(condominioId))
-      .single();
-
-    if (errorCuenta) {
-      throw new Error(
-        "El pago fue guardado, pero no se pudo leer la cuenta bancaria: " +
-          errorCuenta.message
-      );
-    }
-
-    const fondoOrdinarioActual = Number(cuentaActual.fondo_ordinario || 0);
-    const fondoExtraActual = Number(cuentaActual.fondo_extraordinario || 0);
-    const fondoReservaActual = Number(cuentaActual.fondo_reserva || 0);
-    const balanceActual = Number(cuentaActual.balance_actual || 0);
-
-    let nuevoFondoOrdinario = fondoOrdinarioActual;
-    let nuevoFondoExtraordinario = fondoExtraActual;
-    let nuevoFondoReserva = fondoReservaActual;
-
-    if (fondo === "ORDINARIO") {
-      nuevoFondoOrdinario += montoPago;
-    }
-
-    if (fondo === "EXTRAORDINARIO") {
-      nuevoFondoExtraordinario += montoPago;
-    }
-
-    if (fondo === "RESERVA") {
-      nuevoFondoReserva += montoPago;
-    }
-
-    const nuevoBalance = balanceActual + montoPago;
-
-    const { error: errorUpdate } = await supabase
-      .from("cuentas_bancarias")
-      .update({
-        fondo_ordinario: nuevoFondoOrdinario,
-        fondo_extraordinario: nuevoFondoExtraordinario,
-        fondo_reserva: nuevoFondoReserva,
-        balance_actual: nuevoBalance,
-      })
-      .eq("id", cuentaId)
-      .eq("condominio_id", Number(condominioId));
-
-    if (errorUpdate) {
-      throw new Error(
-        "El pago fue guardado, pero no se pudo actualizar el balance bancario: " +
-          errorUpdate.message
-      );
-    }
-  }
-
   async function validarDuplicadoReferencia(
     referenciaLimpia: string,
-    idCondominio: string
+    idCondominio: string,
   ) {
     if (!referenciaLimpia) return false;
 
@@ -306,9 +250,82 @@ export default function PagosMantenimientoPage() {
     return Boolean(data?.id);
   }
 
+  function nombreMesPeriodo(periodo: string) {
+    const nombresMeses = [
+      "Enero",
+      "Febrero",
+      "Marzo",
+      "Abril",
+      "Mayo",
+      "Junio",
+      "Julio",
+      "Agosto",
+      "Septiembre",
+      "Octubre",
+      "Noviembre",
+      "Diciembre",
+    ];
+
+    const [anioTexto, mesTexto] = String(periodo || "").split("-");
+    const anio = Number(anioTexto);
+    const mes = Number(mesTexto);
+
+    if (!anio || !mes || mes < 1 || mes > 12) return periodo || "";
+
+    return `${nombresMeses[mes - 1]} ${anio}`;
+  }
+
+  async function obtenerPeriodosPago(
+    idCondominio: string,
+    idUnidad: number,
+    montoPago: number,
+  ) {
+    const { data, error } = await supabase
+      .from("cargos_periodicos")
+      .select("id, periodo, balance, estado")
+      .eq("condominio_id", Number(idCondominio))
+      .eq("unidad_id", idUnidad)
+      .gt("balance", 0)
+      .neq("estado", "PAGADO")
+      .order("anio", { ascending: true })
+      .order("mes", { ascending: true })
+      .order("id", { ascending: true });
+
+    if (error) {
+      throw new Error(
+        "Error buscando cargos pendientes para identificar el mes pagado: " +
+          error.message,
+      );
+    }
+
+    let restante = Number(montoPago || 0);
+    const periodos: string[] = [];
+
+    for (const cargo of data || []) {
+      if (restante <= 0) break;
+
+      const balance = Number((cargo as any).balance || 0);
+      const periodo = String((cargo as any).periodo || "");
+
+      if (balance <= 0 || !periodo) continue;
+
+      periodos.push(periodo);
+      restante -= Math.min(restante, balance);
+    }
+
+    const periodosUnicos = Array.from(new Set(periodos.filter(Boolean)));
+
+    return {
+      periodos: periodosUnicos,
+      mesesTexto: periodosUnicos.map(nombreMesPeriodo).join(", "),
+    };
+  }
+
   async function guardarPago(e: React.FormEvent) {
     e.preventDefault();
     setMensaje("");
+    setBitacoraProceso([]);
+    agregarBitacora("Paso 1: Iniciando validación del pago...");
 
     if (!unidadId || !fechaPago || !monto) {
       alert("Debe completar unidad, fecha y monto.");
@@ -350,14 +367,15 @@ export default function PagosMantenimientoPage() {
     setGuardando(true);
 
     try {
+      agregarBitacora("Paso 2: Validando referencia duplicada...");
       const referenciaExiste = await validarDuplicadoReferencia(
         referenciaLimpia,
-        condominioId
+        condominioId,
       );
 
       if (referenciaExiste) {
         const continuar = confirm(
-          "Ya existe un pago registrado con esta referencia. ¿Desea continuar de todas formas?"
+          "Ya existe un pago registrado con esta referencia. ¿Desea continuar de todas formas?",
         );
 
         if (!continuar) {
@@ -366,60 +384,132 @@ export default function PagosMantenimientoPage() {
         }
       }
 
+      agregarBitacora("Paso 3: Subiendo comprobante, si fue seleccionado...");
       const comprobanteUrl = await subirComprobante(unidad.id);
 
-      const { data: pagoInsertado, error } = await supabase
-        .from("pagos")
-        .insert([
-          {
-            condominio_id: Number(condominioId),
-            unidad_id: unidad.id,
-            cuenta_bancaria_id: cuentaAsignada.id,
-            tipo_fondo: tipoFondo,
-            monto: montoNumerico,
-            fecha_pago: fechaPago,
-            metodo: "MANUAL",
-            metodo_pago: metodoPago,
-            referencia: referenciaLimpia,
-            origen: "MANUAL",
-            descripcion: `Pago manual de mantenimiento - Unidad ${unidad.codigo}`,
-            comprobante_url: comprobanteUrl,
-          },
-        ])
-        .select("id")
-        .single();
+      agregarBitacora(
+        comprobanteUrl
+          ? "Paso 3 OK: Comprobante subido correctamente."
+          : "Paso 3 OK: No se seleccionó comprobante.",
+      );
 
-      if (error) {
-        alert("Error guardando pago: " + error.message);
+      agregarBitacora(
+        "Paso 4: Buscando cargos pendientes para identificar período pagado...",
+      );
+
+      const periodosPago = await obtenerPeriodosPago(
+        condominioId,
+        unidad.id,
+        montoNumerico,
+      );
+
+      const periodoPago =
+        periodosPago.periodos.length > 0
+          ? periodosPago.periodos.join(",")
+          : fechaPago.slice(0, 7);
+
+      const descripcionPago = periodosPago.mesesTexto
+        ? `Pago mantenimiento ${periodosPago.mesesTexto} - Unidad ${unidad.codigo}`
+        : `Pago mantenimiento ${nombreMesPeriodo(fechaPago.slice(0, 7))} - Unidad ${unidad.codigo}`;
+
+      agregarBitacora(
+        `Paso 4 OK: Período detectado: ${periodoPago}. Descripción: ${descripcionPago}`,
+      );
+
+      agregarBitacora(
+        "Paso 5: Ejecutando función central registrar_pago_mantenimiento_completo()...",
+      );
+
+      const { data: resultado, error: errorRegistroCompleto } =
+        await supabase.rpc("registrar_pago_mantenimiento_completo", {
+          p_condominio_id: Number(condominioId),
+          p_unidad_id: unidad.id,
+          p_fecha_pago: fechaPago,
+          p_monto: montoNumerico,
+          p_metodo_pago: metodoPago,
+          p_referencia: referenciaLimpia,
+          p_cuenta_bancaria_id: cuentaAsignada.id,
+          p_comprobante_url: comprobanteUrl,
+          p_tipo_fondo: tipoFondo,
+        });
+
+      if (errorRegistroCompleto) {
+        agregarBitacora(
+          "ERROR Paso 5: La función central no pudo completar el pago. " +
+            errorRegistroCompleto.message,
+        );
+        alert(
+          "No se pudo completar el pago. No debe quedar el proceso a medias: " +
+            errorRegistroCompleto.message,
+        );
         setGuardando(false);
+        await cargarPagos(condominioId);
         return;
       }
 
-      const { error: errorAplicacion } = await supabase.rpc(
-        "aplicar_pago_a_cargos",
-        {
-          p_pago_id: pagoInsertado.id,
-          p_condominio_id: Number(condominioId),
-          p_unidad_id: unidad.id,
-          p_monto: montoNumerico,
-        }
+      const resultadoRpc = resultado as any;
+      const pagoId = Number(resultadoRpc?.pago_id || 0);
+
+      if (!pagoId) {
+        agregarBitacora(
+          "ERROR Paso 5: La función central respondió sin pago_id.",
+        );
+        alert(
+          "El pago pudo haberse registrado, pero la función no devolvió el ID del pago. Revise la base de datos antes de continuar.",
+        );
+        setGuardando(false);
+        await cargarPagos(condominioId);
+        return;
+      }
+
+      agregarBitacora(
+        `Paso 5 OK: Pago completo registrado. ID pago: ${pagoId}. Banco y cargos actualizados.`,
       );
 
-      if (errorAplicacion) {
-        alert(
-          "Pago guardado, pero no se pudo aplicar a los cargos: " +
-            errorAplicacion.message
+      if (Number(resultadoRpc?.monto_no_aplicado || 0) > 0) {
+        agregarBitacora(
+          `AVISO: Quedó monto no aplicado: RD$ ${Number(
+            resultadoRpc.monto_no_aplicado,
+          ).toLocaleString("es-DO", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}`,
         );
       }
 
-      await actualizarBalanceCuenta(
-        cuentaAsignada.id,
-        tipoFondo,
-        montoNumerico
-      );
+      agregarBitacora("Paso 6: Generando asiento contable...");
 
-      alert(
-        "Pago registrado, aplicado y sumado al balance bancario correctamente."
+      const asientoResultado = await generarAsientoPagoMantenimiento({
+        condominio_id: Number(condominioId),
+        pago_id: pagoId,
+        fecha: fechaPago,
+        monto: montoNumerico,
+        referencia: referenciaLimpia,
+        descripcion: descripcionPago,
+        usuario: null,
+      });
+
+      if (!asientoResultado.ok) {
+        agregarBitacora(
+          "ERROR Paso 6: No se pudo generar asiento contable. " +
+            asientoResultado.error,
+        );
+        alert(
+          "Pago registrado, cargos y Control Bancario actualizados, pero no se pudo generar el asiento contable: " +
+            asientoResultado.error,
+        );
+      } else {
+        agregarBitacora(
+          asientoResultado.duplicado
+            ? "Paso 6 OK: El asiento contable ya existía."
+            : "Paso 6 OK: Asiento contable generado correctamente.",
+        );
+      }
+
+      agregarBitacora("Paso 7: Proceso completado correctamente.");
+
+      setMensaje(
+        "Pago registrado correctamente. Cargos actualizados, Control Bancario recalculado y recibo disponible.",
       );
 
       setUnidadId("");
@@ -431,349 +521,118 @@ export default function PagosMantenimientoPage() {
       setComprobante(null);
 
       const inputFile = document.getElementById(
-        "comprobante"
+        "comprobante",
       ) as HTMLInputElement | null;
 
-      if (inputFile) {
-        inputFile.value = "";
-      }
+      if (inputFile) inputFile.value = "";
 
       await cargarCuentas(condominioId);
       await cargarPagos(condominioId);
+
+      router.push(`/recibos/pago/mantenimiento/${pagoId}`);
     } catch (error: any) {
+      agregarBitacora(
+        "ERROR GENERAL: " + (error.message || "Error registrando el pago."),
+      );
       alert(error.message || "Error registrando el pago.");
     }
 
     setGuardando(false);
   }
 
-  function dinero(valor: number | null | undefined) {
-    return Number(valor || 0).toLocaleString("es-DO", {
-      minimumFractionDigits: 2,
-    });
-  }
+  const pagosResumen = unidadId ? pagosUnidadSeleccionada : pagos;
 
-  const totalPagado = pagos.reduce((sum, p) => sum + Number(p.monto || 0), 0);
+  const totalPagado = pagosResumen.reduce(
+    (sum, p) => sum + Number(p.monto || 0),
+    0,
+  );
+  const cantidadPagos = pagosResumen.length;
+  const promedioPago = cantidadPagos > 0 ? totalPagado / cantidadPagos : 0;
+  const ultimoPago = pagosResumen[0]?.fecha_pago || "-";
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-3xl shadow-sm border p-6">
-        <h1 className="text-3xl font-black text-slate-800">
-          Pagos de Mantenimiento
-        </h1>
-
-        <p className="text-slate-500 mt-2">
-          Registro de pagos de mantenimiento, aplicación a cargos y
-          actualización automática del banco.
-        </p>
-
-        <p className="text-sm text-blue-700 font-bold mt-3">
-          Condominio activo: {condominioNombre || "No seleccionado"}
-        </p>
-      </div>
+    <PageContainer>
+      <PagoMantenimientoToolbar onRefresh={refrescarDatos} />
 
       {mensaje && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-xl p-4 text-sm">
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
           {mensaje}
         </div>
       )}
 
-      <div className="bg-white rounded-2xl shadow-sm border p-6">
-        <h2 className="text-lg font-black mb-5">Registrar pago</h2>
-
-        <form
-          onSubmit={guardarPago}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Unidad / Propietario
-            </label>
-
-            <select
-              value={unidadId}
-              onChange={(e) => seleccionarUnidad(e.target.value)}
-              className="w-full border rounded-xl px-4 py-3 bg-white"
-            >
-              <option value="">Seleccione unidad</option>
-
-              {unidades.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.codigo} - {u.propietario_nombre || "Sin propietario"}
-                </option>
-              ))}
-            </select>
+      {bitacoraProceso.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-800">
+              Bitácora del proceso de pago
+            </h3>
+            <span className="text-xs text-slate-500">Depuración</span>
           </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Fondo
-            </label>
-
-            <select
-              value={tipoFondo}
-              onChange={(e) => setTipoFondo(e.target.value)}
-              className="w-full border rounded-xl px-4 py-3 bg-white"
-            >
-              <option value="ORDINARIO">Fondo Ordinario</option>
-              <option value="EXTRAORDINARIO">Fondo Extraordinario</option>
-              <option value="RESERVA">Fondo Reserva</option>
-            </select>
-          </div>
-
-          {unidadSeleccionada && (
-            <div className="md:col-span-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
-              <p className="text-xs text-blue-700 font-bold mb-1">
-                Información de la unidad seleccionada
-              </p>
-
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
-                <div>
-                  <span className="text-slate-500">Unidad:</span>
-                  <p className="font-black text-slate-800">
-                    {unidadSeleccionada.codigo}
-                  </p>
-                </div>
-
-                <div>
-                  <span className="text-slate-500">Propietario:</span>
-                  <p className="font-black text-slate-800">
-                    {unidadSeleccionada.propietario_nombre || "Sin propietario"}
-                  </p>
-                </div>
-
-                <div>
-                  <span className="text-slate-500">Teléfono:</span>
-                  <p className="font-black text-slate-800">
-                    {unidadSeleccionada.propietario_telefono || "-"}
-                  </p>
-                </div>
-
-                <div>
-                  <span className="text-slate-500">Cuota mensual:</span>
-                  <p className="font-black text-green-700">
-                    RD$ {dinero(unidadSeleccionada.cuota_mensual_actual)}
-                  </p>
-                </div>
+          <div className="max-h-56 space-y-1 overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+            {bitacoraProceso.map((linea, index) => (
+              <div
+                key={`${linea}-${index}`}
+                className={
+                  linea.includes("ERROR") ? "font-semibold text-red-700" : ""
+                }
+              >
+                {linea}
               </div>
-            </div>
-          )}
-
-          <div className="md:col-span-2 bg-slate-50 border rounded-xl px-4 py-3">
-            <p className="text-xs text-slate-500 mb-1">
-              Cuenta bancaria asignada
-            </p>
-
-            {cuentaAsignada ? (
-              <div>
-                <p className="font-semibold text-slate-800">
-                  {cuentaAsignada.nombre_banco} - {cuentaAsignada.numero_cuenta}
-                </p>
-
-                <p className="text-sm text-slate-600 mt-1">
-                  Balance actual: RD$ {dinero(cuentaAsignada.balance_actual)}
-                </p>
-              </div>
-            ) : (
-              <p className="text-red-600 font-medium">
-                No hay cuenta configurada para este fondo.
-              </p>
-            )}
+            ))}
           </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Fecha pago
-            </label>
-
-            <input
-              type="date"
-              value={fechaPago}
-              onChange={(e) => setFechaPago(e.target.value)}
-              className="w-full border rounded-xl px-4 py-3"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Monto
-            </label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={monto}
-              onChange={(e) => setMonto(e.target.value)}
-              placeholder="Monto"
-              className="w-full border rounded-xl px-4 py-3"
-            />
-
-            {unidadSeleccionada?.cuota_mensual_actual && (
-              <p className="text-xs text-slate-500 mt-1">
-                Monto sugerido por cuota mensual: RD${" "}
-                {dinero(unidadSeleccionada.cuota_mensual_actual)}. Puede
-                modificarlo si el pago es parcial, adicional o adelantado.
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Método pago
-            </label>
-
-            <select
-              value={metodoPago}
-              onChange={(e) => setMetodoPago(e.target.value)}
-              className="w-full border rounded-xl px-4 py-3 bg-white"
-            >
-              <option value="">Método pago</option>
-              <option value="Transferencia">Transferencia</option>
-              <option value="Depósito">Depósito</option>
-              <option value="Efectivo">Efectivo</option>
-              <option value="Cheque">Cheque</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Referencia
-            </label>
-
-            <input
-              type="text"
-              value={referencia}
-              onChange={(e) => setReferencia(e.target.value)}
-              className="w-full border rounded-xl px-4 py-3"
-              placeholder="Referencia"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Comprobante
-            </label>
-
-            <input
-              id="comprobante"
-              type="file"
-              accept="image/*,.pdf"
-              onChange={(e) => setComprobante(e.target.files?.[0] || null)}
-              className="w-full border rounded-xl px-4 py-3"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <button
-              type="submit"
-              disabled={guardando}
-              className="bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white px-5 py-3 rounded-xl font-bold transition"
-            >
-              {guardando ? "Guardando..." : "Registrar pago"}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <div className="bg-white rounded-2xl border shadow-sm p-5">
-        <p className="text-sm text-slate-500">Total recaudado</p>
-
-        <h2 className="text-3xl font-black text-green-600 mt-2">
-          RD$ {dinero(totalPagado)}
-        </h2>
-      </div>
-
-      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
-        <div className="p-4 border-b">
-          <h2 className="font-black">Historial de pagos aplicados</h2>
         </div>
+      )}
 
-        {loading ? (
-          <div className="p-6">Cargando pagos...</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="text-left px-4 py-3">Unidad</th>
-                  <th className="text-left px-4 py-3">Propietario</th>
-                  <th className="text-left px-4 py-3">Fecha</th>
-                  <th className="text-right px-4 py-3">Monto</th>
-                  <th className="text-left px-4 py-3">Fondo</th>
-                  <th className="text-left px-4 py-3">Método</th>
-                  <th className="text-left px-4 py-3">Origen</th>
-                  <th className="text-left px-4 py-3">Referencia</th>
-                  <th className="text-left px-4 py-3">Comprobante</th>
-                  <th className="text-left px-4 py-3">Recibo</th>
-                </tr>
-              </thead>
+      <PagoResumen
+        totalPagado={totalPagado}
+        cantidadPagos={cantidadPagos}
+        promedioPago={promedioPago}
+        ultimoPago={ultimoPago}
+      />
 
-              <tbody>
-                {pagos.map((p) => (
-                  <tr key={p.id} className="border-t hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium">
-                      {p.unidades?.codigo || "N/A"}
-                    </td>
+      <PagoForm
+        unidades={unidades}
+        unidadId={unidadId}
+        setUnidadId={setUnidadId}
+        seleccionarUnidad={seleccionarUnidad}
+        tipoFondo={tipoFondo}
+        setTipoFondo={setTipoFondo}
+        fechaPago={fechaPago}
+        setFechaPago={setFechaPago}
+        monto={monto}
+        setMonto={setMonto}
+        metodoPago={metodoPago}
+        setMetodoPago={setMetodoPago}
+        referencia={referencia}
+        setReferencia={setReferencia}
+        setComprobante={setComprobante}
+        unidadSeleccionada={unidadSeleccionada}
+        cuentaAsignada={cuentaAsignada}
+        guardando={guardando}
+        guardarPago={guardarPago}
+      />
 
-                    <td className="px-4 py-3">
-                      {p.unidades?.propietario_nombre || "-"}
-                    </td>
+      {unidadId && unidadSeleccionada && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+          <p className="font-black">
+            Historial filtrado por unidad: {unidadSeleccionada.codigo}
+          </p>
+          <p className="mt-1">
+            Mostrando únicamente los pagos realizados a la fecha para esta unidad.
+          </p>
+        </div>
+      )}
 
-                    <td className="px-4 py-3">{p.fecha_pago}</td>
+      {!unidadId && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-black">Seleccione una unidad para ver su historial.</p>
+          <p className="mt-1">
+            El historial de pagos se mostrará debajo solamente para la unidad seleccionada.
+          </p>
+        </div>
+      )}
 
-                    <td className="px-4 py-3 text-right font-bold text-green-600">
-                      RD$ {dinero(p.monto)}
-                    </td>
-
-                    <td className="px-4 py-3">{p.tipo_fondo || "-"}</td>
-
-                    <td className="px-4 py-3">{p.metodo_pago || "-"}</td>
-
-                    <td className="px-4 py-3">{p.origen || "-"}</td>
-
-                    <td className="px-4 py-3">{p.referencia || "-"}</td>
-
-                    <td className="px-4 py-3">
-                      {p.comprobante_url ? (
-                        <a
-                          href={p.comprobante_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline"
-                        >
-                          Ver comprobante
-                        </a>
-                      ) : (
-                        "Sin comprobante"
-                      )}
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/recibos/pago/pagos/${p.id}`}
-                        className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-1 rounded-lg text-xs font-bold inline-block"
-                      >
-                        Recibo
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-
-                {!loading && pagos.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={10}
-                      className="px-4 py-8 text-center text-slate-500"
-                    >
-                      No hay pagos registrados.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
+      <PagoHistorial pagos={unidadId ? pagosUnidadSeleccionada : []} loading={loading} />
+    </PageContainer>
   );
 }

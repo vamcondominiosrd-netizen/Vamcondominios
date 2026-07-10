@@ -2,25 +2,33 @@
 
 import Link from "next/link";
 import {
-  WalletCards,
-  FileSpreadsheet,
-  ReceiptText,
+  AlertTriangle,
+  ArrowRight,
+  Banknote,
+  BarChart3,
+  Building2,
   ClipboardCheck,
   Coins,
+  CreditCard,
+  FileSpreadsheet,
   Landmark,
-  BarChart3,
-  ArrowRight,
-  AlertTriangle,
+  ReceiptText,
   Settings,
+  WalletCards,
 } from "lucide-react";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
 
 type ModuloFinanzas = {
   titulo: string;
   descripcion: string;
   href: string;
   icono: any;
-  fondo: string;
-  iconoColor: string;
+  color: string;
+  bg: string;
 };
 
 type SeccionFinanzas = {
@@ -32,71 +40,8 @@ type SeccionFinanzas = {
 export default function FinanzasPage() {
   const secciones: SeccionFinanzas[] = [
     {
-      titulo: "Configuraciones",
-      descripcion:
-        "Módulos para configurar cargos, morosidad, fondos, parámetros financieros y reportes.",
-      modulos: [
-        {
-          titulo: "Gestión de Cargos",
-          descripcion:
-            "Crear cargos individuales, cargos masivos y mantenimiento mensual.",
-          href: "/cargos-individuales",
-          icono: FileSpreadsheet,
-          fondo: "from-blue-600 to-blue-800",
-          iconoColor: "text-blue-700",
-        },
-        {
-          titulo: "Cuadre de Pagos Propietarios",
-          descripcion:
-            "Revisar Los Pagos de Propietarios.",
-          href: "finanzas/pagos/cuadre-propietario",
-          icono: AlertTriangle,
-          fondo: "from-red-600 to-red-800",
-          iconoColor: "text-red-700",
-        },
-        {
-          titulo: "Banco / Fondos",
-          descripcion:
-            "Administrar cuentas bancarias, fondos ordinarios y extraordinarios.",
-          href: "/tesoreria",
-          icono: Landmark,
-          fondo: "from-indigo-600 to-indigo-900",
-          iconoColor: "text-indigo-700",
-        },
-        {
-          titulo: "Configuración Financiera",
-          descripcion:
-            "Definir parámetros financieros, cuentas y reglas del módulo.",
-          href: "/configuracion-financiera",
-          icono: Settings,
-          fondo: "from-slate-700 to-slate-950",
-          iconoColor: "text-slate-700",
-        },
-        {
-         titulo: "Saldos a Favor",
-         descripcion:
-          "Consulta y aplicación de créditos generados por pagos adelantados o excedentes de propietarios.",
-         href: "/creditos-propietarios",
-         icono: ReceiptText,
-         fondo: "from-red-600 to-red-800",
-         iconoColor: "text-red-700",
-         activo: true,
-        },
-        {
-          titulo: "Reporte Financiero",
-          descripcion:
-            "Consultar ingresos, gastos, balances y estados financieros.",
-          href: "/reportes",
-          icono: BarChart3,
-          fondo: "from-green-600 to-green-800",
-          iconoColor: "text-green-700",
-        },
-      ],
-    },
-    {
-      titulo: "Pagos",
-      descripcion:
-        "Registro, consulta, gastos y aprobación de pagos del condominio activo.",
+      titulo: "Operaciones principales",
+      descripcion: "Accesos rápidos a los procesos financieros más utilizados.",
       modulos: [
         {
           titulo: "Pagos de Mantenimiento",
@@ -104,8 +49,8 @@ export default function FinanzasPage() {
             "Registrar pagos y aplicarlos automáticamente a cargos pendientes.",
           href: "/pagos-mantenimiento",
           icono: WalletCards,
-          fondo: "from-emerald-600 to-emerald-800",
-          iconoColor: "text-emerald-700",
+          color: "text-emerald-700",
+          bg: "bg-emerald-50",
         },
         {
           titulo: "Gastos",
@@ -113,8 +58,8 @@ export default function FinanzasPage() {
             "Registrar y controlar gastos operativos del condominio activo.",
           href: "/gastos",
           icono: ReceiptText,
-          fondo: "from-orange-500 to-orange-700",
-          iconoColor: "text-orange-700",
+          color: "text-orange-700",
+          bg: "bg-orange-50",
         },
         {
           titulo: "Solicitudes de Pago",
@@ -122,8 +67,51 @@ export default function FinanzasPage() {
             "Crear solicitudes de pago y dar seguimiento al flujo de aprobación.",
           href: "/solicitudes-pago",
           icono: ClipboardCheck,
-          fondo: "from-sky-600 to-sky-800",
-          iconoColor: "text-sky-700",
+          color: "text-sky-700",
+          bg: "bg-sky-50",
+        },
+        {
+          titulo: "Banco / Fondos",
+          descripcion:
+            "Administrar cuentas bancarias, fondos ordinarios y extraordinarios.",
+          href: "/banco",
+          icono: Landmark,
+          color: "text-indigo-700",
+          bg: "bg-indigo-50",
+        },
+        {
+          titulo: "Control Bancario",
+          descripcion:
+            "Generar Estados Financieros.",
+          href: "/finanzas/control-bancario",
+          icono: Banknote,
+          color: "text-amber-700",
+          bg: "bg-amber-50",
+        },
+      ],
+    },
+    {
+      titulo: "Control y seguimiento",
+      descripcion:
+        "Herramientas para verificar balances, estados de cuenta y aprobaciones.",
+      modulos: [
+        {
+          titulo: "Cuadre de Pagos",
+          descripcion:
+            "Revisar pagos de propietarios y validar diferencias pendientes.",
+          href: "/finanzas/pagos/cuadre-propietario",
+          icono: AlertTriangle,
+          color: "text-red-700",
+          bg: "bg-red-50",
+        },
+        {
+          titulo: "Saldos a Favor",
+          descripcion:
+            "Consulta y aplicación de créditos por pagos adelantados o excedentes.",
+          href: "/creditos-propietarios",
+          icono: WalletCards,
+          color: "text-purple-700",
+          bg: "bg-purple-50",
         },
         {
           titulo: "Estado de Cuenta",
@@ -131,25 +119,17 @@ export default function FinanzasPage() {
             "Consultar cargos, pagos, balances y créditos por apartamento.",
           href: "/consulta-estado",
           icono: ReceiptText,
-          fondo: "from-purple-600 to-purple-800",
-          iconoColor: "text-purple-700",
+          color: "text-slate-700",
+          bg: "bg-slate-100",
         },
         {
-          titulo: "Aprobación Tesorero",
+          titulo: "Reporte Financiero",
           descripcion:
-            "Revisar, aprobar, devolver o rechazar solicitudes pendientes.",
-          href: "/solicitudes-pago/tesorero",
-          icono: ClipboardCheck,
-          fondo: "from-amber-500 to-yellow-700",
-          iconoColor: "text-amber-700",
-        },
-        {
-          titulo: "Aprobación Presidente",
-          descripcion: "Autorizar solicitudes ya aprobadas por tesorería.",
-          href: "/solicitudes-pago/presidente",
-          icono: ClipboardCheck,
-          fondo: "from-pink-600 to-rose-800",
-          iconoColor: "text-pink-700",
+            "Consultar ingresos, gastos, balances y estados financieros.",
+          href: "/reportes",
+          icono: BarChart3,
+          color: "text-green-700",
+          bg: "bg-green-50",
         },
       ],
     },
@@ -162,10 +142,10 @@ export default function FinanzasPage() {
           titulo: "Movimientos",
           descripcion:
             "Registrar ingresos, salidas y comprobantes de caja chica.",
-          href: "/caja-chica",
+          href: "/finanzas/caja-chica",
           icono: Coins,
-          fondo: "from-teal-600 to-teal-800",
-          iconoColor: "text-teal-700",
+          color: "text-teal-700",
+          bg: "bg-teal-50",
         },
         {
           titulo: "Fondos",
@@ -173,17 +153,16 @@ export default function FinanzasPage() {
             "Administrar fondos disponibles y responsables de caja chica.",
           href: "/caja-chica/fondos",
           icono: WalletCards,
-          fondo: "from-blue-600 to-cyan-800",
-          iconoColor: "text-blue-700",
+          color: "text-blue-700",
+          bg: "bg-blue-50",
         },
         {
           titulo: "Balance",
-          descripcion:
-            "Consultar balances disponibles por fondo de caja chica.",
+          descripcion: "Consultar balances disponibles por fondo de caja chica.",
           href: "/caja-chica/balance",
           icono: BarChart3,
-          fondo: "from-purple-600 to-indigo-800",
-          iconoColor: "text-purple-700",
+          color: "text-purple-700",
+          bg: "bg-purple-50",
         },
         {
           titulo: "Reportes Caja Chica",
@@ -191,54 +170,135 @@ export default function FinanzasPage() {
             "Generar reportes de movimientos, fondos y balances.",
           href: "/caja-chica/reporte",
           icono: FileSpreadsheet,
-          fondo: "from-slate-700 to-slate-950",
-          iconoColor: "text-slate-700",
+          color: "text-slate-700",
+          bg: "bg-slate-100",
+        },
+      ],
+    },
+    {
+      titulo: "Configuraciones",
+      descripcion: "Parámetros y configuraciones financieras del condominio.",
+      modulos: [
+        {
+          titulo: "Gestión de Cargos",
+          descripcion:
+            "Crear cargos individuales, cargos masivos y mantenimiento mensual.",
+          href: "/cargos-individuales",
+          icono: FileSpreadsheet,
+          color: "text-blue-700",
+          bg: "bg-blue-50",
+        },
+        {
+          titulo: "Configuración Financiera",
+          descripcion: "Definir cuentas, reglas y parámetros financieros.",
+          href: "/configuracion-financiera",
+          icono: Settings,
+          color: "text-slate-700",
+          bg: "bg-slate-100",
+        },
+        {
+          titulo: "Presupuesto",
+          descripcion:
+            "Planificar ingresos, gastos proyectados, cuota sugerida y reporte de asamblea.",
+          href: "/finanzas/configuraciones/presupuesto",
+          icono: Banknote,
+          color: "text-amber-700",
+          bg: "bg-amber-50",
+        },
+        {
+          titulo: "Control Bancario",
+          descripcion:
+            "Generar Estados Financieros.",
+          href: "/finanzas/control-bancario",
+          icono: Banknote,
+          color: "text-amber-700",
+          bg: "bg-amber-50",
         },
       ],
     },
   ];
 
   return (
-    <main className="space-y-5">
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">
-              Módulo
-            </p>
+    <PageContainer>
+      <ModuleMenu
+        title="Finanzas"
+        subtitle="Control financiero del condominio: pagos, gastos, solicitudes, caja chica, bancos, reportes y configuraciones."
+        tone="blue"
+        items={[
+          {
+            href: "/finanzas",
+            label: "Inicio finanzas",
+            icon: WalletCards,
+          },
+          {
+            href: "/pagos-mantenimiento",
+            label: "Pagos",
+            icon: CreditCard,
+          },
+          {
+            href: "/gastos",
+            label: "Gastos",
+            icon: ReceiptText,
+          },
+          {
+            href: "/solicitudes-pago",
+            label: "Solicitudes",
+            icon: ClipboardCheck,
+          },
+          {
+            href: "/banco",
+            label: "Banco / Fondos",
+            icon: Landmark,
+          },
+          {
+            href: "/finanzas/caja-chica",
+            label: "Caja chica",
+            icon: Coins,
+          },
+          {
+            href: "/reportes",
+            label: "Reportes",
+            icon: BarChart3,
+          },
+          {
+            href: "/finanzas/configuraciones/presupuesto",
+            label: "Presupuesto",
+            icon: Banknote,
+          },
+        {
+          titulo: "Control Bancario",
+          descripcion:
+            "Generar Estados Financieros.",
+          href: "/finanzas/control-bancario",
+          icono: Banknote,
+          color: "text-amber-700",
+          bg: "bg-amber-50",
+        },
+        ]}
+      />
 
-            <h1 className="text-2xl md:text-3xl font-black text-slate-900 mt-1">
-              Finanzas
-            </h1>
-
-            <p className="text-sm text-slate-500 mt-2 max-w-3xl">
-              Administre configuraciones financieras, pagos, gastos,
-              solicitudes, caja chica, fondos y reportes del condominio activo.
-            </p>
-          </div>
-
-          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-emerald-600 to-slate-900 flex items-center justify-center shadow-lg">
-            <WalletCards className="h-9 w-9 text-white" />
-          </div>
-        </div>
-      </section>
+      <ModuleToolbar
+        title="Dashboard Financiero"
+        subtitle="Centro de control para pagos, gastos, solicitudes, bancos, caja chica, fondos y reportes."
+        icon={WalletCards}
+        actions={
+          <Link
+            href="/pagos-mantenimiento"
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800"
+          >
+            <CreditCard className="h-4 w-4" />
+            Registrar pago
+          </Link>
+        }
+      />
 
       {secciones.map((seccion) => (
-        <section
+        <SectionCard
           key={seccion.titulo}
-          className="bg-white rounded-2xl border shadow-sm p-5"
+          title={seccion.titulo}
+          subtitle={seccion.descripcion}
         >
-          <div className="mb-5">
-            <h2 className="text-lg font-bold text-slate-900">
-              {seccion.titulo}
-            </h2>
-
-            <p className="text-sm text-slate-500 mt-1">
-              {seccion.descripcion}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-4">
             {seccion.modulos.map((modulo) => {
               const Icono = modulo.icono;
 
@@ -246,72 +306,91 @@ export default function FinanzasPage() {
                 <Link
                   key={modulo.href}
                   href={modulo.href}
-                  className="group rounded-2xl border bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition overflow-hidden"
+                  className="group rounded-2xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                 >
-                  <div
-                    className={`h-20 bg-gradient-to-br ${modulo.fondo} flex items-center justify-center relative`}
-                  >
-                    <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top_right,_white,_transparent_35%)]" />
-
-                    <div className="h-14 w-14 rounded-2xl bg-white/95 flex items-center justify-center shadow-md relative z-10 group-hover:scale-105 transition">
-                      <Icono className={`h-8 w-8 ${modulo.iconoColor}`} />
+                  <div className="flex items-start gap-4">
+                    <div
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${modulo.bg}`}
+                    >
+                      <Icono className={`h-6 w-6 ${modulo.color}`} />
                     </div>
-                  </div>
 
-                  <div className="p-4">
-                    <h3 className="font-black text-slate-900 text-base group-hover:text-emerald-700">
-                      {modulo.titulo}
-                    </h3>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-base font-black text-slate-900 group-hover:text-emerald-700">
+                        {modulo.titulo}
+                      </h3>
 
-                    <p className="text-xs text-slate-500 mt-2 min-h-[54px] leading-relaxed">
-                      {modulo.descripcion}
-                    </p>
+                      <p className="mt-1 min-h-[52px] text-sm leading-relaxed text-slate-500">
+                        {modulo.descripcion}
+                      </p>
 
-                    <div className="mt-3 flex items-center justify-between text-xs font-bold text-emerald-700">
-                      <span>Abrir módulo</span>
-                      <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition" />
+                      <div className="mt-3 flex items-center gap-2 text-sm font-black text-emerald-700">
+                        <span>Abrir módulo</span>
+                        <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                      </div>
                     </div>
                   </div>
                 </Link>
               );
             })}
           </div>
-        </section>
+        </SectionCard>
       ))}
 
-      <section className="bg-slate-900 text-white rounded-2xl border border-slate-800 shadow-sm p-5">
-        <h2 className="text-lg font-bold">Flujo recomendado</h2>
+      <SectionCard
+        title="Flujo recomendado"
+        subtitle="Orden sugerido para mantener el control financiero del condominio."
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <FlujoPaso
+            numero="1"
+            titulo="Configuraciones"
+            descripcion="Definir cargos, fondos, morosidad, cuentas y presupuesto."
+          />
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4 text-sm">
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-emerald-300 font-bold">1. Configuraciones</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Definir cargos, fondos, morosidad y parámetros financieros.
-            </p>
-          </div>
+          <FlujoPaso
+            numero="2"
+            titulo="Operaciones"
+            descripcion="Registrar pagos, gastos y solicitudes del condominio."
+          />
 
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-emerald-300 font-bold">2. Pagos</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Registrar pagos, gastos y solicitudes del condominio.
-            </p>
-          </div>
+          <FlujoPaso
+            numero="3"
+            titulo="Caja chica"
+            descripcion="Controlar movimientos menores, fondos y balances."
+          />
 
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-emerald-300 font-bold">3. Caja Chica</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Controlar movimientos menores, fondos y balances.
-            </p>
-          </div>
-
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-emerald-300 font-bold">4. Reportes</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Analizar la situación financiera del condominio.
-            </p>
-          </div>
+          <FlujoPaso
+            numero="4"
+            titulo="Reportes"
+            descripcion="Analizar ingresos, gastos, presupuesto y estado financiero."
+          />
         </div>
-      </section>
-    </main>
+      </SectionCard>
+    </PageContainer>
+  );
+}
+
+function FlujoPaso({
+  numero,
+  titulo,
+  descripcion,
+}: {
+  numero: string;
+  titulo: string;
+  descripcion: string;
+}) {
+  return (
+    <div className="rounded-2xl border bg-slate-50 p-4">
+      <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-700 text-sm font-black text-white">
+        {numero}
+      </div>
+
+      <p className="font-black text-slate-900">{titulo}</p>
+
+      <p className="mt-1 text-sm leading-relaxed text-slate-500">
+        {descripcion}
+      </p>
+    </div>
   );
 }

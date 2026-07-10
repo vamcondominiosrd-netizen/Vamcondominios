@@ -1,854 +1,1411 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/app/lib/supabaseClient";
-import * as XLSX from "xlsx";
+import {
+  Banknote,
+  Filter,
+  ListChecks,
+  Pencil,
+  RefreshCw,
+  Save,
+  Search,
+  SearchCheck,
+} from "lucide-react";
 
-type PagoIdentificado = {
+import { supabase } from "@/app/lib/supabaseClient";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import ModuleActions from "@/components/vam/enterprise/ModuleActions";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import EmptyState from "@/components/vam/enterprise/EmptyState";
+
+type BancoRow = {
   id: number;
   condominio_id: number;
-  archivo_banco_id: number | null;
+  condominio: string | null;
+  fecha_posteo: string;
+  monto_transaccion: number;
+  no_serial: string;
+  descripcion: string;
+  estado?: string | null;
+};
+
+type AliasRow = {
+  id: number;
+  condominio_id: number;
   unidad_id: number | null;
-  no_apartamento: string | null;
+  no_apartamento: string;
+  propietario: string | null;
+  descripcion_banco: string;
+  estado: string | null;
+};
+
+type UnidadRow = {
+  id: number;
+  condominio_id: number;
+  codigo: string;
+  propietario_nombre: string;
+  activa: boolean;
+};
+
+type PagoIdentificadoRow = {
+  id: number;
+  archivo_banco_id: number;
+  condominio_id: number;
+  unidad_id: number | null;
   apartamento: string | null;
+  no_apartamento: string | null;
   propietario: string | null;
   fecha_posteo: string | null;
-  monto_transaccion: number | null;
   monto: number | null;
+  monto_transaccion: number | null;
   no_serial: string | null;
   descripcion_banco: string | null;
-  estado: string | null;
   tipo_pago: string | null;
   periodo: string | null;
+  estado: string | null;
   observacion: string | null;
-  created_at: string;
 };
 
-type Unidad = {
+type PagoMovilRow = {
   id: number;
-  codigo: string;
+  condominio_id: number;
+  unidad_id: number | null;
+  no_apartamento: string | null;
+  monto: number | null;
+  fecha_pago: string | null;
+  estado: string | null;
 };
 
-type CuentaBancaria = {
-  id: number;
-  nombre_banco: string;
-  numero_cuenta: string;
-  fondo_tipo: string | null;
-  balance_actual: number | null;
-  fondo_ordinario: number | null;
-  fondo_extraordinario: number | null;
-  fondo_reserva: number | null;
+type ResultadoRow = BancoRow & {
+  alias_id: number | null;
+  unidad_id: number | null;
+  apartamento_identificado: string;
+  propietario_identificado: string;
+  alias_registrado: string;
+  metodo_identificacion: string;
+  puntos_coincidencia: number;
+  estado_identificacion: "Identificado" | "Revisar";
 };
 
-export default function PagosIdentificadosPage() {
+function limpiarTexto(texto: string) {
+  return String(texto || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escaparRegex(texto: string) {
+  return texto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function obtenerPalabrasClave(texto: string) {
+  const palabrasIgnoradas = [
+    "pago",
+    "pgo",
+    "pag",
+    "pagos",
+    "transferencia",
+    "transf",
+    "deposito",
+    "depositos",
+    "depósito",
+    "depósitos",
+    "mantenimiento",
+    "mant",
+    "mto",
+    "condominio",
+    "residencial",
+    "colinas",
+    "oeste",
+    "lote",
+    "rd",
+    "rd$",
+    "dop",
+    "del",
+    "de",
+    "la",
+    "el",
+    "los",
+    "las",
+    "por",
+    "para",
+    "desde",
+    "cta",
+    "cuenta",
+    "banco",
+    "popular",
+    "bpd",
+    "ach",
+    "lbtr",
+    "internet",
+    "movil",
+    "mobile",
+    "canal",
+    "servicio",
+    "servicios",
+    "concepto",
+    "referencia",
+    "debito",
+    "credito",
+    "crédito",
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "setiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+  ];
+
+  return limpiarTexto(texto)
+    .split(" ")
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 2)
+    .filter((p) => !palabrasIgnoradas.includes(p))
+    .filter((p) => !/^\d{4}$/.test(p));
+}
+
+function buscarUnidadEnDescripcion(
+  descripcionOriginal: string,
+  unidades: UnidadRow[],
+) {
+  const descripcion = limpiarTexto(descripcionOriginal || "");
+
+  if (!descripcion) return null;
+
+  const unidadesOrdenadas = [...unidades].sort((a, b) => {
+    const codigoA = limpiarTexto(a.codigo || "");
+    const codigoB = limpiarTexto(b.codigo || "");
+    return codigoB.length - codigoA.length;
+  });
+
+  return (
+    unidadesOrdenadas.find((unidad) => {
+      const codigo = limpiarTexto(unidad.codigo || "");
+      if (!codigo) return false;
+
+      const patron = new RegExp(`(^|\\s)${escaparRegex(codigo)}(\\s|$)`, "i");
+      return patron.test(descripcion);
+    }) || null
+  );
+}
+
+function calcularCoincidenciaAlias(
+  descripcionBancoOriginal: string,
+  alias: AliasRow,
+) {
+  const descripcionBanco = limpiarTexto(descripcionBancoOriginal || "");
+  const aliasTexto = limpiarTexto(alias.descripcion_banco || "");
+  const apartamento = limpiarTexto(alias.no_apartamento || "");
+  const propietario = limpiarTexto(alias.propietario || "");
+
+  if (!descripcionBanco || !aliasTexto) return 0;
+
+  if (descripcionBanco.includes(aliasTexto)) return 100;
+
+  if (descripcionBanco.length >= 8 && aliasTexto.includes(descripcionBanco)) {
+    return 95;
+  }
+
+  let puntos = 0;
+
+  const palabrasAlias = obtenerPalabrasClave(aliasTexto);
+  const palabrasPropietario = obtenerPalabrasClave(propietario);
+
+  if (palabrasAlias.length > 0) {
+    const encontradasAlias = palabrasAlias.filter((palabra) =>
+      descripcionBanco.includes(palabra),
+    );
+
+    const porcentajeAlias = encontradasAlias.length / palabrasAlias.length;
+
+    puntos += Math.round(porcentajeAlias * 75);
+
+    if (porcentajeAlias === 1) {
+      puntos += 10;
+    }
+  }
+
+  if (palabrasPropietario.length > 0) {
+    const encontradasPropietario = palabrasPropietario.filter((palabra) =>
+      descripcionBanco.includes(palabra),
+    );
+
+    const porcentajePropietario =
+      encontradasPropietario.length / palabrasPropietario.length;
+
+    puntos += Math.round(porcentajePropietario * 20);
+
+    if (porcentajePropietario === 1) {
+      puntos += 10;
+    }
+  }
+
+  if (apartamento) {
+    const patronApto = new RegExp(
+      `(^|\\s)${escaparRegex(apartamento)}(\\s|$)`,
+      "i",
+    );
+
+    if (patronApto.test(descripcionBanco)) {
+      puntos += 20;
+    }
+  }
+
+  return puntos > 100 ? 100 : puntos;
+}
+
+function buscarMejorAlias(descripcionBanco: string, aliasRows: AliasRow[]) {
+  const evaluados = aliasRows
+    .map((alias) => ({
+      alias,
+      puntos: calcularCoincidenciaAlias(descripcionBanco, alias),
+    }))
+    .filter((item) => item.puntos >= 60)
+    .sort((a, b) => {
+      if (b.puntos !== a.puntos) return b.puntos - a.puntos;
+
+      const largoB = limpiarTexto(b.alias.descripcion_banco || "").length;
+      const largoA = limpiarTexto(a.alias.descripcion_banco || "").length;
+
+      return largoB - largoA;
+    });
+
+  return evaluados[0] || null;
+}
+
+function formatearMoneda(valor: number | null | undefined) {
+  return new Intl.NumberFormat("es-DO", {
+    style: "currency",
+    currency: "DOP",
+    minimumFractionDigits: 2,
+  }).format(Number(valor || 0));
+}
+
+function obtenerPeriodo(fecha: string | null | undefined) {
+  if (!fecha) return "";
+  return String(fecha).slice(0, 7);
+}
+
+function montoIgual(a: number | null, b: number | null) {
+  return Number(a || 0).toFixed(2) === Number(b || 0).toFixed(2);
+}
+
+function estadoPendienteMovil(estado: string | null) {
+  const e = limpiarTexto(estado || "Pendiente");
+
+  return (
+    e === "pendiente" ||
+    e === "reportado" ||
+    e === "en revision" ||
+    e === "en revisión"
+  );
+}
+
+function fechaCorta(valor?: string | null) {
+  if (!valor) return "-";
+  return String(valor).split("T")[0];
+}
+
+export default function IdentificarPagosPage() {
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
 
-  const [pagos, setPagos] = useState<PagoIdentificado[]>([]);
-  const [unidades, setUnidades] = useState<Unidad[]>([]);
-  const [cuentas, setCuentas] = useState<CuentaBancaria[]>([]);
-
-  const [cuentaBancariaId, setCuentaBancariaId] = useState("");
-  const [tipoFondo, setTipoFondo] = useState("ORDINARIO");
+  const [resultado, setResultado] = useState<ResultadoRow[]>([]);
+  const [unidades, setUnidades] = useState<UnidadRow[]>([]);
 
   const [loading, setLoading] = useState(true);
-  const [aplicando, setAplicando] = useState(false);
-  const [filtroApartamento, setFiltroApartamento] = useState("");
-  const [mensaje, setMensaje] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [guardandoManual, setGuardandoManual] = useState(false);
+
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState("Todos");
+
+  const [editando, setEditando] = useState<ResultadoRow | null>(null);
+  const [editUnidadId, setEditUnidadId] = useState("");
+  const [editApartamento, setEditApartamento] = useState("");
+  const [editPropietario, setEditPropietario] = useState("");
+  const [editObservacion, setEditObservacion] = useState("");
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
-    const nombre = localStorage.getItem("condominio_nombre") || "";
+    const nombre =
+      localStorage.getItem("condominio_nombre") ||
+      localStorage.getItem("condominio") ||
+      "";
 
     setCondominioId(id);
     setCondominioNombre(nombre);
 
-    if (!id) {
-      setMensaje(
-        "No se encontró el condominio activo. Debe iniciar sesión nuevamente."
-      );
+    if (id) {
+      cargarDatos(id);
+    } else {
       setLoading(false);
-      return;
+      alert("No se encontró el condominio activo. Debe iniciar sesión nuevamente.");
     }
-
-    cargarTodo(id);
   }, []);
 
-  async function cargarTodo(id: string) {
-    await Promise.all([cargarPagos(id), cargarUnidades(id), cargarCuentas(id)]);
-  }
-
-  async function cargarPagos(idActivo?: string) {
+  async function cargarDatos(id: string) {
     setLoading(true);
-    setMensaje("");
 
-    const id = idActivo || localStorage.getItem("condominio_id") || condominioId;
-
-    if (!id) {
-      setMensaje("No se encontró el condominio activo.");
-      setLoading(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("pagos_identificados")
-      .select(`
-        id,
-        condominio_id,
-        archivo_banco_id,
-        unidad_id,
-        no_apartamento,
-        apartamento,
-        propietario,
-        fecha_posteo,
-        monto_transaccion,
-        monto,
-        no_serial,
-        descripcion_banco,
-        estado,
-        tipo_pago,
-        periodo,
-        observacion,
-        created_at
-      `)
+    const { data: bancoData, error: bancoError } = await supabase
+      .from("archivo_banco")
+      .select(
+        "id, condominio_id, condominio, fecha_posteo, monto_transaccion, no_serial, descripcion, estado",
+      )
       .eq("condominio_id", Number(id))
-      .order("fecha_posteo", { ascending: false })
-      .order("id", { ascending: false });
+      .order("fecha_posteo", { ascending: false });
 
-    if (error) {
-      setMensaje("Error cargando pagos identificados: " + error.message);
+    if (bancoError) {
+      alert("Error cargando archivo_banco: " + bancoError.message);
       setLoading(false);
       return;
     }
 
-    setPagos((data as PagoIdentificado[]) || []);
+    const { data: unidadesData, error: unidadesError } = await supabase
+      .from("unidades")
+      .select("id, condominio_id, codigo, propietario_nombre, activa")
+      .eq("condominio_id", Number(id))
+      .eq("activa", true)
+      .order("codigo", { ascending: true });
+
+    if (unidadesError) {
+      alert("Error cargando unidades: " + unidadesError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: aliasData, error: aliasError } = await supabase
+      .from("apartamento_banco_alias")
+      .select(
+        "id, condominio_id, unidad_id, no_apartamento, propietario, descripcion_banco, estado",
+      )
+      .eq("condominio_id", Number(id))
+      .eq("estado", "Activo")
+      .order("no_apartamento", { ascending: true });
+
+    if (aliasError) {
+      alert("Error cargando apartamento_banco_alias: " + aliasError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: pagosData, error: pagosError } = await supabase
+      .from("pagos_identificados")
+      .select(
+        "id, archivo_banco_id, condominio_id, unidad_id, apartamento, no_apartamento, propietario, fecha_posteo, monto, monto_transaccion, no_serial, descripcion_banco, tipo_pago, periodo, estado, observacion",
+      )
+      .eq("condominio_id", Number(id));
+
+    if (pagosError) {
+      alert("Error cargando pagos_identificados: " + pagosError.message);
+      setLoading(false);
+      return;
+    }
+
+    setUnidades((unidadesData as UnidadRow[]) || []);
+
+    compararDatos(
+      (bancoData as BancoRow[]) || [],
+      (aliasData as AliasRow[]) || [],
+      (unidadesData as UnidadRow[]) || [],
+      (pagosData as PagoIdentificadoRow[]) || [],
+    );
+
     setLoading(false);
   }
 
-  async function cargarUnidades(id: string) {
-    const { data, error } = await supabase
-      .from("unidades")
-      .select("id, codigo")
-      .eq("condominio_id", Number(id))
-      .order("codigo", { ascending: true });
-
-    if (error) {
-      setMensaje("Error cargando unidades: " + error.message);
-      return;
-    }
-
-    setUnidades((data as Unidad[]) || []);
-  }
-
-  async function cargarCuentas(id: string) {
-    const { data, error } = await supabase
-      .from("cuentas_bancarias")
-      .select(`
-        id,
-        nombre_banco,
-        numero_cuenta,
-        fondo_tipo,
-        balance_actual,
-        fondo_ordinario,
-        fondo_extraordinario,
-        fondo_reserva
-      `)
-      .eq("condominio_id", Number(id))
-      .eq("activa", true)
-      .order("nombre_banco", { ascending: true });
-
-    if (error) {
-      setMensaje("Error cargando cuentas bancarias: " + error.message);
-      return;
-    }
-
-    const lista = (data as CuentaBancaria[]) || [];
-    setCuentas(lista);
-
-    const cuentaPreferida =
-      lista.find((c) => c.fondo_tipo === "ORDINARIO") || lista[0];
-
-    if (cuentaPreferida) {
-      setCuentaBancariaId(String(cuentaPreferida.id));
-
-      if (cuentaPreferida.fondo_tipo) {
-        setTipoFondo(cuentaPreferida.fondo_tipo);
-      }
-    }
-  }
-
-  const pagosFiltrados = useMemo(() => {
-    const texto = filtroApartamento.toLowerCase().trim();
-
-    if (!texto) return pagos;
-
-    return pagos.filter((p) => {
-      const combinado = `
-        ${p.no_apartamento || ""}
-        ${p.apartamento || ""}
-        ${p.propietario || ""}
-        ${p.no_serial || ""}
-        ${p.descripcion_banco || ""}
-        ${p.estado || ""}
-        ${p.observacion || ""}
-      `.toLowerCase();
-
-      return combinado.includes(texto);
-    });
-  }, [pagos, filtroApartamento]);
-
-  const pagosPendientesAplicar = useMemo(() => {
-    return pagosFiltrados.filter((p) => {
-      const estado = (p.estado || "").trim().toUpperCase();
-
-      return estado !== "APLICADO" && estado !== "PAGO APLICADO";
-    });
-  }, [pagosFiltrados]);
-
-  const totalPagado = pagosFiltrados.reduce(
-    (sum, p) => sum + montoPagoIdentificado(p),
-    0
-  );
-
-  const totalPendienteAplicar = pagosPendientesAplicar.reduce(
-    (sum, p) => sum + montoPagoIdentificado(p),
-    0
-  );
-
-  const apartamentosUnicos = new Set(
-    pagosFiltrados
-      .map((p) => p.apartamento || p.no_apartamento || "")
-      .filter((apto) => apto.trim() !== "")
-  ).size;
-
-  function montoPagoIdentificado(p: PagoIdentificado) {
-    return Number(p.monto_transaccion || p.monto || 0);
-  }
-
-  function normalizarTexto(valor: string | null | undefined) {
-    return (valor || "")
-      .toString()
-      .trim()
-      .toUpperCase()
-      .replace(/\s+/g, "");
-  }
-
-  function buscarUnidadPorPago(p: PagoIdentificado) {
-    if (p.unidad_id) {
-      const unidadPorId = unidades.find((u) => Number(u.id) === Number(p.unidad_id));
-
-      if (unidadPorId) return unidadPorId;
-    }
-
-    const apto = normalizarTexto(p.apartamento || p.no_apartamento);
-
-    if (!apto) return null;
-
-    return (
-      unidades.find((u) => normalizarTexto(u.codigo) === apto) ||
-      unidades.find((u) => normalizarTexto(u.codigo).includes(apto)) ||
-      null
-    );
-  }
-
-  function fechaParaPago(fecha: string | null | undefined) {
-    if (!fecha) {
-      return new Date().toISOString().slice(0, 10);
-    }
-
-    const valor = fecha.trim();
-
-    if (/^\d{4}-\d{2}-\d{2}/.test(valor)) {
-      return valor.slice(0, 10);
-    }
-
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(valor)) {
-      const [dia, mes, anio] = valor.split("/");
-      return `${anio}-${mes}-${dia}`;
-    }
-
-    const d = new Date(valor);
-
-    if (!Number.isNaN(d.getTime())) {
-      return d.toISOString().slice(0, 10);
-    }
-
-    return new Date().toISOString().slice(0, 10);
-  }
-
-  function dinero(valor: number | null | undefined) {
-    return Number(valor || 0).toLocaleString("es-DO", {
-      minimumFractionDigits: 2,
-    });
-  }
-
-  function fechaLocal(fecha: string | null | undefined) {
-    if (!fecha) return "-";
-
-    const d = new Date(fecha);
-
-    if (Number.isNaN(d.getTime())) return fecha;
-
-    return d.toLocaleDateString("es-DO");
-  }
-
-  async function actualizarBalanceCuenta(
-    cuentaId: number,
-    fondo: string,
-    montoPago: number
+  function compararDatos(
+    bancoRows: BancoRow[],
+    aliasRows: AliasRow[],
+    unidadesRows: UnidadRow[],
+    pagosRows: PagoIdentificadoRow[],
   ) {
-    const { data: cuentaActual, error: errorCuenta } = await supabase
-      .from("cuentas_bancarias")
-      .select(`
-        id,
-        balance_actual,
-        fondo_ordinario,
-        fondo_extraordinario,
-        fondo_reserva
-      `)
-      .eq("id", cuentaId)
-      .eq("condominio_id", Number(condominioId))
-      .single();
+    const pagosPorArchivo = new Map<number, PagoIdentificadoRow>();
 
-    if (errorCuenta) {
-      throw new Error(
-        "No se pudo leer la cuenta bancaria para actualizar balance: " +
-          errorCuenta.message
+    pagosRows.forEach((pago) => {
+      if (pago.archivo_banco_id) {
+        pagosPorArchivo.set(Number(pago.archivo_banco_id), pago);
+      }
+    });
+
+    const aliasOrdenados = [...aliasRows].sort((a, b) => {
+      const textoA = limpiarTexto(a.descripcion_banco || "");
+      const textoB = limpiarTexto(b.descripcion_banco || "");
+
+      return textoB.length - textoA.length;
+    });
+
+    const resultadoComparado: ResultadoRow[] = bancoRows.map((item) => {
+      const pagoGuardado = pagosPorArchivo.get(item.id);
+
+      if (pagoGuardado) {
+        const apartamentoGuardado =
+          pagoGuardado.no_apartamento || pagoGuardado.apartamento || "";
+
+        return {
+          ...item,
+          alias_id: null,
+          unidad_id: pagoGuardado.unidad_id || null,
+          apartamento_identificado: apartamentoGuardado,
+          propietario_identificado: pagoGuardado.propietario || "",
+          alias_registrado:
+            pagoGuardado.observacion ||
+            "Registro guardado en pagos_identificados",
+          metodo_identificacion: "Pago ya guardado",
+          puntos_coincidencia: 100,
+          estado_identificacion: "Identificado",
+        };
+      }
+
+      const unidadDetectada = buscarUnidadEnDescripcion(
+        item.descripcion || "",
+        unidadesRows,
       );
-    }
 
-    const fondoOrdinarioActual = Number(cuentaActual.fondo_ordinario || 0);
-    const fondoExtraActual = Number(cuentaActual.fondo_extraordinario || 0);
-    const fondoReservaActual = Number(cuentaActual.fondo_reserva || 0);
-    const balanceActual = Number(cuentaActual.balance_actual || 0);
+      if (unidadDetectada) {
+        return {
+          ...item,
+          alias_id: null,
+          unidad_id: unidadDetectada.id,
+          apartamento_identificado: unidadDetectada.codigo || "",
+          propietario_identificado: unidadDetectada.propietario_nombre || "",
+          alias_registrado:
+            "Identificado por número de apartamento en descripción",
+          metodo_identificacion: "Apartamento en descripción",
+          puntos_coincidencia: 100,
+          estado_identificacion: "Identificado",
+        };
+      }
 
-    let nuevoFondoOrdinario = fondoOrdinarioActual;
-    let nuevoFondoExtraordinario = fondoExtraActual;
-    let nuevoFondoReserva = fondoReservaActual;
+      const evaluado = buscarMejorAlias(item.descripcion || "", aliasOrdenados);
 
-    if (fondo === "ORDINARIO") {
-      nuevoFondoOrdinario += montoPago;
-    }
+      if (evaluado?.alias) {
+        const encontrado = evaluado.alias;
 
-    if (fondo === "EXTRAORDINARIO") {
-      nuevoFondoExtraordinario += montoPago;
-    }
-
-    if (fondo === "RESERVA") {
-      nuevoFondoReserva += montoPago;
-    }
-
-    const { error: errorUpdate } = await supabase
-      .from("cuentas_bancarias")
-      .update({
-        fondo_ordinario: nuevoFondoOrdinario,
-        fondo_extraordinario: nuevoFondoExtraordinario,
-        fondo_reserva: nuevoFondoReserva,
-        balance_actual: balanceActual + montoPago,
-      })
-      .eq("id", cuentaId)
-      .eq("condominio_id", Number(condominioId));
-
-    if (errorUpdate) {
-      throw new Error(
-        "No se pudo actualizar el balance bancario: " + errorUpdate.message
-      );
-    }
-  }
-
-  async function aplicarPagoIdentificado(p: PagoIdentificado) {
-    if (!condominioId) {
-      throw new Error("No hay condominio activo.");
-    }
-
-    if (!cuentaBancariaId) {
-      throw new Error("Debe seleccionar una cuenta bancaria.");
-    }
-
-    const unidad = buscarUnidadPorPago(p);
-
-    if (!unidad) {
-      throw new Error(
-        `No se encontró la unidad/apartamento ${
-          p.apartamento || p.no_apartamento || "-"
-        } para el pago ID ${p.id}.`
-      );
-    }
-
-    const montoPago = montoPagoIdentificado(p);
-
-    if (montoPago <= 0) {
-      throw new Error(`El pago ID ${p.id} tiene monto inválido.`);
-    }
-
-    const referenciaPago =
-      (p.no_serial || "").trim() || `PAGO_IDENTIFICADO_${p.id}`;
-
-    const { data: pagoExistente, error: errorExiste } = await supabase
-      .from("pagos")
-      .select("id")
-      .eq("condominio_id", Number(condominioId))
-      .eq("pago_identificado_id", p.id)
-      .maybeSingle();
-
-    if (errorExiste) {
-      throw new Error(
-        `Error verificando duplicidad del pago ID ${p.id}: ${errorExiste.message}`
-      );
-    }
-
-    if (pagoExistente?.id) {
-      await supabase
-        .from("pagos_identificados")
-        .update({
-          estado: "APLICADO",
-          observacion: `Pago ya guardado en tabla pagos. ID pago: ${pagoExistente.id}`,
-        })
-        .eq("id", p.id)
-        .eq("condominio_id", Number(condominioId));
+        return {
+          ...item,
+          alias_id: encontrado.id,
+          unidad_id: encontrado.unidad_id || null,
+          apartamento_identificado: encontrado.no_apartamento || "",
+          propietario_identificado: encontrado.propietario || "",
+          alias_registrado: encontrado.descripcion_banco || "",
+          metodo_identificacion: "Alias banco",
+          puntos_coincidencia: evaluado.puntos,
+          estado_identificacion: "Identificado",
+        };
+      }
 
       return {
-        ok: true,
-        mensaje: `Pago ${p.id} ya existía en pagos.`,
+        ...item,
+        alias_id: null,
+        unidad_id: null,
+        apartamento_identificado: "Pendiente",
+        propietario_identificado: "",
+        alias_registrado: "",
+        metodo_identificacion: "Sin coincidencia",
+        puntos_coincidencia: 0,
+        estado_identificacion: "Revisar",
       };
-    }
+    });
 
-    const { data: pagoInsertado, error: errorInsert } = await supabase
-      .from("pagos")
-      .insert([
-        {
-          condominio_id: Number(condominioId),
-          unidad_id: unidad.id,
-          cuenta_bancaria_id: Number(cuentaBancariaId),
-          tipo_fondo: tipoFondo,
-          monto: montoPago,
-          fecha_pago: fechaParaPago(p.fecha_posteo),
-          metodo: "BANCO",
-          metodo_pago: "TRANSFERENCIA",
-          referencia: referenciaPago,
-          origen: "BANCO",
-          bank_transaction_id: p.archivo_banco_id,
-          pago_identificado_id: p.id,
-          descripcion: p.descripcion_banco || `Pago identificado ID ${p.id}`,
-          comprobante_url: null,
-        },
-      ])
-      .select("id")
-      .single();
+    setResultado(resultadoComparado);
+  }
 
-    if (errorInsert) {
-      throw new Error(
-        `Error insertando pago ID ${p.id} en tabla pagos: ${errorInsert.message}`
-      );
-    }
+  async function actualizarPagoMovilRecibido(pagos: PagoIdentificadoRow[]) {
+    if (!condominioId || pagos.length === 0) return;
 
-    const { error: errorAplicacion } = await supabase.rpc(
-      "aplicar_pago_a_cargos",
-      {
-        p_pago_id: pagoInsertado.id,
-        p_condominio_id: Number(condominioId),
-        p_unidad_id: unidad.id,
-        p_monto: montoPago,
-      }
-    );
-
-    if (errorAplicacion) {
-      throw new Error(
-        `Pago ${p.id} fue guardado, pero no se pudo aplicar a cargos: ${errorAplicacion.message}`
-      );
-    }
-
-    await actualizarBalanceCuenta(Number(cuentaBancariaId), tipoFondo, montoPago);
-
-    const { error: errorUpdate } = await supabase
-      .from("pagos_identificados")
-      .update({
-        estado: "APLICADO",
-        unidad_id: unidad.id,
-        observacion: `Pago guardado en tabla pagos. ID pago: ${pagoInsertado.id}`,
-      })
-      .eq("id", p.id)
+    const { data: pagosMovilData, error } = await supabase
+      .from("pagos_movil")
+      .select(
+        "id, condominio_id, unidad_id, no_apartamento, monto, fecha_pago, estado",
+      )
       .eq("condominio_id", Number(condominioId));
 
-    if (errorUpdate) {
-      throw new Error(
-        `Pago ${p.id} fue aplicado, pero no se pudo marcar como APLICADO: ${errorUpdate.message}`
+    if (error) {
+      console.error(error);
+      alert(
+        "Los pagos identificados fueron guardados, pero hubo error consultando pagos_movil: " +
+          error.message,
       );
-    }
-
-    return {
-      ok: true,
-      mensaje: `Pago ${p.id} aplicado correctamente.`,
-    };
-  }
-
-  async function aplicarTodosLosPagos() {
-    if (pagosPendientesAplicar.length === 0) {
-      alert("No hay pagos pendientes de aplicar.");
       return;
     }
 
-    if (!cuentaBancariaId) {
-      alert("Debe seleccionar una cuenta bancaria.");
-      return;
-    }
+    const pagosMovil = (pagosMovilData as PagoMovilRow[]) || [];
 
-    const confirmar = confirm(
-      `Se aplicarán ${pagosPendientesAplicar.length} pagos por un total de RD$ ${dinero(
-        totalPendienteAplicar
-      )}. ¿Desea continuar?`
-    );
+    for (const pago of pagos) {
+      const periodo = pago.periodo || obtenerPeriodo(pago.fecha_posteo || "");
+      const montoPago = Number(pago.monto_transaccion || pago.monto || 0);
 
-    if (!confirmar) return;
+      const pagoMovil = pagosMovil.find((pm) => {
+        const periodoMovil = obtenerPeriodo(pm.fecha_pago || "");
+        const mismoApartamento =
+          (pm.unidad_id &&
+            pago.unidad_id &&
+            Number(pm.unidad_id) === Number(pago.unidad_id)) ||
+          limpiarTexto(pm.no_apartamento || "") ===
+            limpiarTexto(pago.no_apartamento || pago.apartamento || "");
 
-    setAplicando(true);
-    setMensaje("");
+        return (
+          estadoPendienteMovil(pm.estado) &&
+          mismoApartamento &&
+          montoIgual(Number(pm.monto || 0), montoPago) &&
+          periodoMovil === periodo
+        );
+      });
 
-    let aplicados = 0;
-    let errores = 0;
-    const detalleErrores: string[] = [];
+      if (!pagoMovil) continue;
 
-    for (const pago of pagosPendientesAplicar) {
-      try {
-        await aplicarPagoIdentificado(pago);
-        aplicados += 1;
-      } catch (error: any) {
-        errores += 1;
-        detalleErrores.push(error.message || `Error aplicando pago ${pago.id}`);
+      const { error: updateError } = await supabase
+        .from("pagos_movil")
+        .update({
+          estado: "Recibido",
+          fecha_validacion: new Date().toISOString(),
+          archivo_banco_id: pago.archivo_banco_id,
+          pago_identificado_id: pago.id,
+          comentario_admin: "Pago confirmado contra archivo del banco.",
+        })
+        .eq("id", pagoMovil.id)
+        .eq("condominio_id", Number(condominioId));
+
+      if (updateError) {
+        console.error(updateError);
       }
     }
+  }
 
-    setAplicando(false);
+  function seleccionarUnidadManual(unidadId: string) {
+    setEditUnidadId(unidadId);
 
-    await cargarTodo(condominioId);
-
-    if (errores > 0) {
-      setMensaje(
-        `Proceso terminado. Aplicados: ${aplicados}. Con errores: ${errores}. ` +
-          detalleErrores.slice(0, 5).join(" | ")
-      );
+    if (!unidadId) {
+      setEditApartamento("");
+      setEditPropietario("");
       return;
     }
 
-    setMensaje(`Proceso terminado correctamente. Pagos aplicados: ${aplicados}.`);
+    const unidad = unidades.find((item) => String(item.id) === unidadId);
+
+    if (!unidad) {
+      setEditApartamento("");
+      setEditPropietario("");
+      return;
+    }
+
+    setEditApartamento(unidad.codigo || "");
+    setEditPropietario(unidad.propietario_nombre || "");
   }
 
-  async function aplicarUno(p: PagoIdentificado) {
+  function abrirEdicionManual(item: ResultadoRow) {
+    setEditando(item);
+
+    setEditUnidadId(item.unidad_id ? String(item.unidad_id) : "");
+
+    setEditApartamento(
+      item.apartamento_identificado !== "Pendiente"
+        ? item.apartamento_identificado || ""
+        : "",
+    );
+
+    setEditPropietario(item.propietario_identificado || "");
+
+    setEditObservacion(
+      item.estado_identificacion === "Revisar"
+        ? "Identificado manualmente desde revisión"
+        : "Actualizado manualmente",
+    );
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelarEdicionManual() {
+    setEditando(null);
+    setEditUnidadId("");
+    setEditApartamento("");
+    setEditPropietario("");
+    setEditObservacion("");
+  }
+
+  async function guardarIdentificacionManual(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!editando) {
+      alert("Debe seleccionar una transacción.");
+      return;
+    }
+
+    if (!condominioId) {
+      alert("No se encontró el condominio activo.");
+      return;
+    }
+
+    if (!editUnidadId || !editApartamento || !editPropietario) {
+      alert("Debe seleccionar el apartamento correcto.");
+      return;
+    }
+
+    const pago = {
+      archivo_banco_id: editando.id,
+      condominio_id: Number(condominioId),
+      condominio: editando.condominio || condominioNombre,
+      unidad_id: Number(editUnidadId),
+      apartamento: editApartamento,
+      no_apartamento: editApartamento,
+      propietario: editPropietario,
+      fecha_posteo: editando.fecha_posteo,
+      monto: Number(editando.monto_transaccion || 0),
+      monto_transaccion: Number(editando.monto_transaccion || 0),
+      no_serial: editando.no_serial,
+      descripcion_banco: editando.descripcion,
+      tipo_pago: "Mantenimiento",
+      periodo: obtenerPeriodo(editando.fecha_posteo),
+      estado: "Identificado",
+      observacion:
+        editObservacion ||
+        `Identificado manualmente | Apartamento: ${editApartamento}`,
+    };
+
     const confirmar = confirm(
-      `¿Desea aplicar este pago del apartamento ${
-        p.apartamento || p.no_apartamento || "-"
-      } por RD$ ${dinero(montoPagoIdentificado(p))}?`
+      `Se actualizará este pago como identificado para el apartamento ${editApartamento}. ¿Desea continuar?`,
     );
 
     if (!confirmar) return;
 
-    setAplicando(true);
-    setMensaje("");
+    setGuardandoManual(true);
 
-    try {
-      await aplicarPagoIdentificado(p);
-      setMensaje("Pago aplicado correctamente.");
-      await cargarTodo(condominioId);
-    } catch (error: any) {
-      setMensaje(error.message || "Error aplicando pago.");
-    }
+    const { data: pagoGuardado, error: errorPago } = await supabase
+      .from("pagos_identificados")
+      .upsert([pago], { onConflict: "archivo_banco_id" })
+      .select(
+        "id, archivo_banco_id, condominio_id, unidad_id, apartamento, no_apartamento, propietario, fecha_posteo, monto, monto_transaccion, no_serial, descripcion_banco, tipo_pago, periodo, estado, observacion",
+      )
+      .single();
 
-    setAplicando(false);
-  }
-
-  function exportarExcel() {
-    if (pagosFiltrados.length === 0) {
-      alert("No hay datos para exportar.");
+    if (errorPago) {
+      setGuardandoManual(false);
+      console.error(errorPago);
+      alert("Error guardando pago identificado: " + errorPago.message);
       return;
     }
 
-    const dataExcel = pagosFiltrados.map((p) => ({
-      Condominio: condominioNombre || condominioId,
-      Apartamento: p.apartamento || p.no_apartamento || "",
-      Propietario: p.propietario || "",
-      "Fecha Pago": p.fecha_posteo || "",
-      "Monto RD$": montoPagoIdentificado(p),
-      "No Serial": p.no_serial || "",
-      "Descripción Banco": p.descripcion_banco || "",
-      Estado: p.estado || "",
-      Observación: p.observacion || "",
-      "Fecha Registro": fechaLocal(p.created_at),
-    }));
+    const { error: errorBanco } = await supabase
+      .from("archivo_banco")
+      .update({ estado: "Identificado" })
+      .eq("id", editando.id)
+      .eq("condominio_id", Number(condominioId));
 
-    const hoja = XLSX.utils.json_to_sheet(dataExcel);
+    if (errorBanco) {
+      setGuardandoManual(false);
+      alert(
+        "El pago fue guardado, pero hubo error actualizando archivo_banco: " +
+          errorBanco.message,
+      );
+      return;
+    }
 
-    hoja["!cols"] = [
-      { wch: 35 },
-      { wch: 18 },
-      { wch: 30 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 20 },
-      { wch: 45 },
-      { wch: 15 },
-      { wch: 45 },
-      { wch: 18 },
-    ];
+    await actualizarPagoMovilRecibido([pagoGuardado as PagoIdentificadoRow]);
 
-    const libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, hoja, "Pagos Identificados");
+    setGuardandoManual(false);
 
-    const nombreArchivo = `Reporte_Pagos_Identificados_${
-      condominioNombre || condominioId
-    }.xlsx`
-      .replaceAll(" ", "_")
-      .replaceAll("/", "-");
+    alert("Pago actualizado e identificado correctamente.");
 
-    XLSX.writeFile(libro, nombreArchivo);
+    cancelarEdicionManual();
+    cargarDatos(condominioId);
   }
 
-  if (loading) {
-    return <div className="p-6">Cargando pagos identificados...</div>;
+  async function guardarPagosIdentificados() {
+    if (!condominioId) {
+      alert("No se encontró el condominio activo.");
+      return;
+    }
+
+    const pagos = resultado
+      .filter(
+        (r) =>
+          r.estado_identificacion === "Identificado" &&
+          r.apartamento_identificado &&
+          r.apartamento_identificado !== "Pendiente",
+      )
+      .map((r) => ({
+        archivo_banco_id: r.id,
+        condominio_id: Number(condominioId),
+        condominio: r.condominio || condominioNombre,
+        unidad_id: r.unidad_id,
+        apartamento: r.apartamento_identificado,
+        no_apartamento: r.apartamento_identificado,
+        propietario: r.propietario_identificado,
+        fecha_posteo: r.fecha_posteo,
+        monto: Number(r.monto_transaccion || 0),
+        monto_transaccion: Number(r.monto_transaccion || 0),
+        no_serial: r.no_serial,
+        descripcion_banco: r.descripcion,
+        tipo_pago: "Mantenimiento",
+        periodo: obtenerPeriodo(r.fecha_posteo),
+        estado: "Identificado",
+        observacion: `${r.metodo_identificacion} | Coincidencia: ${r.puntos_coincidencia}%`,
+      }));
+
+    if (pagos.length === 0) {
+      alert("No hay pagos identificados para guardar.");
+      return;
+    }
+
+    const confirmar = confirm(
+      `Se procesarán ${pagos.length} pagos identificados para ${condominioNombre}. Si alguno ya existe, se actualizará. ¿Desea continuar?`,
+    );
+
+    if (!confirmar) return;
+
+    setGuardando(true);
+
+    const { data: pagosGuardados, error } = await supabase
+      .from("pagos_identificados")
+      .upsert(pagos, { onConflict: "archivo_banco_id" })
+      .select(
+        "id, archivo_banco_id, condominio_id, unidad_id, apartamento, no_apartamento, propietario, fecha_posteo, monto, monto_transaccion, no_serial, descripcion_banco, tipo_pago, periodo, estado, observacion",
+      );
+
+    if (error) {
+      setGuardando(false);
+      console.error(error);
+      alert("Error al guardar pagos identificados: " + error.message);
+      return;
+    }
+
+    await marcarArchivoBancoIdentificado();
+
+    await actualizarPagoMovilRecibido(
+      (pagosGuardados as PagoIdentificadoRow[]) || [],
+    );
+
+    setGuardando(false);
+
+    alert("Pagos identificados guardados correctamente.");
+    cargarDatos(condominioId);
   }
+
+  async function marcarArchivoBancoIdentificado() {
+    const idsIdentificados = resultado
+      .filter((r) => r.estado_identificacion === "Identificado")
+      .map((r) => r.id);
+
+    const idsPendientes = resultado
+      .filter((r) => r.estado_identificacion === "Revisar")
+      .map((r) => r.id);
+
+    if (idsIdentificados.length > 0) {
+      await supabase
+        .from("archivo_banco")
+        .update({ estado: "Identificado" })
+        .in("id", idsIdentificados)
+        .eq("condominio_id", Number(condominioId));
+    }
+
+    if (idsPendientes.length > 0) {
+      await supabase
+        .from("archivo_banco")
+        .update({ estado: "Revisar" })
+        .in("id", idsPendientes)
+        .eq("condominio_id", Number(condominioId));
+    }
+  }
+
+  async function refrescar() {
+    if (!condominioId) return;
+    await cargarDatos(condominioId);
+  }
+
+  const resultadoFiltrado = useMemo(() => {
+    return resultado.filter((item) => {
+      const texto = `${item.fecha_posteo || ""} ${item.monto_transaccion || ""} ${
+        item.descripcion || ""
+      } ${item.apartamento_identificado || ""} ${
+        item.propietario_identificado || ""
+      } ${item.metodo_identificacion || ""} ${item.estado_identificacion || ""}`
+        .toLowerCase()
+        .trim();
+
+      const coincideBusqueda = texto.includes(busqueda.toLowerCase().trim());
+
+      const coincideEstado =
+        filtroEstado === "Todos"
+          ? true
+          : item.estado_identificacion === filtroEstado;
+
+      return coincideBusqueda && coincideEstado;
+    });
+  }, [resultado, busqueda, filtroEstado]);
+
+  const identificados = resultado.filter(
+    (r) => r.estado_identificacion === "Identificado",
+  ).length;
+
+  const pendientes = resultado.filter(
+    (r) => r.estado_identificacion === "Revisar",
+  ).length;
+
+  const montoIdentificado = resultado
+    .filter((r) => r.estado_identificacion === "Identificado")
+    .reduce((total, item) => total + Number(item.monto_transaccion || 0), 0);
+
+  const montoPendiente = resultado
+    .filter((r) => r.estado_identificacion === "Revisar")
+    .reduce((total, item) => total + Number(item.monto_transaccion || 0), 0);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-black text-slate-900">
-              Reporte de Pagos Identificados
-            </h1>
+    <PageContainer>
+      <ModuleMenu
+        title="Pagos Bancarios"
+        subtitle="Importación, identificación y validación de pagos."
+        tone="blue"
+        items={[
+          {
+            href: "/archivo-banco/importar",
+            label: "Importar banco",
+            icon: Banknote,
+          },
+          {
+            href: "/archivo-banco/identificar",
+            label: "Identificar pagos",
+            icon: SearchCheck,
+          },
+          {
+            href: "/pagos-identificados",
+            label: "Pagos identificados",
+            icon: ListChecks,
+          },
+          {
+            href: "/archivo-banco/importar-banco-identificado",
+            label: "Archivo Banco identificados",
+            icon: SearchCheck,
+          },
+        ]}
+      />
 
-            <p className="text-slate-500 mt-2">
-              Listado de pagos identificados desde el archivo del banco,
-              filtrado por el condominio activo.
+      <ModuleToolbar
+        title="Identificación Automática de Pagos"
+        subtitle={`Cruce de pagos bancarios contra apartamentos y alias. Condominio: ${
+          condominioNombre || "No identificado"
+        }.`}
+        icon={SearchCheck}
+        actions={
+          <ModuleActions
+            onRefresh={refrescar}
+            extra={
+              <button
+                onClick={guardarPagosIdentificados}
+                disabled={guardando || loading || !condominioId}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+                {guardando ? "Guardando..." : "Guardar identificados"}
+              </button>
+            }
+          />
+        }
+      />
+
+      {editando && (
+        <SectionCard
+          title="Actualizar pago en revisión"
+          subtitle="Seleccione el apartamento correcto para guardar este registro como identificado."
+          action={
+            <button
+              type="button"
+              onClick={cancelarEdicionManual}
+              className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+          }
+        >
+          <div className="mb-5 rounded-2xl border bg-yellow-50 p-4">
+            <p className="text-sm font-black uppercase text-yellow-800">
+              Transacción seleccionada
             </p>
 
-            <p className="text-sm text-blue-700 font-bold mt-3">
-              Condominio activo: {condominioNombre || "No seleccionado"}
-            </p>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <InfoLine label="Fecha" value={fechaCorta(editando.fecha_posteo)} />
+              <InfoLine
+                label="Monto"
+                value={formatearMoneda(editando.monto_transaccion)}
+              />
+              <InfoLine
+                label="Estado"
+                value={editando.estado_identificacion}
+                danger={editando.estado_identificacion === "Revisar"}
+              />
+            </div>
+
+            <div className="mt-4 rounded-xl bg-white p-3">
+              <p className="text-xs font-bold uppercase text-slate-500">
+                Descripción banco
+              </p>
+              <p className="mt-1 text-sm font-semibold text-slate-800">
+                {editando.descripcion || "-"}
+              </p>
+            </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => cargarTodo(condominioId)}
-              className="bg-slate-700 text-white px-5 py-3 rounded-xl hover:bg-slate-800 font-bold"
-            >
-              Actualizar listado
-            </button>
+          <form
+            onSubmit={guardarIdentificacionManual}
+            className="grid grid-cols-1 gap-4 md:grid-cols-2"
+          >
+            <div>
+              <label className="mb-1 block text-sm font-semibold">
+                Apartamento correcto *
+              </label>
 
-            <button
-              onClick={exportarExcel}
-              className="bg-green-700 text-white px-5 py-3 rounded-xl hover:bg-green-800 font-bold"
-            >
-              Exportar a Excel
-            </button>
-          </div>
-        </div>
-      </div>
+              <select
+                value={editUnidadId}
+                onChange={(e) => seleccionarUnidadManual(e.target.value)}
+                className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+              >
+                <option value="">Seleccione apartamento</option>
 
-      {mensaje && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-xl p-4 text-sm">
-          {mensaje}
-        </div>
+                {unidades.map((unidad) => (
+                  <option key={unidad.id} value={unidad.id}>
+                    {unidad.codigo} - {unidad.propietario_nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-semibold">
+                No. Apartamento
+              </label>
+
+              <input
+                value={editApartamento}
+                onChange={(e) => setEditApartamento(e.target.value)}
+                className="w-full rounded-xl border px-4 py-3 text-sm"
+                placeholder="Ej. G1"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-semibold">
+                Propietario
+              </label>
+
+              <input
+                value={editPropietario}
+                onChange={(e) => setEditPropietario(e.target.value)}
+                className="w-full rounded-xl border px-4 py-3 text-sm"
+                placeholder="Nombre del propietario"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-semibold">
+                Período
+              </label>
+
+              <input
+                value={obtenerPeriodo(editando.fecha_posteo)}
+                disabled
+                className="w-full rounded-xl border bg-slate-100 px-4 py-3 text-sm"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-sm font-semibold">
+                Observación
+              </label>
+
+              <textarea
+                value={editObservacion}
+                onChange={(e) => setEditObservacion(e.target.value)}
+                className="w-full rounded-xl border px-4 py-3 text-sm"
+                rows={3}
+              />
+            </div>
+
+            <div className="flex flex-col gap-3 md:col-span-2 md:flex-row">
+              <button
+                type="submit"
+                disabled={guardandoManual}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+                {guardandoManual ? "Guardando..." : "Guardar como identificado"}
+              </button>
+
+              <button
+                type="button"
+                onClick={cancelarEdicionManual}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-700 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+            </div>
+          </form>
+        </SectionCard>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="border rounded-2xl p-5 bg-white shadow-sm">
-          <p className="text-gray-500 text-sm">Condominio ID</p>
-          <h2 className="text-3xl font-black text-blue-700">
-            {condominioId || "-"}
-          </h2>
-        </div>
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-5">
+        <InfoBox
+          label="Total transacciones"
+          value={`${resultado.length}`}
+          tone="slate"
+        />
 
-        <div className="border rounded-2xl p-5 bg-white shadow-sm">
-          <p className="text-gray-500 text-sm">Total registros</p>
-          <h2 className="text-3xl font-black">{pagosFiltrados.length}</h2>
-        </div>
+        <InfoBox
+          label="Identificadas"
+          value={`${identificados}`}
+          tone="emerald"
+        />
 
-        <div className="border rounded-2xl p-5 bg-white shadow-sm">
-          <p className="text-gray-500 text-sm">Pendientes aplicar</p>
-          <h2 className="text-3xl font-black text-amber-700">
-            {pagosPendientesAplicar.length}
-          </h2>
-        </div>
+        <InfoBox label="Pendientes" value={`${pendientes}`} tone="red" />
 
-        <div className="border rounded-2xl p-5 bg-white shadow-sm">
-          <p className="text-gray-500 text-sm">Total pendiente</p>
-          <h2 className="text-3xl font-black text-green-700">
-            RD$ {dinero(totalPendienteAplicar)}
-          </h2>
-        </div>
+        <InfoBox
+          label="Monto identificado"
+          value={formatearMoneda(montoIdentificado)}
+          tone="emerald"
+        />
 
-        <div className="border rounded-2xl p-5 bg-white shadow-sm">
-          <p className="text-gray-500 text-sm">Apartamentos únicos</p>
-          <h2 className="text-3xl font-black text-blue-700">
-            {apartamentosUnicos}
-          </h2>
-        </div>
+        <InfoBox
+          label="Monto pendiente"
+          value={formatearMoneda(montoPendiente)}
+          tone="red"
+        />
       </div>
 
-      <div className="border rounded-2xl p-5 bg-white shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-          <div>
-            <label className="block text-sm font-semibold mb-2">Buscar</label>
-
-            <input
-              type="text"
-              value={filtroApartamento}
-              onChange={(e) => setFiltroApartamento(e.target.value)}
-              placeholder="Apartamento, serial, descripción o estado..."
-              className="border rounded-xl px-4 py-3 w-full"
-            />
+      <SectionCard
+        title="Filtros"
+        subtitle="Filtre las transacciones por estado, descripción, apartamento o propietario."
+        action={
+          <div className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">
+            <Filter className="h-4 w-4" />
+            Registros: {resultadoFiltrado.length}
           </div>
-
+        }
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
-            <label className="block text-sm font-semibold mb-2">
-              Fondo destino
-            </label>
+            <label className="mb-1 block text-sm font-semibold">Estado</label>
 
             <select
-              value={tipoFondo}
-              onChange={(e) => setTipoFondo(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
             >
-              <option value="ORDINARIO">Fondo Ordinario</option>
-              <option value="EXTRAORDINARIO">Fondo Extraordinario</option>
-              <option value="RESERVA">Fondo Reserva</option>
+              <option value="Todos">Todos</option>
+              <option value="Identificado">Identificado</option>
+              <option value="Revisar">Revisar</option>
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold mb-2">
-              Cuenta bancaria
-            </label>
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-semibold">Buscar</label>
 
-            <select
-              value={cuentaBancariaId}
-              onChange={(e) => setCuentaBancariaId(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
-            >
-              <option value="">Seleccione cuenta</option>
-
-              {cuentas.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre_banco} - {c.numero_cuenta} - {c.fondo_tipo || "-"}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-4 top-3.5 h-4 w-4 text-slate-400" />
+              <input
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                className="w-full rounded-xl border px-10 py-3 text-sm"
+                placeholder="Buscar por descripción, apartamento o propietario..."
+              />
+            </div>
           </div>
-
-          <button
-            type="button"
-            onClick={aplicarTodosLosPagos}
-            disabled={aplicando || pagosPendientesAplicar.length === 0}
-            className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white px-5 py-3 rounded-xl font-bold"
-          >
-            {aplicando ? "Aplicando..." : "Aplicar pagos identificados"}
-          </button>
         </div>
+      </SectionCard>
 
-        {cuentas.length === 0 && (
-          <p className="text-sm text-red-600 font-semibold mt-3">
-            No hay cuentas bancarias activas configuradas para este condominio.
-          </p>
-        )}
+      <SectionCard
+        title="Resultado de identificación"
+        subtitle="Transacciones importadas del banco comparadas contra unidades y alias bancarios."
+        action={
+          loading ? (
+            <div className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              Cargando
+            </div>
+          ) : (
+            <div className="rounded-xl bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">
+              Identificadas: {identificados}
+            </div>
+          )
+        }
+      >
+        {loading ? (
+          <p className="text-sm text-slate-500">Cargando datos...</p>
+        ) : !condominioId ? (
+          <EmptyState
+            title="Condominio no identificado"
+            description="No se encontró el condominio activo. Debe iniciar sesión nuevamente."
+          />
+        ) : resultadoFiltrado.length === 0 ? (
+          <EmptyState
+            title="Sin transacciones"
+            description="No hay transacciones para mostrar con esta consulta."
+          />
+        ) : (
+          <>
+            {/* Vista móvil y tablet pequeña: tarjetas sin desplazamiento horizontal */}
+            <div className="space-y-3 md:hidden">
+              {resultadoFiltrado.map((r) => (
+                <article
+                  key={r.id}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold uppercase text-slate-500">
+                        {fechaCorta(r.fecha_posteo)}
+                      </p>
+                      <p className="mt-1 text-lg font-black text-slate-900">
+                        {formatearMoneda(r.monto_transaccion)}
+                      </p>
+                      {r.no_serial && (
+                        <p className="mt-1 break-all text-xs text-slate-500">
+                          Serial: {r.no_serial}
+                        </p>
+                      )}
+                    </div>
 
-        <p className="text-xs text-slate-500 mt-3">
-          Al aplicar, el sistema guarda el pago con origen BANCO y enlaza
-          pagos.pago_identificado_id con pagos_identificados.id.
-        </p>
-      </div>
-
-      <div className="overflow-auto border rounded-2xl bg-white shadow-sm">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-100">
-            <tr>
-              <th className="p-3 border text-left">Apartamento</th>
-              <th className="p-3 border text-left">Propietario</th>
-              <th className="p-3 border text-left">Fecha Pago</th>
-              <th className="p-3 border text-right">Monto</th>
-              <th className="p-3 border text-left">No Serial</th>
-              <th className="p-3 border text-left">Descripción Banco</th>
-              <th className="p-3 border text-center">Estado</th>
-              <th className="p-3 border text-left">Observación</th>
-              <th className="p-3 border text-center">Acción</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {pagosFiltrados.map((p) => {
-              const estado = (p.estado || "").trim().toUpperCase();
-              const aplicado =
-                estado === "APLICADO" || estado === "PAGO APLICADO";
-
-              return (
-                <tr key={p.id} className="hover:bg-slate-50">
-                  <td className="p-3 border font-semibold">
-                    {p.apartamento || p.no_apartamento || "-"}
-                  </td>
-
-                  <td className="p-3 border">{p.propietario || "-"}</td>
-
-                  <td className="p-3 border">{p.fecha_posteo || "-"}</td>
-
-                  <td className="p-3 border text-right font-bold text-green-700">
-                    RD$ {dinero(montoPagoIdentificado(p))}
-                  </td>
-
-                  <td className="p-3 border">{p.no_serial || "-"}</td>
-
-                  <td className="p-3 border">{p.descripcion_banco || "-"}</td>
-
-                  <td className="p-3 border text-center">
                     <span
-                      className={`px-3 py-1 rounded-full text-xs font-bold ${
-                        aplicado
-                          ? "bg-green-100 text-green-700"
-                          : "bg-amber-100 text-amber-700"
+                      className={`flex-none rounded-full px-3 py-1 text-xs font-black ${
+                        r.estado_identificacion === "Identificado"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-red-50 text-red-700"
                       }`}
                     >
-                      {p.estado || "PENDIENTE"}
+                      {r.estado_identificacion}
                     </span>
-                  </td>
+                  </div>
 
-                  <td className="p-3 border text-xs">
-                    {p.observacion || "-"}
-                  </td>
+                  <div className="mt-4 rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs font-bold uppercase text-slate-500">
+                      Descripción del banco
+                    </p>
+                    <p className="mt-1 break-words text-sm font-semibold leading-5 text-slate-800">
+                      {r.descripcion || "-"}
+                    </p>
+                  </div>
 
-                  <td className="p-3 border text-center">
-                    {aplicado ? (
-                      <span className="text-green-700 text-xs font-bold">
-                        Aplicado
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => aplicarUno(p)}
-                        disabled={aplicando}
-                        className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white px-3 py-1 rounded-lg text-xs font-bold"
-                      >
-                        Aplicar
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <InfoLine
+                      label="Apartamento"
+                      value={r.apartamento_identificado || "Pendiente"}
+                      danger={r.estado_identificacion === "Revisar"}
+                    />
+                    <InfoLine
+                      label="Coincidencia"
+                      value={
+                        r.puntos_coincidencia > 0
+                          ? `${r.puntos_coincidencia}%`
+                          : "-"
+                      }
+                    />
+                  </div>
 
-            {pagosFiltrados.length === 0 && (
-              <tr>
-                <td
-                  className="p-6 border text-center text-slate-500"
-                  colSpan={9}
-                >
-                  No se encontraron pagos identificados para este condominio.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                  <div className="mt-3 rounded-xl border bg-white px-4 py-3">
+                    <p className="text-xs font-bold uppercase text-slate-500">
+                      Propietario
+                    </p>
+                    <p className="mt-1 break-words text-sm font-black text-slate-900">
+                      {r.propietario_identificado || "-"}
+                    </p>
+                    <p className="mt-2 break-words text-xs text-slate-500">
+                      Método: {r.metodo_identificacion || "-"}
+                    </p>
+                  </div>
 
-      <div className="bg-slate-50 border rounded-xl p-4 text-sm text-slate-600">
-        Total general mostrado: <strong>RD$ {dinero(totalPagado)}</strong>
-      </div>
+                  <button
+                    type="button"
+                    onClick={() => abrirEdicionManual(r)}
+                    className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-bold text-white ${
+                      r.estado_identificacion === "Revisar"
+                        ? "bg-blue-700 hover:bg-blue-800"
+                        : "bg-slate-700 hover:bg-slate-800"
+                    }`}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    {r.estado_identificacion === "Revisar"
+                      ? "Actualizar identificación"
+                      : "Corregir identificación"}
+                  </button>
+                </article>
+              ))}
+            </div>
+
+            {/* Vista de escritorio: tabla compacta de cinco columnas */}
+            <div className="hidden overflow-hidden rounded-2xl border border-slate-200 md:block">
+              <table className="w-full table-fixed text-xs lg:text-sm">
+                <colgroup>
+                  <col className="w-[16%]" />
+                  <col className="w-[30%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[22%]" />
+                  <col className="w-[15%]" />
+                </colgroup>
+
+                <thead className="bg-slate-100 text-slate-600">
+                  <tr>
+                    <th className="px-3 py-3 text-left">Transacción</th>
+                    <th className="px-3 py-3 text-left">Descripción banco</th>
+                    <th className="px-3 py-3 text-left">Identificación</th>
+                    <th className="px-3 py-3 text-left">Unidad / propietario</th>
+                    <th className="px-3 py-3 text-center">Estado / acción</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-200">
+                  {resultadoFiltrado.map((r) => (
+                    <tr key={r.id} className="bg-white align-top hover:bg-slate-50">
+                      <td className="px-3 py-3">
+                        <p className="font-bold text-slate-700">
+                          {fechaCorta(r.fecha_posteo)}
+                        </p>
+                        <p className="mt-1 font-black text-slate-900">
+                          {formatearMoneda(r.monto_transaccion)}
+                        </p>
+                        {r.no_serial && (
+                          <p
+                            className="mt-1 break-all text-[11px] leading-4 text-slate-500"
+                            title={r.no_serial}
+                          >
+                            Serial: {r.no_serial}
+                          </p>
+                        )}
+                      </td>
+
+                      <td className="px-3 py-3">
+                        <p
+                          className="whitespace-normal break-words leading-5 text-slate-700"
+                          title={r.descripcion || ""}
+                        >
+                          {r.descripcion || "-"}
+                        </p>
+                      </td>
+
+                      <td className="px-3 py-3">
+                        <p className="whitespace-normal break-words font-semibold text-slate-800">
+                          {r.metodo_identificacion || "-"}
+                        </p>
+                        <p className="mt-2 text-xs font-black text-blue-700">
+                          Coincidencia: {
+                            r.puntos_coincidencia > 0
+                              ? `${r.puntos_coincidencia}%`
+                              : "-"
+                          }
+                        </p>
+                      </td>
+
+                      <td className="px-3 py-3">
+                        <p
+                          className={`font-black ${
+                            r.estado_identificacion === "Revisar"
+                              ? "text-red-700"
+                              : "text-slate-900"
+                          }`}
+                        >
+                          {r.apartamento_identificado || "Pendiente"}
+                        </p>
+                        <p
+                          className="mt-1 whitespace-normal break-words leading-5 text-slate-600"
+                          title={r.propietario_identificado || ""}
+                        >
+                          {r.propietario_identificado || "-"}
+                        </p>
+                      </td>
+
+                      <td className="px-3 py-3 text-center">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black ${
+                            r.estado_identificacion === "Identificado"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-red-50 text-red-700"
+                          }`}
+                        >
+                          {r.estado_identificacion}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => abrirEdicionManual(r)}
+                          className={`mx-auto mt-2 inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-bold text-white ${
+                            r.estado_identificacion === "Revisar"
+                              ? "bg-blue-700 hover:bg-blue-800"
+                              : "bg-slate-700 hover:bg-slate-800"
+                          }`}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          {r.estado_identificacion === "Revisar"
+                            ? "Actualizar"
+                            : "Corregir"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </SectionCard>
+    </PageContainer>
+  );
+}
+
+function InfoBox({
+  label,
+  value,
+  tone = "slate",
+}: {
+  label: string;
+  value: string;
+  tone?: "slate" | "emerald" | "red" | "blue";
+}) {
+  const toneClass =
+    tone === "emerald"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+      : tone === "red"
+        ? "bg-red-50 text-red-700 border-red-100"
+        : tone === "blue"
+          ? "bg-blue-50 text-blue-700 border-blue-100"
+          : "bg-white text-slate-800 border-slate-200";
+
+  return (
+    <div className={`rounded-2xl border p-5 shadow-sm ${toneClass}`}>
+      <p className="text-sm font-bold opacity-80">{label}</p>
+      <h2 className="mt-2 text-2xl font-black">{value}</h2>
+    </div>
+  );
+}
+
+function InfoLine({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: string;
+  danger?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border bg-white px-4 py-3">
+      <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
+      <p
+        className={`mt-1 text-sm font-black ${
+          danger ? "text-red-700" : "text-slate-900"
+        }`}
+      >
+        {value}
+      </p>
     </div>
   );
 }

@@ -1,7 +1,22 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  Building2,
+  CheckCircle,
+  CircleDollarSign,
+  Hash,
+  Plus,
+  RefreshCw,
+  XCircle,
+} from "lucide-react";
 import { supabase } from "@/app/lib/supabaseClient";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import PageHeader from "@/components/vam/enterprise/PageHeader";
+import StatCard from "@/components/vam/enterprise/StatCard";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import ActionBar from "@/components/vam/enterprise/ActionBar";
 
 type Condominio = {
   id: number;
@@ -15,6 +30,7 @@ type Condominio = {
   porcentaje_mora: number | null;
   dia_inicio_mora: number | null;
   estado: string | null;
+  activa?: boolean | null;
   logo_url: string | null;
   nombre_representante: string | null;
   cedula_representante: string | null;
@@ -25,15 +41,13 @@ type Condominio = {
 export default function CondominiosPage() {
   const [condominioActivoId, setCondominioActivoId] = useState("");
   const [condominioActivoNombre, setCondominioActivoNombre] = useState("");
-
   const [condominios, setCondominios] = useState<Condominio[]>([]);
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
-
   const [editandoId, setEditandoId] = useState<number | null>(null);
   const [detalleId, setDetalleId] = useState<number | null>(null);
-
   const [buscar, setBuscar] = useState("");
+  const [mostrarFormulario, setMostrarFormulario] = useState(false);
 
   const [nombre, setNombre] = useState("");
   const [rnc, setRnc] = useState("");
@@ -41,12 +55,10 @@ export default function CondominiosPage() {
   const [telefono, setTelefono] = useState("");
   const [correo, setCorreo] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
-
   const [cuotaMensual, setCuotaMensual] = useState("");
   const [porcentajeMora, setPorcentajeMora] = useState("5");
   const [diaInicioMora, setDiaInicioMora] = useState("10");
   const [estado, setEstado] = useState("activo");
-
   const [nombreRepresentante, setNombreRepresentante] = useState("");
   const [cedulaRepresentante, setCedulaRepresentante] = useState("");
   const [cargoRepresentante, setCargoRepresentante] = useState("");
@@ -59,7 +71,9 @@ export default function CondominiosPage() {
     setCondominioActivoNombre(nombreActivo);
 
     if (!id) {
-      alert("No se encontró el condominio activo. Debe iniciar sesión nuevamente.");
+      alert(
+        "No se encontró el condominio activo. Debe iniciar sesión nuevamente.",
+      );
       return;
     }
 
@@ -70,9 +84,7 @@ export default function CondominiosPage() {
     setLoading(true);
 
     const id =
-      idActivo ||
-      localStorage.getItem("condominio_id") ||
-      condominioActivoId;
+      idActivo || localStorage.getItem("condominio_id") || condominioActivoId;
 
     if (!id) {
       setLoading(false);
@@ -94,7 +106,6 @@ export default function CondominiosPage() {
     }
 
     const lista = (data as Condominio[]) || [];
-
     setCondominios(lista);
 
     if (lista.length > 0 && !detalleId) {
@@ -104,19 +115,16 @@ export default function CondominiosPage() {
 
   function limpiarFormulario() {
     setEditandoId(null);
-
     setNombre("");
     setRnc("");
     setDireccion("");
     setTelefono("");
     setCorreo("");
     setLogoUrl("");
-
     setCuotaMensual("");
     setPorcentajeMora("5");
     setDiaInicioMora("10");
     setEstado("activo");
-
     setNombreRepresentante("");
     setCedulaRepresentante("");
     setCargoRepresentante("");
@@ -124,27 +132,22 @@ export default function CondominiosPage() {
 
   function editarCondominio(c: Condominio) {
     setEditandoId(c.id);
-
+    setMostrarFormulario(true);
     setNombre(c.nombre || "");
     setRnc(c.rnc || "");
     setDireccion(c.direccion || "");
     setTelefono(c.telefono || "");
     setCorreo(c.correo || "");
     setLogoUrl(c.logo_url || "");
-
     setCuotaMensual(String(c.cuota_mensual || ""));
     setPorcentajeMora(String(c.porcentaje_mora || 5));
     setDiaInicioMora(String(c.dia_inicio_mora || 10));
     setEstado(c.estado || "activo");
-
     setNombreRepresentante(c.nombre_representante || "");
     setCedulaRepresentante(c.cedula_representante || "");
     setCargoRepresentante(c.cargo_representante || "");
 
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function guardarCondominio(e: React.FormEvent) {
@@ -165,12 +168,10 @@ export default function CondominiosPage() {
       telefono: telefono.trim() || null,
       correo: correo.trim() || null,
       logo_url: logoUrl.trim() || null,
-
       cuota_mensual: Number(cuotaMensual || 0),
       porcentaje_mora: Number(porcentajeMora || 5),
       dia_inicio_mora: Number(diaInicioMora || 10),
       estado,
-
       nombre_representante: nombreRepresentante.trim() || null,
       cedula_representante: cedulaRepresentante.trim() || null,
       cargo_representante: cargoRepresentante.trim() || null,
@@ -203,23 +204,53 @@ export default function CondominiosPage() {
 
       alert("Condominio actualizado correctamente.");
       limpiarFormulario();
+      setMostrarFormulario(false);
       cargarCondominios(condominioActivoId);
       return;
     }
 
-    const { error } = await supabase.from("condominios").insert([registro]);
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const userId = authData?.user?.id || "";
 
-    setGuardando(false);
-
-    if (error) {
-      alert("Error guardando condominio: " + error.message);
+    if (authError || !userId) {
+      setGuardando(false);
+      alert("No se pudo identificar el usuario logueado. Cierre sesión e ingrese nuevamente.");
       return;
     }
 
-    alert("Condominio registrado correctamente.");
+    const { data: nuevoId, error } = await supabase.rpc("crear_condominio_completo", {
+      p_user_id: userId,
+      p_nombre: nombre.trim(),
+      p_rnc: rnc.trim() || null,
+      p_direccion: direccion.trim() || null,
+      p_telefono: telefono.trim() || null,
+      p_correo: correo.trim() || null,
+      p_logo_url: logoUrl.trim() || null,
+      p_cuota_mensual: Number(cuotaMensual || 0),
+      p_porcentaje_mora: Number(porcentajeMora || 5),
+      p_dia_inicio_mora: Number(diaInicioMora || 10),
+      p_estado: estado,
+      p_nombre_representante: nombreRepresentante.trim() || null,
+      p_cedula_representante: cedulaRepresentante.trim() || null,
+      p_cargo_representante: cargoRepresentante.trim() || null,
+      p_empresa_id: 1,
+      p_sucursal_id: 1,
+    });
 
+    if (error) {
+      setGuardando(false);
+      alert("Error creando condominio completo: " + error.message);
+      return;
+    }
+
+    console.log("Condominio creado completo ID:", nuevoId);
+
+    setGuardando(false);
+    alert(
+      "Condominio registrado correctamente. Ya quedó asignado al usuario y listo para entrar desde el selector.",
+    );
     limpiarFormulario();
-
+    setMostrarFormulario(false);
     cargarCondominios(condominioActivoId);
   }
 
@@ -230,9 +261,7 @@ export default function CondominiosPage() {
 
     const { error } = await supabase
       .from("condominios")
-      .update({
-        estado: nuevoEstado,
-      })
+      .update({ estado: nuevoEstado })
       .eq("id", id);
 
     if (error) {
@@ -273,320 +302,270 @@ export default function CondominiosPage() {
 
   const activos = condominios.filter((c) => c.estado === "activo").length;
   const inactivos = condominios.filter((c) => c.estado !== "activo").length;
+  const condominioPrincipal = condominios[0];
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-4xl font-black text-slate-900">Condominios</h1>
+    <PageContainer>
+      <PageHeader
+        title="Condominios"
+        subtitle="Registro, configuración y administración del condominio activo."
+        badge="Centro Residencial"
+        icon={Building2}
+        action={
+          <button
+            type="button"
+            onClick={() => {
+              limpiarFormulario();
+              setMostrarFormulario((v) => !v);
+            }}
+            className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-800"
+          >
+            <Plus className="h-4 w-4" />
+            {mostrarFormulario ? "Ocultar formulario" : "Nuevo / Editar"}
+          </button>
+        }
+      />
 
-        <p className="text-slate-500 mt-2">
-          Registro, configuración y administración del condominio activo.
-        </p>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard
+          title="Total mostrado"
+          value={condominios.length}
+          subtitle="Condominio en sesión"
+          icon={Building2}
+          tone="blue"
+        />
 
-        <p className="text-sm text-blue-700 font-bold mt-3">
-          Condominio activo en sesión:{" "}
-          {condominioActivoNombre || "No seleccionado"}
-        </p>
+        <StatCard
+          title="Activos"
+          value={activos}
+          subtitle="Estado activo"
+          icon={CheckCircle}
+          tone="green"
+        />
+
+        <StatCard
+          title="Inactivos"
+          value={inactivos}
+          subtitle="Estado inactivo"
+          icon={XCircle}
+          tone="red"
+        />
+
+        <StatCard
+          title="Cuota"
+          value={`RD$ ${dinero(condominioPrincipal?.cuota_mensual)}`}
+          subtitle={`ID ${condominioActivoId || "-"}`}
+          icon={CircleDollarSign}
+          tone="amber"
+        />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Total mostrado</p>
-          <h2 className="text-3xl font-black">{condominios.length}</h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Activos</p>
-          <h2 className="text-3xl font-black text-green-700">{activos}</h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Inactivos</p>
-          <h2 className="text-3xl font-black text-red-700">{inactivos}</h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Condominio ID</p>
-          <h2 className="text-3xl font-black text-blue-700">
-            {condominioActivoId || "-"}
-          </h2>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-3xl p-6 shadow-sm border">
-        <h2 className="text-xl font-black mb-4">
-          {editandoId ? "Modificar condominio" : "Registrar condominio"}
-        </h2>
-
-        <form
-          onSubmit={guardarCondominio}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
+      {mostrarFormulario && (
+        <SectionCard
+          title={editandoId ? "Modificar condominio" : "Registrar condominio"}
+          subtitle="Complete los datos generales, financieros y del representante."
         >
-          <div className="md:col-span-2">
-            <h3 className="font-black text-slate-800 border-b pb-2">
-              Datos generales
-            </h3>
-          </div>
+          <form onSubmit={guardarCondominio} className="space-y-5">
+            <div>
+              <h3 className="mb-3 border-b pb-2 text-sm font-black text-slate-800">
+                Datos generales
+              </h3>
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Nombre *
-            </label>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <input
+                  type="text"
+                  value={nombre}
+                  onChange={(e) => setNombre(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="Nombre del condominio *"
+                />
 
-            <input
-              type="text"
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="Ej. Condominio Residencial Colinas del Oeste Lote 9"
-            />
-          </div>
+                <input
+                  type="text"
+                  value={rnc}
+                  onChange={(e) => setRnc(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="RNC"
+                />
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">RNC</label>
+                <input
+                  type="text"
+                  value={telefono}
+                  onChange={(e) => setTelefono(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="Teléfono"
+                />
 
-            <input
-              type="text"
-              value={rnc}
-              onChange={(e) => setRnc(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="RNC del condominio"
-            />
-          </div>
+                <input
+                  type="email"
+                  value={correo}
+                  onChange={(e) => setCorreo(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="Correo"
+                />
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Teléfono
-            </label>
+                <input
+                  type="text"
+                  value={logoUrl}
+                  onChange={(e) => setLogoUrl(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm md:col-span-2"
+                  placeholder="URL del logo"
+                />
 
-            <input
-              type="text"
-              value={telefono}
-              onChange={(e) => setTelefono(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="Teléfono"
-            />
-          </div>
+                <textarea
+                  value={direccion}
+                  onChange={(e) => setDireccion(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm md:col-span-2"
+                  rows={3}
+                  placeholder="Dirección completa"
+                />
+              </div>
+            </div>
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">Correo</label>
+            <div>
+              <h3 className="mb-3 border-b pb-2 text-sm font-black text-slate-800">
+                Datos financieros
+              </h3>
 
-            <input
-              type="email"
-              value={correo}
-              onChange={(e) => setCorreo(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="correo@ejemplo.com"
-            />
-          </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                <input
+                  type="number"
+                  step="0.01"
+                  value={cuotaMensual}
+                  onChange={(e) => setCuotaMensual(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="Cuota mensual"
+                />
 
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">
-              URL del logo
-            </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={porcentajeMora}
+                  onChange={(e) => setPorcentajeMora(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="% Mora"
+                />
 
-            <input
-              type="text"
-              value={logoUrl}
-              onChange={(e) => setLogoUrl(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="https://..."
-            />
+                <input
+                  type="number"
+                  value={diaInicioMora}
+                  onChange={(e) => setDiaInicioMora(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="Día mora"
+                />
+
+                <select
+                  value={estado}
+                  onChange={(e) => setEstado(e.target.value)}
+                  className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+                >
+                  <option value="activo">Activo</option>
+                  <option value="inactivo">Inactivo</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="mb-3 border-b pb-2 text-sm font-black text-slate-800">
+                Representante para contratos
+              </h3>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <input
+                  type="text"
+                  value={nombreRepresentante}
+                  onChange={(e) => setNombreRepresentante(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="Nombre del representante"
+                />
+
+                <input
+                  type="text"
+                  value={cedulaRepresentante}
+                  onChange={(e) => setCedulaRepresentante(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="Cédula"
+                />
+
+                <input
+                  type="text"
+                  value={cargoRepresentante}
+                  onChange={(e) => setCargoRepresentante(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="Cargo"
+                />
+              </div>
+            </div>
 
             {logoUrl && (
-              <div className="mt-3">
+              <div>
                 <img
                   src={logoUrl}
                   alt="Logo condominio"
-                  className="h-20 object-contain border rounded-xl p-2 bg-white"
+                  className="h-20 rounded-xl border bg-white object-contain p-2"
                 />
               </div>
             )}
-          </div>
 
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">
-              Dirección
-            </label>
-
-            <textarea
-              value={direccion}
-              onChange={(e) => setDireccion(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              rows={3}
-              placeholder="Dirección completa del condominio"
-            />
-          </div>
-
-          <div className="md:col-span-2 mt-4">
-            <h3 className="font-black text-slate-800 border-b pb-2">
-              Datos financieros
-            </h3>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Cuota mensual RD$
-            </label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={cuotaMensual}
-              onChange={(e) => setCuotaMensual(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="0.00"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">% Mora</label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={porcentajeMora}
-              onChange={(e) => setPorcentajeMora(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="5"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Día inicio mora
-            </label>
-
-            <input
-              type="number"
-              value={diaInicioMora}
-              onChange={(e) => setDiaInicioMora(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="10"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">Estado</label>
-
-            <select
-              value={estado}
-              onChange={(e) => setEstado(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
-            >
-              <option value="activo">Activo</option>
-              <option value="inactivo">Inactivo</option>
-            </select>
-          </div>
-
-          <div className="md:col-span-2 mt-4">
-            <h3 className="font-black text-slate-800 border-b pb-2">
-              Representante para contratos
-            </h3>
-
-            <p className="text-sm text-slate-500 mt-1">
-              Estos datos se utilizarán automáticamente para generar contratos
-              de empleados.
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Nombre del representante
-            </label>
-
-            <input
-              type="text"
-              value={nombreRepresentante}
-              onChange={(e) => setNombreRepresentante(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="Nombre del administrador o representante"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Cédula del representante
-            </label>
-
-            <input
-              type="text"
-              value={cedulaRepresentante}
-              onChange={(e) => setCedulaRepresentante(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="000-0000000-0"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Cargo del representante
-            </label>
-
-            <input
-              type="text"
-              value={cargoRepresentante}
-              onChange={(e) => setCargoRepresentante(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="Administrador / Presidente / Representante"
-            />
-          </div>
-
-          <div className="md:col-span-2 flex flex-col md:flex-row gap-3 mt-3">
-            <button
-              type="submit"
-              disabled={guardando}
-              className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white px-5 py-3 rounded-xl font-bold"
-            >
-              {guardando
-                ? "Guardando..."
-                : editandoId
-                ? "Guardar cambios"
-                : "Guardar condominio"}
-            </button>
-
-            {editandoId && (
+            <div className="flex flex-col gap-3 md:flex-row">
               <button
-                type="button"
-                onClick={limpiarFormulario}
-                className="bg-slate-600 hover:bg-slate-700 text-white px-5 py-3 rounded-xl font-bold"
+                type="submit"
+                disabled={guardando}
+                className="rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:bg-slate-400"
               >
-                Cancelar edición
+                {guardando
+                  ? "Guardando..."
+                  : editandoId
+                    ? "Guardar cambios"
+                    : "Guardar condominio"}
               </button>
-            )}
-          </div>
-        </form>
-      </div>
 
-      <div className="bg-white rounded-3xl p-6 shadow-sm border">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
-          <div>
-            <h2 className="text-xl font-black">Condominio activo</h2>
+              {editandoId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    limpiarFormulario();
+                    setMostrarFormulario(false);
+                  }}
+                  className="rounded-xl bg-slate-600 px-5 py-3 font-bold text-white hover:bg-slate-700"
+                >
+                  Cancelar edición
+                </button>
+              )}
+            </div>
+          </form>
+        </SectionCard>
+      )}
 
-            <p className="text-sm text-slate-500">
-              Mostrando solamente el condominio logueado en este momento.
-            </p>
-          </div>
+      <SectionCard
+        title="Condominio activo"
+        subtitle={`Mostrando solamente: ${
+          condominioActivoNombre || "No seleccionado"
+        }`}
+      >
+        <ActionBar
+          search={buscar}
+          onSearch={setBuscar}
+          placeholder="Buscar dentro del condominio activo..."
+        >
+          <button
+            type="button"
+            onClick={() => cargarCondominios(condominioActivoId)}
+            className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Actualizar
+          </button>
+        </ActionBar>
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">Buscar</label>
-
-            <input
-              type="text"
-              value={buscar}
-              onChange={(e) => setBuscar(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full md:w-96"
-              placeholder="Buscar dentro del condominio activo..."
-            />
-          </div>
-        </div>
-
-        {loading ? (
-          <p>Cargando condominio...</p>
-        ) : (
-          <div className="overflow-x-auto border rounded-2xl">
+        <div className="mt-4 overflow-x-auto rounded-2xl border">
+          {loading ? (
+            <div className="p-6 text-sm text-slate-500">
+              Cargando condominio...
+            </div>
+          ) : (
             <table className="w-full text-sm">
-              <thead className="bg-slate-50">
+              <thead className="bg-slate-100 text-slate-600">
                 <tr>
                   <th className="px-4 py-3 text-left">Condominio</th>
                   <th className="px-4 py-3 text-left">RNC</th>
@@ -597,28 +576,29 @@ export default function CondominiosPage() {
                 </tr>
               </thead>
 
-              <tbody>
+              <tbody className="divide-y divide-slate-200">
                 {condominiosFiltrados.map((c) => (
                   <Fragment key={c.id}>
-                    <tr className="border-t bg-blue-50">
+                    <tr className="bg-white hover:bg-slate-50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           {c.logo_url ? (
                             <img
                               src={c.logo_url}
                               alt={c.nombre}
-                              className="h-10 w-10 object-contain border rounded-xl p-1 bg-white"
+                              className="h-10 w-10 rounded-xl border bg-white object-contain p-1"
                             />
                           ) : (
-                            <div className="h-10 w-10 rounded-xl bg-slate-100 border flex items-center justify-center text-slate-400 text-[10px]">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl border bg-slate-100 text-[10px] text-slate-400">
                               Logo
                             </div>
                           )}
 
                           <div>
-                            <p className="font-black">{c.nombre}</p>
-
-                            <p className="text-xs text-blue-700 font-bold">
+                            <p className="font-black text-slate-900">
+                              {c.nombre}
+                            </p>
+                            <p className="text-xs font-bold text-blue-700">
                               Condominio activo
                             </p>
                           </div>
@@ -626,7 +606,6 @@ export default function CondominiosPage() {
                       </td>
 
                       <td className="px-4 py-3">{c.rnc || "-"}</td>
-
                       <td className="px-4 py-3">{c.telefono || "-"}</td>
 
                       <td className="px-4 py-3 text-right font-bold text-green-700">
@@ -635,7 +614,7 @@ export default function CondominiosPage() {
 
                       <td className="px-4 py-3 text-center">
                         <span
-                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${
                             c.estado === "activo"
                               ? "bg-green-100 text-green-800"
                               : "bg-red-100 text-red-800"
@@ -650,15 +629,15 @@ export default function CondominiosPage() {
                           <button
                             type="button"
                             onClick={() => verDetalle(c.id)}
-                            className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                            className="rounded-lg bg-blue-700 px-3 py-1 text-xs font-bold text-white hover:bg-blue-800"
                           >
-                            {detalleId === c.id ? "Ocultar" : "Ver detalle"}
+                            {detalleId === c.id ? "Ocultar" : "Detalle"}
                           </button>
 
                           <button
                             type="button"
                             onClick={() => editarCondominio(c)}
-                            className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                            className="rounded-lg bg-slate-700 px-3 py-1 text-xs font-bold text-white hover:bg-slate-800"
                           >
                             Editar
                           </button>
@@ -667,7 +646,7 @@ export default function CondominiosPage() {
                             <button
                               type="button"
                               onClick={() => cambiarEstado(c.id, "inactivo")}
-                              className="bg-red-700 hover:bg-red-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                              className="rounded-lg bg-red-700 px-3 py-1 text-xs font-bold text-white hover:bg-red-800"
                             >
                               Inactivar
                             </button>
@@ -675,7 +654,7 @@ export default function CondominiosPage() {
                             <button
                               type="button"
                               onClick={() => cambiarEstado(c.id, "activo")}
-                              className="bg-green-700 hover:bg-green-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                              className="rounded-lg bg-green-700 px-3 py-1 text-xs font-bold text-white hover:bg-green-800"
                             >
                               Activar
                             </button>
@@ -687,64 +666,60 @@ export default function CondominiosPage() {
                     {detalleId === c.id && (
                       <tr className="bg-slate-50">
                         <td colSpan={6} className="px-4 py-4">
-                          <div className="border rounded-2xl p-5 bg-white">
-                            <div className="flex flex-col md:flex-row gap-4">
+                          <div className="rounded-2xl border bg-white p-5">
+                            <div className="flex flex-col gap-4 md:flex-row">
                               {c.logo_url ? (
                                 <img
                                   src={c.logo_url}
                                   alt={c.nombre}
-                                  className="h-24 w-24 object-contain border rounded-2xl p-2 bg-white"
+                                  className="h-24 w-24 rounded-2xl border bg-white object-contain p-2"
                                 />
                               ) : (
-                                <div className="h-24 w-24 rounded-2xl bg-slate-100 border flex items-center justify-center text-slate-400 text-xs">
+                                <div className="flex h-24 w-24 items-center justify-center rounded-2xl border bg-slate-100 text-xs text-slate-400">
                                   Sin logo
                                 </div>
                               )}
 
                               <div className="flex-1">
-                                <h3 className="text-xl font-black">
+                                <h3 className="text-xl font-black text-slate-900">
                                   {c.nombre}
                                 </h3>
 
-                                <p className="text-sm text-slate-500 mt-1">
+                                <p className="mt-1 text-sm text-slate-500">
                                   {c.direccion || "-"}
                                 </p>
 
-                                <p className="text-sm text-slate-500 mt-2">
-                                  RNC: {c.rnc || "-"} · Tel:{" "}
-                                  {c.telefono || "-"} · Correo:{" "}
-                                  {c.correo || "-"}
+                                <p className="mt-2 text-sm text-slate-500">
+                                  RNC: {c.rnc || "-"} · Tel: {c.telefono || "-"}{" "}
+                                  · Correo: {c.correo || "-"}
                                 </p>
 
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5 text-sm">
-                                  <div className="bg-slate-50 border rounded-xl p-3">
+                                <div className="mt-5 grid grid-cols-1 gap-4 text-sm md:grid-cols-3">
+                                  <div className="rounded-xl border bg-slate-50 p-3">
                                     <p className="text-slate-500">
                                       Cuota mensual
                                     </p>
-
                                     <p className="font-bold text-green-700">
                                       RD$ {dinero(c.cuota_mensual)}
                                     </p>
                                   </div>
 
-                                  <div className="bg-slate-50 border rounded-xl p-3">
+                                  <div className="rounded-xl border bg-slate-50 p-3">
                                     <p className="text-slate-500">% Mora</p>
-
                                     <p className="font-semibold">
                                       {c.porcentaje_mora || 0}%
                                     </p>
                                   </div>
 
-                                  <div className="bg-slate-50 border rounded-xl p-3">
+                                  <div className="rounded-xl border bg-slate-50 p-3">
                                     <p className="text-slate-500">Día mora</p>
-
                                     <p className="font-semibold">
                                       Día {c.dia_inicio_mora || 10}
                                     </p>
                                   </div>
                                 </div>
 
-                                <div className="mt-5 bg-slate-50 border rounded-xl p-3 text-sm">
+                                <div className="mt-5 rounded-xl border bg-slate-50 p-3 text-sm">
                                   <p className="font-bold text-slate-800">
                                     Representante contratos
                                   </p>
@@ -776,9 +751,9 @@ export default function CondominiosPage() {
                 )}
               </tbody>
             </table>
-          </div>
-        )}
-      </div>
-    </div>
+          )}
+        </div>
+      </SectionCard>
+    </PageContainer>
   );
 }

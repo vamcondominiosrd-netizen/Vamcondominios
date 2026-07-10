@@ -2,8 +2,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Download,
+  FileSpreadsheet,
+  RefreshCw,
+  Upload,
+  UserRound,
+  Users,
+  CheckCircle,
+} from "lucide-react";
 import { supabase } from "@/app/lib/supabaseClient";
 import * as XLSX from "xlsx";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import PageHeader from "@/components/vam/enterprise/PageHeader";
+import StatCard from "@/components/vam/enterprise/StatCard";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import ActionBar from "@/components/vam/enterprise/ActionBar";
 
 type Banco = {
   id: number;
@@ -45,6 +60,7 @@ export default function PropietariosPage() {
   const [loading, setLoading] = useState(false);
   const [importando, setImportando] = useState(false);
   const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [mostrarFormulario, setMostrarFormulario] = useState(false);
 
   const [noApartamento, setNoApartamento] = useState("");
   const [nombrePropietario, setNombrePropietario] = useState("");
@@ -166,6 +182,7 @@ export default function PropietariosPage() {
 
   function editarPropietario(p: Propietario) {
     setEditandoId(p.id);
+    setMostrarFormulario(true);
     setNoApartamento(p.no_apartamento || "");
     setNombrePropietario(p.nombre_propietario || "");
     setCedula(p.cedula || "");
@@ -255,6 +272,7 @@ export default function PropietariosPage() {
 
     await actualizarUnidadesDesdePropietarios(condominioId);
     limpiarFormulario();
+    setMostrarFormulario(false);
     await cargarPropietarios(condominioId);
   }
 
@@ -381,18 +399,20 @@ export default function PropietariosPage() {
                 ""
             ).trim(),
             banco_id: bancoEncontrado?.id || null,
-            tipo_cuenta: String(
-              fila["Tipo Cuenta"] ||
-                fila["Tipo de Cuenta"] ||
-                fila["TIPO CUENTA"] ||
-                ""
-            ).trim() || null,
-            titular_cuenta: String(
-              fila["Titular Cuenta"] ||
-                fila["Titular de la Cuenta"] ||
-                fila["TITULAR CUENTA"] ||
-                ""
-            ).trim() || null,
+            tipo_cuenta:
+              String(
+                fila["Tipo Cuenta"] ||
+                  fila["Tipo de Cuenta"] ||
+                  fila["TIPO CUENTA"] ||
+                  ""
+              ).trim() || null,
+            titular_cuenta:
+              String(
+                fila["Titular Cuenta"] ||
+                  fila["Titular de la Cuenta"] ||
+                  fila["TITULAR CUENTA"] ||
+                  ""
+              ).trim() || null,
             direccion: String(
               fila["Direccion"] || fila["Dirección"] || fila["DIRECCION"] || ""
             ).trim(),
@@ -506,242 +526,298 @@ export default function PropietariosPage() {
   ).length;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Propietarios</h1>
-          <p className="text-slate-500">
-            Condominio activo: {condominioNombre || `ID ${condominioId}`}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={descargarPlantilla}
-            className="bg-slate-700 text-white px-4 py-2 rounded-lg"
-          >
-            Descargar plantilla
-          </button>
-
-          <label className="bg-blue-700 text-white px-4 py-2 rounded-lg cursor-pointer">
-            {importando ? "Importando..." : "Importar Excel"}
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={importarExcel}
-              className="hidden"
-              disabled={importando}
-            />
-          </label>
-
-          <button
-            type="button"
-            onClick={exportarExcel}
-            className="bg-green-700 text-white px-4 py-2 rounded-lg"
-          >
-            Exportar Excel
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Total propietarios</p>
-          <h2 className="text-2xl font-bold">{propietariosFiltrados.length}</h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Activos</p>
-          <h2 className="text-2xl font-bold text-green-700">{totalActivos}</h2>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl p-6 shadow-sm border">
-        <h2 className="text-xl font-bold mb-4">
-          {editandoId ? "Modificar propietario" : "Registrar propietario"}
-        </h2>
-
-        <form
-          onSubmit={guardarPropietario}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
-          <input
-            type="text"
-            value={noApartamento}
-            onChange={(e) => setNoApartamento(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="No. Apartamento *"
-          />
-
-          <input
-            type="text"
-            value={nombrePropietario}
-            onChange={(e) => setNombrePropietario(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Nombre del propietario *"
-          />
-
-          <input
-            type="text"
-            value={cedula}
-            onChange={(e) => setCedula(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Cédula"
-          />
-
-          <input
-            type="text"
-            value={telefono}
-            onChange={(e) => setTelefono(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Teléfono"
-          />
-
-          <input
-            type="email"
-            value={correo}
-            onChange={(e) => setCorreo(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Correo"
-          />
-
-          <select
-            value={bancoId}
-            onChange={(e) => setBancoId(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full bg-white"
-          >
-            <option value="">Seleccione banco</option>
-            {bancos.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.nombre_banco}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={tipoCuenta}
-            onChange={(e) => setTipoCuenta(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full bg-white"
-          >
-            <option value="">Tipo de cuenta</option>
-            <option value="Ahorro">Ahorro</option>
-            <option value="Corriente">Corriente</option>
-            <option value="Nómina">Nómina</option>
-            <option value="Otro">Otro</option>
-          </select>
-
-          <input
-            type="text"
-            value={cuentaBanco}
-            onChange={(e) => setCuentaBanco(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="No. cuenta bancaria"
-          />
-
-          <input
-            type="text"
-            value={titularCuenta}
-            onChange={(e) => setTitularCuenta(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full md:col-span-2"
-            placeholder="Titular de la cuenta"
-          />
-
-          <textarea
-            value={direccion}
-            onChange={(e) => setDireccion(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full md:col-span-2"
-            rows={2}
-            placeholder="Dirección"
-          />
-
-          <div className="md:col-span-2 flex gap-2">
+    <PageContainer>
+      <PageHeader
+        title="Propietarios"
+        subtitle="Registro, importación y control de propietarios del condominio activo."
+        badge="Centro Residencial"
+        icon={Users}
+        action={
+          <div className="flex flex-wrap gap-2">
             <button
-              type="submit"
-              className="bg-amber-500 text-white px-5 py-2 rounded-lg"
+              type="button"
+              onClick={() => {
+                limpiarFormulario();
+                setMostrarFormulario((actual) => !actual);
+              }}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-800"
             >
-              {editandoId ? "Guardar cambios" : "Guardar propietario"}
+              <UserRound className="h-4 w-4" />
+              {mostrarFormulario ? "Ocultar formulario" : "Nuevo propietario"}
             </button>
 
-            {editandoId && (
-              <button
-                type="button"
-                onClick={limpiarFormulario}
-                className="bg-slate-500 text-white px-5 py-2 rounded-lg"
-              >
-                Cancelar
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={descargarPlantilla}
+              className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="h-4 w-4" />
+              Plantilla
+            </button>
+
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-900">
+              <Upload className="h-4 w-4" />
+              {importando ? "Importando..." : "Importar"}
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={importarExcel}
+                className="hidden"
+                disabled={importando}
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={exportarExcel}
+              className="inline-flex items-center gap-2 rounded-xl bg-green-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-green-800"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Exportar
+            </button>
           </div>
-        </form>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <StatCard
+          title="Total propietarios"
+          value={propietariosFiltrados.length}
+          subtitle="Resultado filtrado"
+          icon={Users}
+          tone="blue"
+        />
+
+        <StatCard
+          title="Activos"
+          value={totalActivos}
+          subtitle="Propietarios activos"
+          icon={CheckCircle}
+          tone="green"
+        />
+
+        <StatCard
+          title="Bancos"
+          value={bancos.length}
+          subtitle="Catálogo activo"
+          icon={FileSpreadsheet}
+          tone="slate"
+        />
       </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm border">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-xl font-bold">Listado de propietarios</h2>
-            <p className="text-sm text-slate-500">
-              Solo se muestran propietarios del condominio activo.
-            </p>
-          </div>
+      {mostrarFormulario && (
+        <SectionCard
+          title={editandoId ? "Modificar propietario" : "Registrar propietario"}
+          subtitle="Complete los datos generales y bancarios del propietario."
+        >
+          <form
+            onSubmit={guardarPropietario}
+            className="grid grid-cols-1 gap-4 md:grid-cols-2"
+          >
+            <input
+              type="text"
+              value={noApartamento}
+              onChange={(e) => setNoApartamento(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="No. Apartamento *"
+            />
 
-          <input
-            type="text"
-            value={buscar}
-            onChange={(e) => setBuscar(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full md:w-80"
-            placeholder="Buscar propietario..."
-          />
-        </div>
+            <input
+              type="text"
+              value={nombrePropietario}
+              onChange={(e) => setNombrePropietario(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="Nombre del propietario *"
+            />
 
-        {loading ? (
-          <p>Cargando propietarios...</p>
-        ) : (
-          <div className="overflow-auto border rounded-lg">
+            <input
+              type="text"
+              value={cedula}
+              onChange={(e) => setCedula(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="Cédula"
+            />
+
+            <input
+              type="text"
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="Teléfono"
+            />
+
+            <input
+              type="email"
+              value={correo}
+              onChange={(e) => setCorreo(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="Correo"
+            />
+
+            <select
+              value={bancoId}
+              onChange={(e) => setBancoId(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+            >
+              <option value="">Seleccione banco</option>
+              {bancos.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.nombre_banco}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={tipoCuenta}
+              onChange={(e) => setTipoCuenta(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+            >
+              <option value="">Tipo de cuenta</option>
+              <option value="Ahorro">Ahorro</option>
+              <option value="Corriente">Corriente</option>
+              <option value="Nómina">Nómina</option>
+              <option value="Otro">Otro</option>
+            </select>
+
+            <input
+              type="text"
+              value={cuentaBanco}
+              onChange={(e) => setCuentaBanco(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="No. cuenta bancaria"
+            />
+
+            <input
+              type="text"
+              value={titularCuenta}
+              onChange={(e) => setTitularCuenta(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm md:col-span-2"
+              placeholder="Titular de la cuenta"
+            />
+
+            <textarea
+              value={direccion}
+              onChange={(e) => setDireccion(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm md:col-span-2"
+              rows={2}
+              placeholder="Dirección"
+            />
+
+            <div className="flex gap-2 md:col-span-2">
+              <button
+                type="submit"
+                className="rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800"
+              >
+                {editandoId ? "Guardar cambios" : "Guardar propietario"}
+              </button>
+
+              {editandoId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    limpiarFormulario();
+                    setMostrarFormulario(false);
+                  }}
+                  className="rounded-xl bg-slate-600 px-5 py-3 font-bold text-white hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+              )}
+            </div>
+          </form>
+        </SectionCard>
+      )}
+
+      <SectionCard
+        title="Listado de propietarios"
+        subtitle={`Condominio activo: ${
+          condominioNombre || `ID ${condominioId}`
+        }`}
+        action={
+          <button
+            type="button"
+            onClick={() => cargarPropietarios(condominioId)}
+            className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Actualizar
+          </button>
+        }
+      >
+        <ActionBar
+          search={buscar}
+          onSearch={setBuscar}
+          placeholder="Buscar propietario, apartamento, cédula, banco..."
+        />
+
+        <div className="mt-4 overflow-auto rounded-2xl border">
+          {loading ? (
+            <div className="p-6 text-sm text-slate-500">
+              Cargando propietarios...
+            </div>
+          ) : (
             <table className="min-w-full text-sm">
-              <thead className="bg-gray-100">
+              <thead className="bg-slate-100 text-slate-600">
                 <tr>
-                  <th className="p-2 border">Apartamento</th>
-                  <th className="p-2 border">Propietario</th>
-                  <th className="p-2 border">Cédula</th>
-                  <th className="p-2 border">Teléfono</th>
-                  <th className="p-2 border">Correo</th>
-                  <th className="p-2 border">Banco</th>
-                  <th className="p-2 border">Tipo cuenta</th>
-                  <th className="p-2 border">Cuenta Banco</th>
-                  <th className="p-2 border">Titular</th>
-                  <th className="p-2 border">Dirección</th>
-                  <th className="p-2 border">Estado</th>
-                  <th className="p-2 border">Acciones</th>
+                  <th className="px-4 py-3 text-left">Apartamento</th>
+                  <th className="px-4 py-3 text-left">Propietario</th>
+                  <th className="px-4 py-3 text-left">Contacto</th>
+                  <th className="px-4 py-3 text-left">Banco</th>
+                  <th className="px-4 py-3 text-left">Cuenta</th>
+                  <th className="px-4 py-3 text-center">Estado</th>
+                  <th className="px-4 py-3 text-center">Acciones</th>
                 </tr>
               </thead>
 
-              <tbody>
+              <tbody className="divide-y divide-slate-200">
                 {propietariosFiltrados.map((p) => (
-                  <tr key={p.id}>
-                    <td className="p-2 border font-semibold">
-                      {p.no_apartamento}
+                  <tr key={p.id} className="bg-white hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <p className="font-black text-slate-900">
+                        {p.no_apartamento}
+                      </p>
+                      <p className="text-xs text-slate-500">ID {p.id}</p>
                     </td>
-                    <td className="p-2 border">{p.nombre_propietario}</td>
-                    <td className="p-2 border">{p.cedula}</td>
-                    <td className="p-2 border">{p.telefono}</td>
-                    <td className="p-2 border">{p.correo}</td>
-                    <td className="p-2 border">
+
+                    <td className="px-4 py-3">
+                      <p className="font-bold text-slate-900">
+                        {p.nombre_propietario}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Cédula: {p.cedula || "-"}
+                      </p>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <p>{p.telefono || "-"}</p>
+                      <p className="text-xs text-slate-500">
+                        {p.correo || "-"}
+                      </p>
+                    </td>
+
+                    <td className="px-4 py-3">
                       {p.catalogo_bancos?.nombre_banco || "-"}
                     </td>
-                    <td className="p-2 border">{p.tipo_cuenta || "-"}</td>
-                    <td className="p-2 border">{p.cuenta_banco || "-"}</td>
-                    <td className="p-2 border">{p.titular_cuenta || "-"}</td>
-                    <td className="p-2 border">{p.direccion}</td>
-                    <td className="p-2 border text-green-700 font-semibold">
-                      {p.estado}
+
+                    <td className="px-4 py-3">
+                      <p>{p.cuenta_banco || "-"}</p>
+                      <p className="text-xs text-slate-500">
+                        {p.tipo_cuenta || "-"} · {p.titular_cuenta || "-"}
+                      </p>
                     </td>
-                    <td className="p-2 border">
-                      <div className="flex gap-2">
+
+                    <td className="px-4 py-3 text-center">
+                      <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
+                        {p.estado}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex justify-center gap-2">
                         <button
                           type="button"
                           onClick={() => editarPropietario(p)}
-                          className="bg-blue-600 text-white px-3 py-1 rounded"
+                          className="rounded-lg bg-blue-700 px-3 py-1 text-xs font-bold text-white hover:bg-blue-800"
                         >
                           Editar
                         </button>
@@ -749,7 +825,7 @@ export default function PropietariosPage() {
                         <button
                           type="button"
                           onClick={() => borrarPropietario(p)}
-                          className="bg-red-600 text-white px-3 py-1 rounded"
+                          className="rounded-lg bg-red-700 px-3 py-1 text-xs font-bold text-white hover:bg-red-800"
                         >
                           Borrar
                         </button>
@@ -760,16 +836,19 @@ export default function PropietariosPage() {
 
                 {propietariosFiltrados.length === 0 && (
                   <tr>
-                    <td className="p-4 border text-center" colSpan={12}>
+                    <td
+                      className="px-4 py-8 text-center text-slate-500"
+                      colSpan={7}
+                    >
                       No hay propietarios registrados.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
-        )}
-      </div>
-    </div>
+          )}
+        </div>
+      </SectionCard>
+    </PageContainer>
   );
 }

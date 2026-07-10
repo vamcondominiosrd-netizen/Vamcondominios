@@ -18,6 +18,7 @@ type Nomina = {
 
   periodo: string;
   fecha_pago: string;
+  tipo_nomina: string;
 
   salario_base: number;
   dias_trabajados: number;
@@ -66,6 +67,11 @@ type Condominio = {
   logo_url: string;
 };
 
+type EmpleadoDetalle = {
+  id: number;
+  cedula: string;
+};
+
 export default function ReciboNominaPage() {
   const params = useParams();
   const nominaId = params?.id as string;
@@ -74,6 +80,7 @@ export default function ReciboNominaPage() {
   const [nomina, setNomina] = useState<Nomina | null>(null);
   const [descuentos, setDescuentos] = useState<DescuentoNomina[]>([]);
   const [condominio, setCondominio] = useState<Condominio | null>(null);
+  const [empleadoDetalle, setEmpleadoDetalle] = useState<EmpleadoDetalle | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -108,6 +115,15 @@ export default function ReciboNominaPage() {
     }
 
     setNomina(dataNomina as Nomina);
+
+    const { data: dataEmpleado } = await supabase
+      .from("empleados")
+      .select("id, cedula")
+      .eq("id", Number((dataNomina as Nomina).empleado_id))
+      .eq("condominio_id", Number(idCondominio))
+      .maybeSingle();
+
+    setEmpleadoDetalle((dataEmpleado as EmpleadoDetalle) || null);
 
     const { data: dataDescuentos, error: errorDescuentos } = await supabase
       .from("rh_nomina_descuentos")
@@ -146,6 +162,15 @@ export default function ReciboNominaPage() {
 
   function imprimir() {
     window.print();
+  }
+
+  function codigoRecibo() {
+    const anio = (nomina?.periodo || new Date().getFullYear().toString()).slice(0, 4);
+    return `NOM-${anio}-${String(nomina?.id || 0).padStart(6, "0")}`;
+  }
+
+  function salarioDiario() {
+    return Number(nomina?.salario_base || 0) / 23.83;
   }
 
   if (loading) {
@@ -241,7 +266,7 @@ export default function ReciboNominaPage() {
             </h1>
 
             <p className="text-sm text-slate-600 mt-2">
-              Recibo No. RH-{String(nomina.id).padStart(6, "0")}
+              Recibo No. {codigoRecibo()}
             </p>
 
             <p className="text-sm text-slate-600">
@@ -269,6 +294,10 @@ export default function ReciboNominaPage() {
             </p>
 
             <p>
+              <strong>Cédula:</strong> {empleadoDetalle?.cedula || "-"}
+            </p>
+
+            <p>
               <strong>Cargo:</strong> {nomina.cargo || "-"}
             </p>
 
@@ -283,7 +312,16 @@ export default function ReciboNominaPage() {
             </h3>
 
             <p>
+              <strong>Tipo de nómina:</strong>{" "}
+              {nomina.tipo_nomina || "Nómina Regular"}
+            </p>
+
+            <p>
               <strong>Días trabajados:</strong> {nomina.dias_trabajados || 0}
+            </p>
+
+            <p>
+              <strong>Salario diario:</strong> RD${moneda(salarioDiario())}
             </p>
 
             <p>
@@ -431,6 +469,11 @@ export default function ReciboNominaPage() {
             <p>
               <strong>Período:</strong> {nomina.periodo}
             </p>
+
+            <p>
+              <strong>Tipo nómina:</strong>{" "}
+              {nomina.tipo_nomina || "Nómina Regular"}
+            </p>
           </div>
         </div>
 
@@ -446,7 +489,10 @@ export default function ReciboNominaPage() {
             <div className="border-t border-slate-400 pt-3">
               <p className="font-bold">Recibido conforme</p>
               <p className="text-sm text-slate-500">
-                Firma del empleado
+                {nomina.nombre_empleado || "Firma del empleado"}
+              </p>
+              <p className="text-sm text-slate-500">
+                Cédula: {empleadoDetalle?.cedula || "-"}
               </p>
             </div>
           </div>

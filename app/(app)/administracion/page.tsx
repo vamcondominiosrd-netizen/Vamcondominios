@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Settings,
   WalletCards,
+  FileText,
   ArrowRight,
 } from "lucide-react";
 
@@ -87,35 +88,20 @@ export default function AdministracionPage() {
       fondo: "from-red-600 to-red-800",
       iconoColor: "text-red-700",
     },
+{
+  titulo: "Documentos",
+  descripcion:
+    "Reglamentos, actas, presupuestos, contratos y documentos del condominio.",
+  href: "/administracion/documentos",
+  icono: FileText,
+  fondo: "from-indigo-600 to-indigo-800",
+  iconoColor: "text-indigo-700",
+},
   ];
 
   return (
     <main className="space-y-5">
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
-              Módulo
-            </p>
-
-            <h1 className="text-2xl md:text-3xl font-black text-slate-900 mt-1">
-              Administración
-            </h1>
-
-            <p className="text-sm text-slate-500 mt-2 max-w-3xl">
-              Gestione la información principal del condominio activo:
-              condominios, apartamentos, propietarios, usuarios, áreas sociales
-              y configuraciones generales.
-            </p>
-          </div>
-
-          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-600 to-slate-900 flex items-center justify-center shadow-lg">
-            <Building2 className="h-9 w-9 text-white" />
-          </div>
-        </div>
-      </section>
-
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
+     <section className="bg-white rounded-2xl border shadow-sm p-5">
         <div className="mb-5">
           <h2 className="text-lg font-bold text-slate-900">
             Opciones de Administración

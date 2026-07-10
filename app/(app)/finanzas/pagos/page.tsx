@@ -1,171 +1,407 @@
 "use client";
 
-import Link from "next/link";
-import {
-  WalletCards,
-  ReceiptText,
-  ClipboardCheck,
-  ArrowRight,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/app/lib/supabaseClient";
+import { generarAsientoPagoMantenimiento } from "@/app/lib/contabilidad/generarAsientoPagoMantenimiento";
 
-type Modulo = {
-  titulo: string;
-  descripcion: string;
-  href: string;
-  icono: any;
-  fondo: string;
-  iconoColor: string;
-};
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import PagosToolbar from "./components/PagosToolbar";
+import PagoForm from "./components/PagoForm";
 
-export default function FinanzasPagosPage() {
-  const modulos: Modulo[] = [
-    {
-      titulo: "Pagos de Mantenimiento",
-      descripcion:
-        "Registrar pagos y aplicarlos automáticamente a cargos pendientes.",
-      href: "/pagos-mantenimiento",
-      icono: WalletCards,
-      fondo: "from-emerald-600 to-emerald-800",
-      iconoColor: "text-emerald-700",
-    },
-    {
-      titulo: "Gastos",
-      descripcion:
-        "Registrar y controlar gastos operativos del condominio activo.",
-      href: "/gastos",
-      icono: ReceiptText,
-      fondo: "from-orange-500 to-orange-700",
-      iconoColor: "text-orange-700",
-    },
-    {
-      titulo: "Solicitudes de Pago",
-      descripcion:
-        "Crear solicitudes de pago y dar seguimiento al flujo de aprobación.",
-      href: "/solicitudes-pago",
-      icono: ClipboardCheck,
-      fondo: "from-sky-600 to-sky-800",
-      iconoColor: "text-sky-700",
-    },
-    {
-      titulo: "Estado de Cuenta",
-      descripcion:
-        "Consultar cargos, pagos, balances y créditos por apartamento.",
-      href: "/consulta-estado",
-      icono: ReceiptText,
-      fondo: "from-purple-600 to-purple-800",
-      iconoColor: "text-purple-700",
-    },
-    {
-      titulo: "Aprobación Tesorero",
-      descripcion:
-        "Revisar, aprobar, devolver o rechazar solicitudes pendientes.",
-      href: "/solicitudes-pago/tesorero",
-      icono: ClipboardCheck,
-      fondo: "from-amber-500 to-yellow-700",
-      iconoColor: "text-amber-700",
-    },
-    {
-      titulo: "Aprobación Presidente",
-      descripcion: "Autorizar solicitudes ya aprobadas por tesorería.",
-      href: "/solicitudes-pago/presidente",
-      icono: ClipboardCheck,
-      fondo: "from-pink-600 to-rose-800",
-      iconoColor: "text-pink-700",
-    },
-   {
-      titulo: "Resumen Solicitudes de Pago",
-      descripcion:
-        "Crear solicitudes de pago y dar seguimiento al flujo de aprobación.",
-      href: "/solicitudes-pago/resumen",
-      icono: ClipboardCheck,
-      fondo: "from-sky-600 to-sky-800",
-      iconoColor: "text-sky-700",
-    },
-   {
-      titulo: "Modulo del Recibo del Gas",
-      descripcion:"Recepción, precios, tanques y facturas de gas.",
-      href: "/gas",
-      icono: ClipboardCheck,
-      fondo: "from-sky-600 to-sky-800",
-      iconoColor: "text-sky-700",
-    },
-  ];
+import type { CuentaBancaria, Unidad } from "./types";
+
+export default function PagosMantenimientoPage() {
+  const router = useRouter();
+
+  const [condominioId, setCondominioId] = useState<string>("");
+  const [condominioNombre, setCondominioNombre] = useState("");
+
+  const [unidades, setUnidades] = useState<Unidad[]>([]);
+  const [cuentas, setCuentas] = useState<CuentaBancaria[]>([]);
+
+  const [unidadId, setUnidadId] = useState("");
+  const [tipoFondo, setTipoFondo] = useState("ORDINARIO");
+  const [fechaPago, setFechaPago] = useState("");
+  const [monto, setMonto] = useState("");
+  const [metodoPago, setMetodoPago] = useState("");
+  const [referencia, setReferencia] = useState("");
+  const [comprobante, setComprobante] = useState<File | null>(null);
+
+  const [guardando, setGuardando] = useState(false);
+  const [mensaje, setMensaje] = useState("");
+
+  useEffect(() => {
+    const id = localStorage.getItem("condominio_id") || "";
+    const nombre = localStorage.getItem("condominio_nombre") || "";
+
+    if (!id) {
+      router.push("/login");
+      return;
+    }
+
+    const hoy = new Date().toISOString().slice(0, 10);
+
+    setCondominioId(id);
+    setCondominioNombre(nombre);
+    setFechaPago(hoy);
+
+    cargarUnidades(id);
+    cargarCuentas(id);
+  }, [router]);
+
+  async function cargarUnidades(id: string) {
+    const { data, error } = await supabase
+      .from("unidades")
+      .select(
+        "id, codigo, propietario_nombre, propietario_cedula, propietario_telefono, cuota_mensual_actual"
+      )
+      .eq("condominio_id", Number(id))
+      .eq("activa", true)
+      .order("codigo", { ascending: true });
+
+    if (error) {
+      alert("Error cargando unidades: " + error.message);
+      return;
+    }
+
+    setUnidades((data as Unidad[]) || []);
+  }
+
+  async function cargarCuentas(id: string) {
+    const { data, error } = await supabase
+      .from("cuentas_bancarias")
+      .select(`
+        id,
+        nombre_banco,
+        numero_cuenta,
+        fondo_tipo,
+        balance_actual,
+        fondo_ordinario,
+        fondo_extraordinario,
+        fondo_reserva
+      `)
+      .eq("condominio_id", Number(id))
+      .eq("activa", true)
+      .order("nombre_banco", { ascending: true });
+
+    if (error) {
+      alert("Error cargando cuentas: " + error.message);
+      return;
+    }
+
+    setCuentas((data as CuentaBancaria[]) || []);
+  }
+
+  async function refrescarDatos() {
+    if (!condominioId) return;
+
+    await Promise.all([
+      cargarUnidades(condominioId),
+      cargarCuentas(condominioId),
+    ]);
+  }
+
+  const cuentaAsignada = useMemo(() => {
+    return cuentas.find((c) => c.fondo_tipo === tipoFondo) || null;
+  }, [cuentas, tipoFondo]);
+
+  const unidadSeleccionada = useMemo(() => {
+    return unidades.find((u) => String(u.id) === unidadId) || null;
+  }, [unidades, unidadId]);
+
+  function seleccionarUnidad(idUnidad: string) {
+    setUnidadId(idUnidad);
+
+    const unidad = unidades.find((u) => String(u.id) === idUnidad);
+
+    if (!unidad) {
+      setMonto("");
+      return;
+    }
+
+    const cuota = Number(unidad.cuota_mensual_actual || 0);
+
+    if (cuota > 0) {
+      setMonto(String(cuota));
+    }
+  }
+
+  async function subirComprobante(unidadIdPago: number) {
+    if (!comprobante || !condominioId) return null;
+
+    const extension = comprobante.name.split(".").pop();
+    const nombreArchivo = `${condominioId}/${Date.now()}-unidad-${unidadIdPago}.${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("comprobantes-pagos")
+      .upload(nombreArchivo, comprobante, { upsert: true });
+
+    if (uploadError) throw new Error(uploadError.message);
+
+    const { data } = supabase.storage
+      .from("comprobantes-pagos")
+      .getPublicUrl(nombreArchivo);
+
+    return data.publicUrl;
+  }
+
+  async function actualizarBalanceCuenta(
+    cuentaId: number,
+    fondo: string,
+    montoPago: number
+  ) {
+    const { data: cuentaActual, error: errorCuenta } = await supabase
+      .from("cuentas_bancarias")
+      .select("id,balance_actual,fondo_ordinario,fondo_extraordinario,fondo_reserva")
+      .eq("id", cuentaId)
+      .eq("condominio_id", Number(condominioId))
+      .single();
+
+    if (errorCuenta) {
+      throw new Error(
+        "El pago fue guardado, pero no se pudo leer la cuenta bancaria: " +
+          errorCuenta.message
+      );
+    }
+
+    const fondoOrdinarioActual = Number(cuentaActual.fondo_ordinario || 0);
+    const fondoExtraActual = Number(cuentaActual.fondo_extraordinario || 0);
+    const fondoReservaActual = Number(cuentaActual.fondo_reserva || 0);
+    const balanceActual = Number(cuentaActual.balance_actual || 0);
+
+    let nuevoFondoOrdinario = fondoOrdinarioActual;
+    let nuevoFondoExtraordinario = fondoExtraActual;
+    let nuevoFondoReserva = fondoReservaActual;
+
+    if (fondo === "ORDINARIO") nuevoFondoOrdinario += montoPago;
+    if (fondo === "EXTRAORDINARIO") nuevoFondoExtraordinario += montoPago;
+    if (fondo === "RESERVA") nuevoFondoReserva += montoPago;
+
+    const nuevoBalance = balanceActual + montoPago;
+
+    const { error: errorUpdate } = await supabase
+      .from("cuentas_bancarias")
+      .update({
+        fondo_ordinario: nuevoFondoOrdinario,
+        fondo_extraordinario: nuevoFondoExtraordinario,
+        fondo_reserva: nuevoFondoReserva,
+        balance_actual: nuevoBalance,
+      })
+      .eq("id", cuentaId)
+      .eq("condominio_id", Number(condominioId));
+
+    if (errorUpdate) {
+      throw new Error(
+        "El pago fue guardado, pero no se pudo actualizar el balance bancario: " +
+          errorUpdate.message
+      );
+    }
+  }
+
+  async function validarDuplicadoReferencia(referenciaLimpia: string, idCondominio: string) {
+    if (!referenciaLimpia) return false;
+
+    const { data, error } = await supabase
+      .from("pagos")
+      .select("id")
+      .eq("condominio_id", Number(idCondominio))
+      .eq("referencia", referenciaLimpia)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error("Error validando referencia duplicada: " + error.message);
+    }
+
+    return Boolean(data?.id);
+  }
+
+  async function guardarPago(e: React.FormEvent) {
+    e.preventDefault();
+    setMensaje("");
+
+    if (!unidadId || !fechaPago || !monto) {
+      alert("Debe completar unidad, fecha y monto.");
+      return;
+    }
+
+    if (!condominioId) {
+      alert("No se encontró el condominio activo.");
+      return;
+    }
+
+    if (!cuentaAsignada) {
+      alert("No existe cuenta bancaria configurada para el fondo seleccionado.");
+      return;
+    }
+
+    if (!metodoPago) {
+      alert("Debe seleccionar el método de pago.");
+      return;
+    }
+
+    const montoNumerico = Number(monto || 0);
+
+    if (montoNumerico <= 0) {
+      alert("El monto debe ser mayor que cero.");
+      return;
+    }
+
+    const unidad = unidades.find((u) => String(u.id) === unidadId);
+
+    if (!unidad) {
+      alert("Debe seleccionar una unidad válida.");
+      return;
+    }
+
+    const referenciaLimpia =
+      referencia.trim() || `PAGO_MANUAL_${unidad.id}_${Date.now()}`;
+
+    setGuardando(true);
+
+    try {
+      const referenciaExiste = await validarDuplicadoReferencia(
+        referenciaLimpia,
+        condominioId
+      );
+
+      if (referenciaExiste) {
+        const continuar = confirm(
+          "Ya existe un pago registrado con esta referencia. ¿Desea continuar de todas formas?"
+        );
+
+        if (!continuar) {
+          setGuardando(false);
+          return;
+        }
+      }
+
+      const comprobanteUrl = await subirComprobante(unidad.id);
+
+      const { data: pagoInsertado, error } = await supabase
+        .from("pagos")
+        .insert([
+          {
+            condominio_id: Number(condominioId),
+            unidad_id: unidad.id,
+            cuenta_bancaria_id: cuentaAsignada.id,
+            tipo_fondo: tipoFondo,
+            monto: montoNumerico,
+            fecha_pago: fechaPago,
+            metodo: "MANUAL",
+            metodo_pago: metodoPago,
+            referencia: referenciaLimpia,
+            origen: "MANUAL",
+            descripcion: `Pago manual de mantenimiento - Unidad ${unidad.codigo}`,
+            comprobante_url: comprobanteUrl,
+          },
+        ])
+        .select("id")
+        .single();
+
+      if (error) {
+        alert("Error guardando pago: " + error.message);
+        setGuardando(false);
+        return;
+      }
+
+      const { error: errorAplicacion } = await supabase.rpc(
+        "aplicar_pago_a_cargos",
+        {
+          p_pago_id: pagoInsertado.id,
+          p_condominio_id: Number(condominioId),
+          p_unidad_id: unidad.id,
+          p_monto: montoNumerico,
+        }
+      );
+
+      if (errorAplicacion) {
+        alert(
+          "Pago guardado, pero no se pudo aplicar a los cargos: " +
+            errorAplicacion.message
+        );
+      }
+
+      await actualizarBalanceCuenta(
+        cuentaAsignada.id,
+        tipoFondo,
+        montoNumerico
+      );
+
+      const asientoResultado = await generarAsientoPagoMantenimiento({
+        condominio_id: Number(condominioId),
+        pago_id: pagoInsertado.id,
+        fecha: fechaPago,
+        monto: montoNumerico,
+        referencia: referenciaLimpia,
+        descripcion: `Pago de mantenimiento - Unidad ${unidad.codigo}`,
+        usuario: null,
+      });
+
+      if (!asientoResultado.ok) {
+        alert(
+          "Pago registrado, aplicado y sumado al banco, pero no se pudo generar el asiento contable: " +
+            asientoResultado.error
+        );
+      } else {
+        setMensaje(
+          asientoResultado.duplicado
+            ? "Pago registrado correctamente. El asiento contable ya existía."
+            : "Pago registrado correctamente y asiento contable generado automáticamente."
+        );
+      }
+
+      setUnidadId("");
+      setTipoFondo("ORDINARIO");
+      setFechaPago(new Date().toISOString().slice(0, 10));
+      setMonto("");
+      setMetodoPago("");
+      setReferencia("");
+      setComprobante(null);
+
+      const inputFile = document.getElementById("comprobante") as HTMLInputElement | null;
+
+      if (inputFile) inputFile.value = "";
+
+      await cargarCuentas(condominioId);
+    } catch (error: any) {
+      alert(error.message || "Error registrando el pago.");
+    }
+
+    setGuardando(false);
+  }
 
   return (
-    <main className="space-y-5">
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">
-              Finanzas
-            </p>
+    <PageContainer>
+      <PagosToolbar onRefresh={refrescarDatos} />
 
-            <h1 className="text-2xl md:text-3xl font-black text-slate-900 mt-1">
-              Pagos
-            </h1>
-
-            <p className="text-sm text-slate-500 mt-2 max-w-3xl">
-              Registre pagos de mantenimiento, gastos, solicitudes de pago,
-              aprobaciones y estados de cuenta.
-            </p>
-          </div>
-
-          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-emerald-600 to-slate-900 flex items-center justify-center shadow-lg">
-            <WalletCards className="h-9 w-9 text-white" />
-          </div>
+      {mensaje && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+          {mensaje}
         </div>
-      </section>
+      )}
 
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="mb-5">
-          <h2 className="text-lg font-bold text-slate-900">
-            Opciones de Pagos
-          </h2>
-
-          <p className="text-sm text-slate-500 mt-1">
-            Seleccione una opción para continuar trabajando.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-4">
-          {modulos.map((modulo) => {
-            const Icono = modulo.icono;
-
-            return (
-              <Link
-                key={modulo.href}
-                href={modulo.href}
-                className="group rounded-2xl border bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition overflow-hidden"
-              >
-                <div
-                  className={`h-20 bg-gradient-to-br ${modulo.fondo} flex items-center justify-center relative`}
-                >
-                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top_right,_white,_transparent_35%)]" />
-
-                  <div className="h-14 w-14 rounded-2xl bg-white/95 flex items-center justify-center shadow-md relative z-10 group-hover:scale-105 transition">
-                    <Icono className={`h-8 w-8 ${modulo.iconoColor}`} />
-                  </div>
-                </div>
-
-                <div className="p-4">
-                  <h3 className="font-black text-slate-900 text-base group-hover:text-emerald-700">
-                    {modulo.titulo}
-                  </h3>
-
-                  <p className="text-xs text-slate-500 mt-2 min-h-[54px] leading-relaxed">
-                    {modulo.descripcion}
-                  </p>
-
-                  <div className="mt-3 flex items-center justify-between text-xs font-bold text-emerald-700">
-                    <span>Abrir módulo</span>
-                    <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition" />
-                  </div>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
-    </main>
+      <PagoForm
+        unidades={unidades}
+        unidadId={unidadId}
+        setUnidadId={setUnidadId}
+        seleccionarUnidad={seleccionarUnidad}
+        tipoFondo={tipoFondo}
+        setTipoFondo={setTipoFondo}
+        fechaPago={fechaPago}
+        setFechaPago={setFechaPago}
+        monto={monto}
+        setMonto={setMonto}
+        metodoPago={metodoPago}
+        setMetodoPago={setMetodoPago}
+        referencia={referencia}
+        setReferencia={setReferencia}
+        setComprobante={setComprobante}
+        unidadSeleccionada={unidadSeleccionada}
+        cuentaAsignada={cuentaAsignada}
+        guardando={guardando}
+        guardarPago={guardarPago}
+      />
+    </PageContainer>
   );
 }

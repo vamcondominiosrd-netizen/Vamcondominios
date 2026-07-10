@@ -1,17 +1,52 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "@/app/lib/supabaseClient";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  CalendarDays,
+  Download,
+  FileSpreadsheet,
+  FolderOpen,
+  RefreshCw,
+  Save,
+  Search,
+  Settings,
+  WalletCards,
+} from "lucide-react";
 import * as XLSX from "xlsx";
+
+import { supabase } from "@/app/lib/supabaseClient";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import ModuleActions from "@/components/vam/enterprise/ModuleActions";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import DataTable from "@/components/vam/enterprise/DataTable";
+import EmptyState from "@/components/vam/enterprise/EmptyState";
 
 type CategoriaGasto = {
   id: number;
   condominio_id: number | null;
-  nombre_categoria: string;
+  nombre_categoria: string | null;
   descripcion: string | null;
-  estado: string;
-  created_at: string;
+  estado: string | null;
+  created_at: string | null;
 };
+
+function normalizarTexto(valor: string | null | undefined) {
+  return String(valor || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function fechaCorta(valor?: string | null) {
+  if (!valor) return "-";
+  return String(valor).split("T")[0];
+}
 
 export default function CategoriasGastosPage() {
   const [condominioId, setCondominioId] = useState("");
@@ -19,6 +54,8 @@ export default function CategoriasGastosPage() {
 
   const [categorias, setCategorias] = useState<CategoriaGasto[]>([]);
   const [loading, setLoading] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [cargandoSugeridas, setCargandoSugeridas] = useState(false);
 
   const [nombreCategoria, setNombreCategoria] = useState("");
   const [descripcion, setDescripcion] = useState("");
@@ -26,7 +63,10 @@ export default function CategoriasGastosPage() {
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
-    const nombre = localStorage.getItem("condominio_nombre") || "";
+    const nombre =
+      localStorage.getItem("condominio_nombre") ||
+      localStorage.getItem("condominio") ||
+      "";
 
     setCondominioId(id);
     setCondominioNombre(nombre);
@@ -39,13 +79,15 @@ export default function CategoriasGastosPage() {
     cargarCategorias(id);
   }, []);
 
-  async function cargarCategorias(id: string) {
+  async function cargarCategorias(id = condominioId) {
+    if (!id) return;
+
     setLoading(true);
 
     const { data, error } = await supabase
       .from("catalogo_categoria_gastos")
       .select(
-        "id, condominio_id, nombre_categoria, descripcion, estado, created_at"
+        "id, condominio_id, nombre_categoria, descripcion, estado, created_at",
       )
       .eq("condominio_id", Number(id))
       .order("nombre_categoria", { ascending: true });
@@ -58,6 +100,11 @@ export default function CategoriasGastosPage() {
     }
 
     setCategorias((data as CategoriaGasto[]) || []);
+  }
+
+  function limpiarFormulario() {
+    setNombreCategoria("");
+    setDescripcion("");
   }
 
   async function guardarCategoria(e: React.FormEvent) {
@@ -73,6 +120,17 @@ export default function CategoriasGastosPage() {
       return;
     }
 
+    const existe = categorias.some(
+      (c) => normalizarTexto(c.nombre_categoria) === normalizarTexto(nombreCategoria),
+    );
+
+    if (existe) {
+      alert("Ya existe una categoría con ese nombre en este condominio.");
+      return;
+    }
+
+    setGuardando(true);
+
     const { error } = await supabase.from("catalogo_categoria_gastos").insert([
       {
         condominio_id: Number(condominioId),
@@ -82,35 +140,32 @@ export default function CategoriasGastosPage() {
       },
     ]);
 
+    setGuardando(false);
+
     if (error) {
       alert("Error guardando categoría: " + error.message);
       return;
     }
 
     alert("Categoría registrada correctamente.");
-
-    setNombreCategoria("");
-    setDescripcion("");
-
+    limpiarFormulario();
     cargarCategorias(condominioId);
   }
 
   async function cambiarEstado(categoria: CategoriaGasto) {
     if (!condominioId) return;
 
-    const nuevoEstado = categoria.estado === "activo" ? "inactivo" : "activo";
+    const nuevoEstado = normalizarTexto(categoria.estado) === "activo" ? "inactivo" : "activo";
 
     const confirmar = confirm(
-      `¿Desea cambiar la categoría "${categoria.nombre_categoria}" a ${nuevoEstado}?`
+      `¿Desea cambiar la categoría "${categoria.nombre_categoria}" a ${nuevoEstado}?`,
     );
 
     if (!confirmar) return;
 
     const { error } = await supabase
       .from("catalogo_categoria_gastos")
-      .update({
-        estado: nuevoEstado,
-      })
+      .update({ estado: nuevoEstado })
       .eq("id", categoria.id)
       .eq("condominio_id", Number(condominioId));
 
@@ -126,7 +181,7 @@ export default function CategoriasGastosPage() {
     if (!condominioId) return;
 
     const confirmar = confirm(
-      `¿Seguro que desea borrar la categoría "${categoria.nombre_categoria}"?`
+      `¿Seguro que desea borrar la categoría "${categoria.nombre_categoria}"?`,
     );
 
     if (!confirmar) return;
@@ -146,14 +201,24 @@ export default function CategoriasGastosPage() {
     cargarCategorias(condominioId);
   }
 
-  const categoriasFiltradas = categorias.filter((c) => {
-    const texto = `${c.nombre_categoria || ""} ${c.descripcion || ""}`.toLowerCase();
-    return texto.includes(buscar.toLowerCase());
-  });
+  const categoriasFiltradas = useMemo(() => {
+    const filtro = normalizarTexto(buscar);
 
-  const totalActivas = categoriasFiltradas.filter(
-    (c) => c.estado === "activo"
-  ).length;
+    return categorias.filter((c) => {
+      const texto = normalizarTexto(
+        `${c.nombre_categoria || ""} ${c.descripcion || ""} ${c.estado || ""}`,
+      );
+
+      return !filtro || texto.includes(filtro);
+    });
+  }, [categorias, buscar]);
+
+  const totalActivas = useMemo(
+    () => categoriasFiltradas.filter((c) => normalizarTexto(c.estado) === "activo").length,
+    [categoriasFiltradas],
+  );
+
+  const totalInactivas = categoriasFiltradas.length - totalActivas;
 
   function exportarExcel() {
     if (categoriasFiltradas.length === 0) {
@@ -163,9 +228,10 @@ export default function CategoriasGastosPage() {
 
     const dataExcel = categoriasFiltradas.map((c) => ({
       Condominio: condominioNombre,
-      Categoría: c.nombre_categoria,
+      Categoría: c.nombre_categoria || "",
       Descripción: c.descripcion || "",
-      Estado: c.estado,
+      Estado: c.estado || "",
+      "Fecha registro": fechaCorta(c.created_at),
     }));
 
     const hoja = XLSX.utils.json_to_sheet(dataExcel);
@@ -173,8 +239,9 @@ export default function CategoriasGastosPage() {
     hoja["!cols"] = [
       { wch: 35 },
       { wch: 30 },
-      { wch: 50 },
+      { wch: 55 },
       { wch: 15 },
+      { wch: 18 },
     ];
 
     const libro = XLSX.utils.book_new();
@@ -182,7 +249,10 @@ export default function CategoriasGastosPage() {
 
     XLSX.writeFile(
       libro,
-      `Catalogo_Categorias_Gastos_${condominioNombre || condominioId}.xlsx`
+      `Catalogo_Categorias_Gastos_${(condominioNombre || condominioId).replaceAll(
+        " ",
+        "_",
+      )}.xlsx`,
     );
   }
 
@@ -214,13 +284,25 @@ export default function CategoriasGastosPage() {
       return;
     }
 
+    const existentes = new Set(categorias.map((c) => normalizarTexto(c.nombre_categoria)));
+    const sugeridasNuevas = categoriasSugeridas.filter(
+      (nombre) => !existentes.has(normalizarTexto(nombre)),
+    );
+
+    if (sugeridasNuevas.length === 0) {
+      alert("Todas las categorías sugeridas ya existen para este condominio.");
+      return;
+    }
+
     const confirmar = confirm(
-      `Se cargarán categorías sugeridas solamente para el condominio activo:\n\n${condominioNombre}\n\n¿Desea continuar?`
+      `Se cargarán ${sugeridasNuevas.length} categorías sugeridas solamente para el condominio activo:\n\n${condominioNombre}\n\n¿Desea continuar?`,
     );
 
     if (!confirmar) return;
 
-    const registros = categoriasSugeridas.map((nombre) => ({
+    setCargandoSugeridas(true);
+
+    const registros = sugeridasNuevas.map((nombre) => ({
       condominio_id: Number(condominioId),
       nombre_categoria: nombre,
       descripcion: `Categoría para gastos de ${nombre.toLowerCase()}.`,
@@ -230,6 +312,8 @@ export default function CategoriasGastosPage() {
     const { error } = await supabase
       .from("catalogo_categoria_gastos")
       .insert(registros);
+
+    setCargandoSugeridas(false);
 
     if (error) {
       alert("Error cargando categorías sugeridas: " + error.message);
@@ -241,196 +325,368 @@ export default function CategoriasGastosPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold">Categorías de Gastos</h1>
+    <PageContainer>
+      <ModuleMenu
+        title="Catálogos"
+        subtitle="Catálogos base del sistema: proveedores, categorías, fondos, áreas sociales, técnicos y parámetros."
+        tone="purple"
+        items={[
+          {
+            href: "/catalogos",
+            label: "Inicio catálogos",
+            icon: FolderOpen,
+          },
+          {
+            href: "/catalogos/proveedores",
+            label: "Proveedores",
+            icon: FileSpreadsheet,
+          },
+          {
+            href: "/catalogos/categorias-gastos",
+            label: "Categorías",
+            icon: FolderOpen,
+          },
+          {
+            href: "/catalogos/fondos",
+            label: "Fondos",
+            icon: WalletCards,
+          },
+          {
+            href: "/areas-sociales",
+            label: "Áreas sociales",
+            icon: CalendarDays,
+          },
+          {
+            href: "/catalogo-tecnicos",
+            label: "Técnicos",
+            icon: FileSpreadsheet,
+          },
+          {
+            href: "/catalogos/parametros",
+            label: "Parámetros",
+            icon: Settings,
+          },
+        ]}
+      />
 
-            <p className="text-slate-500 mt-1">
-              Catálogo para clasificar los gastos del condominio activo.
-            </p>
+      <ModuleToolbar
+        title="Categorías de Gastos"
+        subtitle={`Catálogo para clasificar los gastos del condominio activo: ${
+          condominioNombre || "No seleccionado"
+        }.`}
+        icon={FolderOpen}
+        actions={
+          <ModuleActions
+            onRefresh={() => cargarCategorias(condominioId)}
+            extra={
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href="/catalogos"
+                  className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Volver
+                </Link>
 
-            <p className="text-sm text-blue-700 font-bold mt-2">
-              Condominio activo: {condominioNombre || "No seleccionado"}
-            </p>
-          </div>
+                <button
+                  type="button"
+                  onClick={cargarCategoriasSugeridas}
+                  disabled={cargandoSugeridas || loading || !condominioId}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {cargandoSugeridas ? "Cargando..." : "Cargar sugeridas"}
+                </button>
 
-          <div className="flex gap-2">
-            <button
-              onClick={cargarCategoriasSugeridas}
-              className="bg-blue-700 text-white px-4 py-2 rounded-lg hover:bg-blue-800"
-            >
-              Cargar sugeridas
-            </button>
+                <button
+                  type="button"
+                  onClick={exportarExcel}
+                  disabled={categoriasFiltradas.length === 0}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+                >
+                  <Download className="h-4 w-4" />
+                  Exportar Excel
+                </button>
+              </div>
+            }
+          />
+        }
+      />
 
-            <button
-              onClick={exportarExcel}
-              className="bg-green-700 text-white px-4 py-2 rounded-lg hover:bg-green-800"
-            >
-              Exportar a Excel
-            </button>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
+        <InfoBox label="Total categorías" value={`${categoriasFiltradas.length}`} tone="slate" />
+        <InfoBox label="Activas" value={`${totalActivas}`} tone="emerald" />
+        <InfoBox label="Inactivas" value={`${totalInactivas}`} tone="amber" />
+        <InfoBox
+          label="Condominio activo"
+          value={condominioNombre || "No seleccionado"}
+          tone="blue"
+          compact
+        />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Total categorías</p>
-          <h2 className="text-2xl font-bold">{categoriasFiltradas.length}</h2>
-        </div>
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <section className="xl:col-span-1">
+          <SectionCard
+            title="Registrar categoría"
+            subtitle="Cree categorías para clasificar gastos operativos y financieros."
+          >
+            <form onSubmit={guardarCategoria} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Nombre de la categoría *
+                </label>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Categorías activas</p>
-          <h2 className="text-2xl font-bold text-green-700">{totalActivas}</h2>
-        </div>
+                <input
+                  type="text"
+                  value={nombreCategoria}
+                  onChange={(e) => setNombreCategoria(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  placeholder="Ej. Limpieza, Seguridad, Electricidad"
+                />
+              </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Condominio ID</p>
-          <h2 className="text-2xl font-bold text-blue-700">
-            {condominioId || "-"}
-          </h2>
-        </div>
-      </div>
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Descripción
+                </label>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm border">
-        <h2 className="text-xl font-bold mb-4">Registrar categoría</h2>
+                <textarea
+                  value={descripcion}
+                  onChange={(e) => setDescripcion(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 text-sm"
+                  rows={4}
+                  placeholder="Detalle o uso de la categoría"
+                />
+              </div>
 
-        <form
-          onSubmit={guardarCategoria}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Nombre de la categoría *
-            </label>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="submit"
+                  disabled={guardando}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {guardando ? "Guardando..." : "Guardar categoría"}
+                </button>
 
-            <input
-              type="text"
-              value={nombreCategoria}
-              onChange={(e) => setNombreCategoria(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-              placeholder="Ej. Limpieza, Seguridad, Electricidad"
-            />
-          </div>
+                <button
+                  type="button"
+                  onClick={limpiarFormulario}
+                  className="inline-flex items-center justify-center rounded-xl bg-slate-700 px-5 py-3 text-sm font-bold text-white hover:bg-slate-800"
+                >
+                  Limpiar
+                </button>
+              </div>
+            </form>
+          </SectionCard>
+        </section>
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Descripción
-            </label>
+        <section className="xl:col-span-2">
+          <SectionCard
+            title="Listado de categorías"
+            subtitle="Mostrando solamente categorías del condominio activo."
+            action={
+              loading ? (
+                <div className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Cargando
+                </div>
+              ) : (
+                <div className="rounded-xl bg-purple-50 px-4 py-2 text-sm font-black text-purple-700">
+                  Registros: {categoriasFiltradas.length}
+                </div>
+              )
+            }
+          >
+            <div className="mb-4">
+              <label className="mb-1 block text-sm font-semibold">Buscar</label>
 
-            <input
-              type="text"
-              value={descripcion}
-              onChange={(e) => setDescripcion(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-              placeholder="Detalle o uso de la categoría"
-            />
-          </div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-4 top-3.5 h-4 w-4 text-slate-400" />
 
-          <div className="md:col-span-2">
-            <button
-              type="submit"
-              className="bg-blue-700 text-white px-5 py-2 rounded-lg hover:bg-blue-800"
-            >
-              Guardar categoría
-            </button>
-          </div>
-        </form>
-      </div>
+                <input
+                  type="text"
+                  value={buscar}
+                  onChange={(e) => setBuscar(e.target.value)}
+                  className="w-full rounded-xl border px-10 py-3 text-sm"
+                  placeholder="Buscar por categoría, descripción o estado..."
+                />
+              </div>
+            </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm border">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-xl font-bold">Listado de categorías</h2>
-
-            <p className="text-sm text-slate-500">
-              Mostrando solamente categorías del condominio activo.
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">Buscar</label>
-
-            <input
-              type="text"
-              value={buscar}
-              onChange={(e) => setBuscar(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full md:w-80"
-              placeholder="Buscar categoría..."
-            />
-          </div>
-        </div>
-
-        {loading ? (
-          <p>Cargando categorías...</p>
-        ) : (
-          <div className="overflow-auto border rounded-lg">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="p-2 border text-left">Categoría</th>
-                  <th className="p-2 border text-left">Descripción</th>
-                  <th className="p-2 border text-center">Estado</th>
-                  <th className="p-2 border text-center">Acción</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {categoriasFiltradas.map((c) => (
-                  <tr key={c.id}>
-                    <td className="p-2 border font-semibold">
-                      {c.nombre_categoria}
-                    </td>
-
-                    <td className="p-2 border">{c.descripcion || "-"}</td>
-
-                    <td className="p-2 border text-center">
-                      <span
-                        className={
-                          c.estado === "activo"
-                            ? "bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold"
-                            : "bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold"
-                        }
-                      >
-                        {c.estado}
-                      </span>
-                    </td>
-
-                    <td className="p-2 border text-center">
-                      <div className="flex justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => cambiarEstado(c)}
-                          className="bg-slate-700 text-white px-3 py-1 rounded-lg text-xs hover:bg-slate-800"
-                        >
-                          {c.estado === "activo" ? "Inactivar" : "Activar"}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => borrarCategoria(c)}
-                          className="bg-red-700 text-white px-3 py-1 rounded-lg text-xs hover:bg-red-800"
-                        >
-                          Borrar
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-
-                {categoriasFiltradas.length === 0 && (
+            {loading ? (
+              <p className="text-sm text-slate-500">Cargando categorías...</p>
+            ) : !condominioId ? (
+              <EmptyState
+                title="Condominio no identificado"
+                description="No se encontró el condominio activo. Debe iniciar sesión nuevamente."
+              />
+            ) : categoriasFiltradas.length === 0 ? (
+              <EmptyState
+                title="Sin categorías"
+                description="No hay categorías registradas o no coinciden con la búsqueda."
+              />
+            ) : (
+              <DataTable>
+                <thead className="bg-slate-100 text-slate-600">
                   <tr>
-                    <td className="p-4 border text-center" colSpan={4}>
-                      No hay categorías registradas para este condominio.
-                    </td>
+                    <th className="px-4 py-3 text-left">Categoría</th>
+                    <th className="px-4 py-3 text-left">Descripción</th>
+                    <th className="px-4 py-3 text-center">Estado</th>
+                    <th className="px-4 py-3 text-center">Acciones</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+
+                <tbody className="divide-y divide-slate-200">
+                  {categoriasFiltradas.map((c) => {
+                    const activa = normalizarTexto(c.estado) === "activo";
+
+                    return (
+                      <tr key={c.id} className="bg-white hover:bg-slate-50">
+                        <td className="px-4 py-3">
+                          <p className="font-black text-slate-900">
+                            {c.nombre_categoria || "-"}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            ID: {c.id} · Registro: {fechaCorta(c.created_at)}
+                          </p>
+                        </td>
+
+                        <td className="max-w-[420px] px-4 py-3 text-slate-600">
+                          {c.descripcion || "-"}
+                        </td>
+
+                        <td className="px-4 py-3 text-center">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${
+                              activa
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-red-50 text-red-700"
+                            }`}
+                          >
+                            {c.estado || "activo"}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex flex-wrap justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => cambiarEstado(c)}
+                              className="rounded-xl bg-slate-700 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                            >
+                              {activa ? "Inactivar" : "Activar"}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => borrarCategoria(c)}
+                              className="rounded-xl bg-red-700 px-3 py-2 text-xs font-bold text-white hover:bg-red-800"
+                            >
+                              Borrar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </DataTable>
+            )}
+          </SectionCard>
+        </section>
       </div>
+
+      <SectionCard
+        title="Flujo recomendado"
+        subtitle="Orden sugerido para usar correctamente las categorías de gastos."
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <FlujoPaso
+            numero="1"
+            titulo="Crear"
+            descripcion="Registrar categorías base del condominio."
+          />
+
+          <FlujoPaso
+            numero="2"
+            titulo="Clasificar"
+            descripcion="Usarlas al registrar gastos y solicitudes de pago."
+          />
+
+          <FlujoPaso
+            numero="3"
+            titulo="Revisar"
+            descripcion="Inactivar categorías que ya no se utilicen."
+          />
+
+          <FlujoPaso
+            numero="4"
+            titulo="Reportar"
+            descripcion="Exportar el catálogo para revisión administrativa."
+          />
+        </div>
+      </SectionCard>
+    </PageContainer>
+  );
+}
+
+function InfoBox({
+  label,
+  value,
+  tone = "slate",
+  compact = false,
+}: {
+  label: string;
+  value: string;
+  tone?: "slate" | "emerald" | "amber" | "blue";
+  compact?: boolean;
+}) {
+  const toneClass =
+    tone === "emerald"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+      : tone === "amber"
+        ? "bg-amber-50 text-amber-700 border-amber-100"
+        : tone === "blue"
+          ? "bg-blue-50 text-blue-700 border-blue-100"
+          : "bg-white text-slate-800 border-slate-200";
+
+  return (
+    <div className={`rounded-2xl border p-5 shadow-sm ${toneClass}`}>
+      <p className="text-sm font-bold opacity-80">{label}</p>
+      <h2
+        className={`mt-2 font-black ${
+          compact ? "truncate text-lg" : "text-2xl"
+        }`}
+        title={value}
+      >
+        {value}
+      </h2>
+    </div>
+  );
+}
+
+function FlujoPaso({
+  numero,
+  titulo,
+  descripcion,
+}: {
+  numero: string;
+  titulo: string;
+  descripcion: string;
+}) {
+  return (
+    <div className="rounded-2xl border bg-slate-50 p-4">
+      <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-purple-700 text-sm font-black text-white">
+        {numero}
+      </div>
+
+      <p className="font-black text-slate-900">{titulo}</p>
+
+      <p className="mt-1 text-sm leading-relaxed text-slate-500">
+        {descripcion}
+      </p>
     </div>
   );
 }

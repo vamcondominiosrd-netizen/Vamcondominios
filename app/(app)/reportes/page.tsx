@@ -2,219 +2,354 @@
 
 import Link from "next/link";
 import {
-  BarChart3,
-  FileSpreadsheet,
-  WalletCards,
   AlertTriangle,
+  ArrowRight,
+  Banknote,
+  BarChart3,
+  ClipboardCheck,
+  Coins,
+  CreditCard,
+  Download,
+  FileSpreadsheet,
+  Landmark,
   ReceiptText,
   TrendingUp,
-  Download,
-  ArrowRight,
+  WalletCards,
 } from "lucide-react";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
 
 type ModuloReporte = {
   titulo: string;
   descripcion: string;
   href: string;
   icono: any;
-  fondo: string;
-  iconoColor: string;
+  color: string;
+  bg: string;
+};
+
+type SeccionReporte = {
+  titulo: string;
+  descripcion: string;
+  modulos: ModuloReporte[];
 };
 
 export default function ReportesPage() {
-  const modulos: ModuloReporte[] = [
+  const secciones: SeccionReporte[] = [
     {
-      titulo: "Centro de Reportes",
+      titulo: "Reportes financieros",
       descripcion:
-        "Vista general de reportes disponibles del condominio activo.",
-      href: "/reportes",
-      icono: BarChart3,
-      fondo: "from-blue-600 to-blue-800",
-      iconoColor: "text-blue-700",
+        "Reportes principales para revisar la situación económica del condominio.",
+      modulos: [
+        {
+          titulo: "Centro de Reportes",
+          descripcion:
+            "Vista general de reportes disponibles del condominio activo.",
+          href: "/reportes",
+          icono: BarChart3,
+          color: "text-blue-700",
+          bg: "bg-blue-50",
+        },
+        {
+          titulo: "Estado Financiero Propietarios",
+          descripcion:
+            "Consultar balances, ingresos, egresos y situación financiera.",
+          href: "/reportes/estado-financiero/reporte-propietarios",
+          icono: FileSpreadsheet,
+          color: "text-emerald-700",
+          bg: "bg-emerald-50",
+        },
+        {
+          titulo: "Ingresos vs Gastos",
+          descripcion:
+            "Analizar ingresos y gastos por mes, período o categoría.",
+          href: "/reportes/ingresos-gastos",
+          icono: TrendingUp,
+          color: "text-purple-700",
+          bg: "bg-purple-50",
+        },
+            {
+          titulo: "Estado de Cuentas Detallado",
+          descripcion:
+            "Estado de Cuentas por mes.",
+          href: "/reportes/control-bancario",
+          icono: TrendingUp,
+          color: "text-purple-700",
+          bg: "bg-purple-50",
+        },
+      ],
     },
     {
-      titulo: "Estado Financiero",
+      titulo: "Cobros y propietarios",
       descripcion:
-        "Consultar balances, ingresos, egresos y situación financiera.",
-      href: "/reportes/estado-financiero",
-      icono: FileSpreadsheet,
-      fondo: "from-emerald-600 to-emerald-800",
-      iconoColor: "text-emerald-700",
+        "Control de cuentas por cobrar, morosidad y pagos por propietarios.",
+      modulos: [
+        {
+          titulo: "Cuentas por Cobrar",
+          descripcion:
+            "Revisar balances pendientes por apartamento, período y propietario.",
+          href: "/reportes/cuentas-por-cobrar",
+          icono: WalletCards,
+          color: "text-amber-700",
+          bg: "bg-amber-50",
+        },
+        {
+          titulo: "Morosidad",
+          descripcion:
+            "Reporte de propietarios con pagos pendientes o vencidos.",
+          href: "/morosidad",
+          icono: AlertTriangle,
+          color: "text-red-700",
+          bg: "bg-red-50",
+        },
+        {
+          titulo: "Pagos por Propietarios",
+          descripcion:
+            "Consultar pagos registrados por unidad, propietario, fecha y concepto.",
+          href: "/reportes/pagos-propietarios",
+          icono: WalletCards,
+          color: "text-sky-700",
+          bg: "bg-sky-50",
+        },
+        {
+          titulo: "Estado de Cuenta",
+          descripcion:
+            "Consultar cargos, pagos, balances y créditos por apartamento.",
+          href: "/consulta-estado",
+          icono: ReceiptText,
+          color: "text-slate-700",
+          bg: "bg-slate-100",
+        },
+      ],
     },
     {
-      titulo: "Ingresos vs Gastos",
+      titulo: "Gastos y presupuesto",
       descripcion:
-        "Analizar ingresos y gastos por mes, período o categoría.",
-      href: "/reportes/ingresos-gastos",
-      icono: TrendingUp,
-      fondo: "from-purple-600 to-purple-800",
-      iconoColor: "text-purple-700",
+        "Reportes para analizar gastos, categorías y presupuesto anual.",
+      modulos: [
+        {
+          titulo: "Gastos por Categoría",
+          descripcion:
+            "Analizar gastos por proveedor, categoría, período y fondo.",
+          href: "/reportes/gastos-categoria",
+          icono: ReceiptText,
+          color: "text-pink-700",
+          bg: "bg-pink-50",
+        },
+        {
+          titulo: "Presupuesto Anual",
+          descripcion:
+            "Comparar presupuesto anual contra ingresos y gastos reales.",
+          href: "/finanzas/configuraciones/presupuesto",
+          icono: Banknote,
+          color: "text-indigo-700",
+          bg: "bg-indigo-50",
+        },
+        {
+          titulo: "Comparativo Presupuesto",
+          descripcion:
+            "Comparar presupuesto proyectado contra ejecución real.",
+          href: "/finanzas/configuraciones/presupuesto/comparativo",
+          icono: BarChart3,
+          color: "text-blue-700",
+          bg: "bg-blue-50",
+        },
+        {
+          titulo: "Reporte Asamblea",
+          descripcion:
+            "Generar reporte del presupuesto anual para presentación en asamblea.",
+          href: "/finanzas/configuraciones/presupuesto/asamblea",
+          icono: FileSpreadsheet,
+          color: "text-orange-700",
+          bg: "bg-orange-50",
+        },
+      ],
     },
     {
-      titulo: "Cuentas por Cobrar",
+      titulo: "Exportaciones",
       descripcion:
-        "Revisar balances pendientes por apartamento y período.",
-      href: "/reportes/cuentas-por-cobrar",
-      icono: WalletCards,
-      fondo: "from-amber-500 to-orange-700",
-      iconoColor: "text-amber-700",
-    },
-    {
-      titulo: "Morosidad",
-      descripcion:
-        "Reporte de propietarios con pagos pendientes o vencidos.",
-      href: "/morosidad",
-      icono: AlertTriangle,
-      fondo: "from-red-600 to-red-800",
-      iconoColor: "text-red-700",
-    },
-    {
-      titulo: "Pagos por Propietarios",
-      descripcion:
-        "Consultar pagos registrados por unidad, fecha y concepto.",
-      href: "/reportes/pagos-propietarios",
-      icono: WalletCards,
-      fondo: "from-sky-600 to-sky-800",
-      iconoColor: "text-sky-700",
-    },
-    {
-      titulo: "Gastos por Categoría",
-      descripcion:
-        "Analizar gastos por proveedor, categoría, período y fondo.",
-      href: "/reportes/gastos-categoria",
-      icono: ReceiptText,
-      fondo: "from-pink-600 to-rose-800",
-      iconoColor: "text-pink-700",
-    },
-    {
-      titulo: "Presupuesto Anual",
-      descripcion:
-        "Comparar presupuesto anual contra ingresos y gastos reales.",
-      href: "/reportes/presupuesto-anual",
-      icono: FileSpreadsheet,
-      fondo: "from-indigo-600 to-indigo-900",
-      iconoColor: "text-indigo-700",
-    },
-    {
-      titulo: "Exportar a Excel",
-      descripcion:
-        "Generar archivos Excel con reportes financieros y operativos.",
-      href: "/reportes/exportar",
-      icono: Download,
-      fondo: "from-slate-700 to-slate-950",
-      iconoColor: "text-slate-700",
+        "Generación de archivos y reportes para revisión externa o asamblea.",
+      modulos: [
+        {
+          titulo: "Exportar a Excel",
+          descripcion:
+            "Generar archivos Excel con reportes financieros y operativos.",
+          href: "/reportes/exportar",
+          icono: Download,
+          color: "text-slate-700",
+          bg: "bg-slate-100",
+        },
+      ],
     },
   ];
 
   return (
-    <main className="space-y-5">
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">
-              Módulo
-            </p>
+    <PageContainer>
+      <ModuleMenu
+        title="Finanzas"
+        subtitle="Control financiero del condominio: pagos, gastos, solicitudes, caja chica, bancos, reportes y configuraciones."
+        tone="blue"
+        items={[
+          {
+            href: "/finanzas",
+            label: "Inicio finanzas",
+            icon: WalletCards,
+          },
+          {
+            href: "/pagos-mantenimiento",
+            label: "Pagos",
+            icon: CreditCard,
+          },
+          {
+            href: "/gastos",
+            label: "Gastos",
+            icon: ReceiptText,
+          },
+          {
+            href: "/solicitudes-pago",
+            label: "Solicitudes",
+            icon: ClipboardCheck,
+          },
+          {
+            href: "/banco",
+            label: "Banco / Fondos",
+            icon: Landmark,
+          },
+          {
+            href: "/finanzas/caja-chica",
+            label: "Caja chica",
+            icon: Coins,
+          },
+          {
+            href: "/reportes",
+            label: "Reportes",
+            icon: BarChart3,
+          },
+          {
+            href: "/finanzas/configuraciones/presupuesto",
+            label: "Presupuesto",
+            icon: Banknote,
+          },
+        ]}
+      />
 
-            <h1 className="text-2xl md:text-3xl font-black text-slate-900 mt-1">
-              Reportes
-            </h1>
+      <ModuleToolbar
+        title="Reportes"
+        subtitle="Centro de reportes financieros, cuentas por cobrar, morosidad, gastos, presupuesto y exportaciones."
+        icon={BarChart3}
+        actions={
+          <Link
+            href="/reportes/exportar"
+            className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-800"
+          >
+            <Download className="h-4 w-4" />
+            Exportar
+          </Link>
+        }
+      />
 
-            <p className="text-sm text-slate-500 mt-2 max-w-3xl">
-              Consulte reportes financieros, cuentas por cobrar, morosidad,
-              pagos, gastos, presupuesto anual y exportaciones del condominio.
-            </p>
-          </div>
+      {secciones.map((seccion) => (
+        <SectionCard
+          key={seccion.titulo}
+          title={seccion.titulo}
+          subtitle={seccion.descripcion}
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-4">
+            {seccion.modulos.map((modulo) => {
+              const Icono = modulo.icono;
 
-          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-green-600 to-slate-900 flex items-center justify-center shadow-lg">
-            <BarChart3 className="h-9 w-9 text-white" />
-          </div>
-        </div>
-      </section>
+              return (
+                <Link
+                 key={`${seccion.titulo}-${modulo.titulo}-${modulo.href}`}
+                  href={modulo.href}
+                  className="group rounded-2xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                 >
+                  <div className="flex items-start gap-4">
+                    <div
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${modulo.bg}`}
+                    >
+                      <Icono className={`h-6 w-6 ${modulo.color}`} />
+                    </div>
 
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="mb-5">
-          <h2 className="text-lg font-bold text-slate-900">
-            Opciones de Reportes
-          </h2>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-base font-black text-slate-900 group-hover:text-blue-700">
+                        {modulo.titulo}
+                      </h3>
 
-          <p className="text-sm text-slate-500 mt-1">
-            Seleccione una opción para continuar trabajando.
-          </p>
-        </div>
+                      <p className="mt-1 min-h-[52px] text-sm leading-relaxed text-slate-500">
+                        {modulo.descripcion}
+                      </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-4">
-          {modulos.map((modulo) => {
-            const Icono = modulo.icono;
-
-            return (
-              <Link
-                key={modulo.href}
-                href={modulo.href}
-                className="group rounded-2xl border bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition overflow-hidden"
-              >
-                <div
-                  className={`h-20 bg-gradient-to-br ${modulo.fondo} flex items-center justify-center relative`}
-                >
-                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top_right,_white,_transparent_35%)]" />
-
-                  <div className="h-14 w-14 rounded-2xl bg-white/95 flex items-center justify-center shadow-md relative z-10 group-hover:scale-105 transition">
-                    <Icono className={`h-8 w-8 ${modulo.iconoColor}`} />
+                      <div className="mt-3 flex items-center gap-2 text-sm font-black text-blue-700">
+                        <span>Abrir módulo</span>
+                        <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                      </div>
+                    </div>
                   </div>
-                </div>
+                </Link>
+              );
+            })}
+          </div>
+        </SectionCard>
+      ))}
 
-                <div className="p-4">
-                  <h3 className="font-black text-slate-900 text-base group-hover:text-green-700">
-                    {modulo.titulo}
-                  </h3>
+      <SectionCard
+        title="Flujo recomendado de reportes"
+        subtitle="Orden sugerido para revisar la situación financiera del condominio."
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <FlujoPaso
+            numero="1"
+            titulo="Estado financiero"
+            descripcion="Revisar ingresos, gastos y balance general."
+          />
 
-                  <p className="text-xs text-slate-500 mt-2 min-h-[54px] leading-relaxed">
-                    {modulo.descripcion}
-                  </p>
+          <FlujoPaso
+            numero="2"
+            titulo="Cuentas por cobrar"
+            descripcion="Consultar balances pendientes y morosidad."
+          />
 
-                  <div className="mt-3 flex items-center justify-between text-xs font-bold text-green-700">
-                    <span>Abrir módulo</span>
-                    <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition" />
-                  </div>
-                </div>
-              </Link>
-            );
-          })}
+          <FlujoPaso
+            numero="3"
+            titulo="Gastos"
+            descripcion="Analizar gastos por categoría, proveedor y período."
+          />
+
+          <FlujoPaso
+            numero="4"
+            titulo="Exportar"
+            descripcion="Generar reportes en Excel para revisión externa."
+          />
         </div>
-      </section>
+      </SectionCard>
+    </PageContainer>
+  );
+}
 
-      <section className="bg-slate-900 text-white rounded-2xl border border-slate-800 shadow-sm p-5">
-        <h2 className="text-lg font-bold">Flujo recomendado Reportes</h2>
+function FlujoPaso({
+  numero,
+  titulo,
+  descripcion,
+}: {
+  numero: string;
+  titulo: string;
+  descripcion: string;
+}) {
+  return (
+    <div className="rounded-2xl border bg-slate-50 p-4">
+      <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-blue-700 text-sm font-black text-white">
+        {numero}
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4 text-sm">
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-green-300 font-bold">1. Estado Financiero</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Revisar ingresos, gastos y balance general.
-            </p>
-          </div>
+      <p className="font-black text-slate-900">{titulo}</p>
 
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-green-300 font-bold">2. Cuentas por Cobrar</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Consultar balances pendientes y morosidad.
-            </p>
-          </div>
-
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-green-300 font-bold">3. Gastos</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Analizar gastos por categoría y proveedor.
-            </p>
-          </div>
-
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-green-300 font-bold">4. Exportar</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Generar reportes en Excel para revisión externa.
-            </p>
-          </div>
-        </div>
-      </section>
-    </main>
+      <p className="mt-1 text-sm leading-relaxed text-slate-500">
+        {descripcion}
+      </p>
+    </div>
   );
 }

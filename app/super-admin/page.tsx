@@ -134,16 +134,27 @@ export default function SuperAdminPage() {
     setGuardando(true);
     setMensaje("");
 
-    const { error } = await supabase.from("condominios").insert([
-      {
-        nombre: nombre.trim(),
-        rnc: rnc.trim() || null,
-        direccion: direccion.trim() || null,
-        telefono: telefono.trim() || null,
-        logo_url: logoUrl.trim() || null,
-        estado: "Activo",
-      },
-    ]);
+    const { data: nuevoCondominio, error } = await supabase
+      .from("condominios")
+      .insert([
+        {
+          client_id: 1,
+          empresa_id: 1,
+          sucursal_id: 1,
+          nombre: nombre.trim(),
+          rnc: rnc.trim() || null,
+          direccion: direccion.trim() || null,
+          telefono: telefono.trim() || null,
+          logo_url: logoUrl.trim() || null,
+          cuota_mensual: 0,
+          porcentaje_mora: 5,
+          dia_inicio_mora: 10,
+          activa: true,
+          estado: "Activo",
+        },
+      ])
+      .select("id, nombre")
+      .single();
 
     setGuardando(false);
 
@@ -152,8 +163,11 @@ export default function SuperAdminPage() {
       return;
     }
 
-    alert("Condominio creado correctamente.");
+    alert(
+      `Condominio creado correctamente. Ahora puede crear el usuario administrador para ${nuevoCondominio?.nombre}.`
+    );
 
+    setUsuarioCondominioId(nuevoCondominio?.id ? String(nuevoCondominio.id) : "");
     setNombre("");
     setRnc("");
     setDireccion("");

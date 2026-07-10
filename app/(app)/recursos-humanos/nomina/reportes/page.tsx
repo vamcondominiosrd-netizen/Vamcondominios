@@ -8,42 +8,32 @@ type Nomina = {
   id: number;
   condominio_id: number;
   condominio: string;
-
   empleado_id: number;
   numero_empleado: string;
   nombre_empleado: string;
   cargo: string;
   departamento: string;
-
   periodo: string;
   fecha_pago: string;
-
   salario_base: number;
   dias_trabajados: number;
-
   horas_extras: number;
   monto_horas_extras: number;
   bonificacion: number;
-
   vacaciones_id: number | null;
   pago_vacaciones: number;
   dias_vacaciones: number;
-
   afp: number;
   sfs: number;
   isr: number;
   otros_descuentos: number;
-
   total_ingresos: number;
   total_descuentos: number;
   neto_pagar: number;
-
   estado: string;
   observacion: string;
-
   pagado_por: string;
   fecha_registro_pago: string;
-
   created_at: string;
 };
 
@@ -52,10 +42,8 @@ const estadosNomina = ["Todos", "Pendiente", "Aprobada", "Pagada", "Anulada"];
 export default function ReportesNominaPage() {
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
-
   const [nominas, setNominas] = useState<Nomina[]>([]);
   const [loading, setLoading] = useState(false);
-
   const [filtroPeriodo, setFiltroPeriodo] = useState(
     new Date().toISOString().slice(0, 7)
   );
@@ -65,13 +53,9 @@ export default function ReportesNominaPage() {
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
     const nombre = localStorage.getItem("condominio_nombre") || "";
-
     setCondominioId(id);
     setCondominioNombre(nombre);
-
-    if (id) {
-      cargarReporte(id, filtroPeriodo);
-    }
+    if (id) cargarReporte(id, filtroPeriodo);
   }, []);
 
   async function cargarReporte(id: string, periodoBuscar: string) {
@@ -83,12 +67,9 @@ export default function ReportesNominaPage() {
       .eq("condominio_id", Number(id))
       .order("nombre_empleado", { ascending: true });
 
-    if (periodoBuscar) {
-      query = query.eq("periodo", periodoBuscar);
-    }
+    if (periodoBuscar) query = query.eq("periodo", periodoBuscar);
 
     const { data, error } = await query;
-
     setLoading(false);
 
     if (error) {
@@ -114,29 +95,21 @@ export default function ReportesNominaPage() {
     window.print();
   }
 
-  function exportarCSV() {
-    const filas = reportesFiltrados.map((item) => ({
-      periodo: item.periodo || "",
-      numero_empleado: item.numero_empleado || "",
-      empleado: item.nombre_empleado || "",
-      cargo: item.cargo || "",
-      departamento: item.departamento || "",
-      salario_base: Number(item.salario_base || 0),
-      horas_extras: Number(item.monto_horas_extras || 0),
-      bonificacion: Number(item.bonificacion || 0),
-      pago_vacaciones: Number(item.pago_vacaciones || 0),
-      total_ingresos: Number(item.total_ingresos || 0),
-      afp: Number(item.afp || 0),
-      sfs: Number(item.sfs || 0),
-      isr: Number(item.isr || 0),
-      otros_descuentos: Number(item.otros_descuentos || 0),
-      total_descuentos: Number(item.total_descuentos || 0),
-      neto_pagar: Number(item.neto_pagar || 0),
-      estado: item.estado || "",
-      fecha_pago: item.fecha_pago || "",
-      pagado_por: item.pagado_por || "",
-    }));
+  const reportesFiltrados = nominas.filter((item) => {
+    const texto = `${item.nombre_empleado || ""} ${item.numero_empleado || ""} ${
+      item.cargo || ""
+    } ${item.departamento || ""}`
+      .toLowerCase()
+      .trim();
 
+    const coincideBusqueda = texto.includes(busqueda.toLowerCase().trim());
+    const coincideEstado =
+      filtroEstado === "Todos" ? true : item.estado === filtroEstado;
+
+    return coincideBusqueda && coincideEstado;
+  });
+
+  function exportarCSV() {
     const encabezados = [
       "Periodo",
       "No. Empleado",
@@ -161,27 +134,27 @@ export default function ReportesNominaPage() {
 
     const contenido = [
       encabezados.join(","),
-      ...filas.map((fila) =>
+      ...reportesFiltrados.map((item) =>
         [
-          fila.periodo,
-          fila.numero_empleado,
-          fila.empleado,
-          fila.cargo,
-          fila.departamento,
-          fila.salario_base,
-          fila.horas_extras,
-          fila.bonificacion,
-          fila.pago_vacaciones,
-          fila.total_ingresos,
-          fila.afp,
-          fila.sfs,
-          fila.isr,
-          fila.otros_descuentos,
-          fila.total_descuentos,
-          fila.neto_pagar,
-          fila.estado,
-          fila.fecha_pago,
-          fila.pagado_por,
+          item.periodo || "",
+          item.numero_empleado || "",
+          item.nombre_empleado || "",
+          item.cargo || "",
+          item.departamento || "",
+          Number(item.salario_base || 0),
+          Number(item.monto_horas_extras || 0),
+          Number(item.bonificacion || 0),
+          Number(item.pago_vacaciones || 0),
+          Number(item.total_ingresos || 0),
+          Number(item.afp || 0),
+          Number(item.sfs || 0),
+          Number(item.isr || 0),
+          Number(item.otros_descuentos || 0),
+          Number(item.total_descuentos || 0),
+          Number(item.neto_pagar || 0),
+          item.estado || "",
+          item.fecha_pago || "",
+          item.pagado_por || "",
         ]
           .map((valor) => `"${String(valor).replace(/"/g, '""')}"`)
           .join(",")
@@ -201,21 +174,6 @@ export default function ReportesNominaPage() {
 
     URL.revokeObjectURL(url);
   }
-
-  const reportesFiltrados = nominas.filter((item) => {
-    const texto = `${item.nombre_empleado || ""} ${
-      item.numero_empleado || ""
-    } ${item.cargo || ""} ${item.departamento || ""}`
-      .toLowerCase()
-      .trim();
-
-    const coincideBusqueda = texto.includes(busqueda.toLowerCase().trim());
-
-    const coincideEstado =
-      filtroEstado === "Todos" ? true : item.estado === filtroEstado;
-
-    return coincideBusqueda && coincideEstado;
-  });
 
   const totalEmpleados = new Set(
     reportesFiltrados.map((item) => item.empleado_id)
@@ -292,103 +250,93 @@ export default function ReportesNominaPage() {
     (item) => item.estado === "Anulada"
   ).length;
 
+  const inputClass =
+    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500";
+
+  const labelClass = "mb-1 block text-xs font-semibold text-slate-700";
+
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-7xl space-y-4 px-2 pb-6">
       <NominaMenu />
 
-      <div className="no-print bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-4xl font-black text-slate-900">
-          Reportes de Nómina
-        </h1>
-
-        <p className="text-slate-500 mt-2">
-          Resumen financiero de nómina por período, empleado, estado y conceptos.
-        </p>
-      </div>
-
-      <div className="no-print bg-white rounded-2xl p-5 shadow-sm border">
-        <p className="text-sm text-slate-500">Condominio activo</p>
-
-        <h2 className="text-lg font-bold text-slate-900">
-          {condominioNombre || "No identificado"}
-        </h2>
-      </div>
-
-      <div className="no-print bg-white rounded-3xl border shadow-sm p-6">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+      <div className="no-print rounded-xl border bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-xl font-black">Filtros del reporte</h2>
-
+            <h1 className="text-2xl font-black text-slate-900">
+              Reportes de Nómina
+            </h1>
             <p className="text-sm text-slate-500">
-              Filtra por período, estado, empleado, cargo o departamento.
+              Resumen financiero por período, empleado, estado y conceptos.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 w-full md:w-auto">
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Período
-              </label>
-
-              <input
-                type="month"
-                value={filtroPeriodo}
-                onChange={(e) => setFiltroPeriodo(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">Estado</label>
-
-              <select
-                value={filtroEstado}
-                onChange={(e) => setFiltroEstado(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full bg-white"
-              >
-                {estadosNomina.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Buscar
-              </label>
-
-              <input
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full"
-                placeholder="Empleado, cargo..."
-              />
-            </div>
-
-            <div className="flex items-end">
-              <button
-                onClick={buscar}
-                className="bg-blue-700 hover:bg-blue-800 text-white px-5 py-3 rounded-xl font-bold w-full"
-              >
-                Buscar
-              </button>
-            </div>
-
-            <div className="flex items-end">
-              <button
-                onClick={exportarCSV}
-                className="bg-green-700 hover:bg-green-800 text-white px-5 py-3 rounded-xl font-bold w-full"
-              >
-                Exportar
-              </button>
-            </div>
+          <div className="rounded-lg bg-slate-100 px-3 py-2 text-sm">
+            <span className="text-slate-500">Condominio: </span>
+            <span className="font-bold text-slate-800">
+              {condominioNombre || "No identificado"}
+            </span>
           </div>
         </div>
       </div>
 
-      <div className="print-area space-y-6">
+      <div className="no-print rounded-xl border bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+          <div>
+            <label className={labelClass}>Período</label>
+            <input
+              type="month"
+              value={filtroPeriodo}
+              onChange={(e) => setFiltroPeriodo(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+
+          <div>
+            <label className={labelClass}>Estado</label>
+            <select
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value)}
+              className={`${inputClass} bg-white`}
+            >
+              {estadosNomina.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className={labelClass}>Buscar</label>
+            <input
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className={inputClass}
+              placeholder="Empleado, cargo..."
+            />
+          </div>
+
+          <div className="flex items-end">
+            <button
+              onClick={buscar}
+              className="w-full rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800"
+            >
+              Buscar
+            </button>
+          </div>
+
+          <div className="flex items-end">
+            <button
+              onClick={exportarCSV}
+              className="w-full rounded-lg bg-green-700 px-4 py-2 text-sm font-bold text-white hover:bg-green-800"
+            >
+              Exportar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="print-area space-y-4">
         <div className="hidden print:block">
           <h1 className="text-2xl font-black">Reporte de Nómina</h1>
           <p>
@@ -402,70 +350,71 @@ export default function ReportesNominaPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div className="bg-white rounded-2xl p-5 shadow-sm border">
-            <p className="text-sm text-slate-500">Registros</p>
-            <h2 className="text-3xl font-black">{reportesFiltrados.length}</h2>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="text-xs text-slate-500">Registros</p>
+            <h2 className="text-2xl font-black">{reportesFiltrados.length}</h2>
           </div>
 
-          <div className="bg-white rounded-2xl p-5 shadow-sm border">
-            <p className="text-sm text-slate-500">Empleados</p>
-            <h2 className="text-3xl font-black text-blue-700">
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="text-xs text-slate-500">Empleados</p>
+            <h2 className="text-2xl font-black text-blue-700">
               {totalEmpleados}
             </h2>
           </div>
 
-          <div className="bg-white rounded-2xl p-5 shadow-sm border">
-            <p className="text-sm text-slate-500">Total ingresos</p>
-            <h2 className="text-2xl font-black text-green-700">
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="text-xs text-slate-500">Ingresos</p>
+            <h2 className="text-xl font-black text-green-700">
               RD${moneda(totalIngresos)}
             </h2>
           </div>
 
-          <div className="bg-white rounded-2xl p-5 shadow-sm border">
-            <p className="text-sm text-slate-500">Total descuentos</p>
-            <h2 className="text-2xl font-black text-red-700">
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="text-xs text-slate-500">Descuentos</p>
+            <h2 className="text-xl font-black text-red-700">
               RD${moneda(totalDescuentos)}
             </h2>
           </div>
 
-          <div className="bg-white rounded-2xl p-5 shadow-sm border">
-            <p className="text-sm text-slate-500">Total neto</p>
-            <h2 className="text-2xl font-black text-blue-700">
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="text-xs text-slate-500">Neto</p>
+            <h2 className="text-xl font-black text-blue-700">
               RD${moneda(totalNeto)}
             </h2>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-white rounded-2xl p-5 shadow-sm border">
-            <p className="text-sm text-slate-500">Pendientes</p>
-            <h2 className="text-3xl font-black text-yellow-700">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="text-xs text-slate-500">Pendientes</p>
+            <h2 className="text-2xl font-black text-yellow-700">
               {pendientes}
             </h2>
           </div>
 
-          <div className="bg-white rounded-2xl p-5 shadow-sm border">
-            <p className="text-sm text-slate-500">Aprobadas</p>
-            <h2 className="text-3xl font-black text-blue-700">{aprobadas}</h2>
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="text-xs text-slate-500">Aprobadas</p>
+            <h2 className="text-2xl font-black text-blue-700">{aprobadas}</h2>
           </div>
 
-          <div className="bg-white rounded-2xl p-5 shadow-sm border">
-            <p className="text-sm text-slate-500">Pagadas</p>
-            <h2 className="text-3xl font-black text-green-700">{pagadas}</h2>
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="text-xs text-slate-500">Pagadas</p>
+            <h2 className="text-2xl font-black text-green-700">{pagadas}</h2>
           </div>
 
-          <div className="bg-white rounded-2xl p-5 shadow-sm border">
-            <p className="text-sm text-slate-500">Anuladas</p>
-            <h2 className="text-3xl font-black text-red-700">{anuladas}</h2>
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="text-xs text-slate-500">Anuladas</p>
+            <h2 className="text-2xl font-black text-red-700">{anuladas}</h2>
           </div>
         </div>
 
-        <div className="bg-white rounded-3xl border shadow-sm p-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
+        <div className="rounded-xl border bg-white p-4 shadow-sm">
+          <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-xl font-black">Resumen por concepto</h2>
-
+              <h2 className="text-lg font-black text-slate-900">
+                Resumen por concepto
+              </h2>
               <p className="text-sm text-slate-500">
                 Totales agrupados de ingresos, deducciones y neto.
               </p>
@@ -473,95 +422,95 @@ export default function ReportesNominaPage() {
 
             <button
               onClick={imprimir}
-              className="no-print bg-slate-700 hover:bg-slate-800 text-white px-5 py-3 rounded-xl font-bold"
+              className="no-print rounded-lg bg-slate-700 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
             >
               Imprimir / PDF
             </button>
           </div>
 
           <div className="overflow-auto">
-            <table className="min-w-full text-sm">
+            <table className="min-w-full text-xs">
               <thead className="bg-slate-100">
                 <tr>
-                  <th className="p-3 border text-left">Concepto</th>
-                  <th className="p-3 border text-right">Monto</th>
+                  <th className="border p-2 text-left">Concepto</th>
+                  <th className="border p-2 text-right">Monto</th>
                 </tr>
               </thead>
 
               <tbody>
                 <tr>
-                  <td className="p-3 border font-bold">Salario base</td>
-                  <td className="p-3 border text-right font-bold">
+                  <td className="border p-2 font-bold">Salario base</td>
+                  <td className="border p-2 text-right font-bold">
                     RD${moneda(totalSalarioBase)}
                   </td>
                 </tr>
 
                 <tr>
-                  <td className="p-3 border font-bold">Horas extras</td>
-                  <td className="p-3 border text-right font-bold">
+                  <td className="border p-2 font-bold">Horas extras</td>
+                  <td className="border p-2 text-right font-bold">
                     RD${moneda(totalHorasExtras)}
                   </td>
                 </tr>
 
                 <tr>
-                  <td className="p-3 border font-bold">Bonificación</td>
-                  <td className="p-3 border text-right font-bold">
+                  <td className="border p-2 font-bold">Bonificación</td>
+                  <td className="border p-2 text-right font-bold">
                     RD${moneda(totalBonificacion)}
                   </td>
                 </tr>
 
                 <tr>
-                  <td className="p-3 border font-bold">Pago vacaciones</td>
-                  <td className="p-3 border text-right font-bold text-purple-700">
+                  <td className="border p-2 font-bold">Pago vacaciones</td>
+                  <td className="border p-2 text-right font-bold text-purple-700">
                     RD${moneda(totalVacaciones)}
                   </td>
                 </tr>
 
                 <tr className="bg-green-50">
-                  <td className="p-3 border font-black">Total ingresos</td>
-                  <td className="p-3 border text-right font-black text-green-700">
+                  <td className="border p-2 font-black">Total ingresos</td>
+                  <td className="border p-2 text-right font-black text-green-700">
                     RD${moneda(totalIngresos)}
                   </td>
                 </tr>
 
                 <tr>
-                  <td className="p-3 border font-bold">AFP</td>
-                  <td className="p-3 border text-right font-bold text-red-700">
+                  <td className="border p-2 font-bold">AFP</td>
+                  <td className="border p-2 text-right font-bold text-red-700">
                     RD${moneda(totalAFP)}
                   </td>
                 </tr>
 
                 <tr>
-                  <td className="p-3 border font-bold">SFS</td>
-                  <td className="p-3 border text-right font-bold text-red-700">
+                  <td className="border p-2 font-bold">SFS</td>
+                  <td className="border p-2 text-right font-bold text-red-700">
                     RD${moneda(totalSFS)}
                   </td>
                 </tr>
 
                 <tr>
-                  <td className="p-3 border font-bold">ISR</td>
-                  <td className="p-3 border text-right font-bold text-red-700">
+                  <td className="border p-2 font-bold">ISR</td>
+                  <td className="border p-2 text-right font-bold text-red-700">
                     RD${moneda(totalISR)}
                   </td>
                 </tr>
 
                 <tr>
-                  <td className="p-3 border font-bold">Otros descuentos</td>
-                  <td className="p-3 border text-right font-bold text-red-700">
+                  <td className="border p-2 font-bold">Otros descuentos</td>
+                  <td className="border p-2 text-right font-bold text-red-700">
                     RD${moneda(totalOtrosDescuentos)}
                   </td>
                 </tr>
 
                 <tr className="bg-red-50">
-                  <td className="p-3 border font-black">Total descuentos</td>
-                  <td className="p-3 border text-right font-black text-red-700">
+                  <td className="border p-2 font-black">Total descuentos</td>
+                  <td className="border p-2 text-right font-black text-red-700">
                     RD${moneda(totalDescuentos)}
                   </td>
                 </tr>
 
                 <tr className="bg-blue-50">
-                  <td className="p-3 border font-black">Neto pagado</td>
-                  <td className="p-3 border text-right font-black text-blue-700">
+                  <td className="border p-2 font-black">Neto pagado</td>
+                  <td className="border p-2 text-right font-black text-blue-700">
                     RD${moneda(totalNeto)}
                   </td>
                 </tr>
@@ -570,82 +519,84 @@ export default function ReportesNominaPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-3xl border shadow-sm p-6">
-          <h2 className="text-xl font-black mb-4">Detalle por empleado</h2>
+        <div className="rounded-xl border bg-white p-4 shadow-sm">
+          <h2 className="mb-4 text-lg font-black text-slate-900">
+            Detalle por empleado
+          </h2>
 
           {loading ? (
-            <div>Cargando reporte...</div>
+            <div className="text-sm text-slate-500">Cargando reporte...</div>
           ) : (
             <div className="overflow-auto">
-              <table className="min-w-full text-sm">
+              <table className="min-w-full text-xs">
                 <thead className="bg-slate-100">
                   <tr>
-                    <th className="p-3 border text-left">Empleado</th>
-                    <th className="p-3 border text-left">Cargo</th>
-                    <th className="p-3 border text-right">Ingresos</th>
-                    <th className="p-3 border text-right">Vacaciones</th>
-                    <th className="p-3 border text-right">AFP</th>
-                    <th className="p-3 border text-right">SFS</th>
-                    <th className="p-3 border text-right">ISR</th>
-                    <th className="p-3 border text-right">Otros desc.</th>
-                    <th className="p-3 border text-right">Descuentos</th>
-                    <th className="p-3 border text-right">Neto</th>
-                    <th className="p-3 border text-center">Estado</th>
+                    <th className="border p-2 text-left">Empleado</th>
+                    <th className="border p-2 text-left">Cargo</th>
+                    <th className="border p-2 text-right">Ingresos</th>
+                    <th className="border p-2 text-right">Vacaciones</th>
+                    <th className="border p-2 text-right">AFP</th>
+                    <th className="border p-2 text-right">SFS</th>
+                    <th className="border p-2 text-right">ISR</th>
+                    <th className="border p-2 text-right">Otros</th>
+                    <th className="border p-2 text-right">Descuentos</th>
+                    <th className="border p-2 text-right">Neto</th>
+                    <th className="border p-2 text-center">Estado</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {reportesFiltrados.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50">
-                      <td className="p-3 border">
+                      <td className="border p-2">
                         <p className="font-bold">{item.nombre_empleado}</p>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-[11px] text-slate-500">
                           {item.numero_empleado || "-"} · {item.periodo}
                         </p>
                       </td>
 
-                      <td className="p-3 border">
+                      <td className="border p-2">
                         <p>{item.cargo || "-"}</p>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-[11px] text-slate-500">
                           {item.departamento || "-"}
                         </p>
                       </td>
 
-                      <td className="p-3 border text-right font-bold text-green-700">
+                      <td className="border p-2 text-right font-bold text-green-700">
                         RD${moneda(item.total_ingresos)}
                       </td>
 
-                      <td className="p-3 border text-right font-bold text-purple-700">
+                      <td className="border p-2 text-right font-bold text-purple-700">
                         RD${moneda(item.pago_vacaciones)}
                       </td>
 
-                      <td className="p-3 border text-right font-bold text-red-700">
+                      <td className="border p-2 text-right font-bold text-red-700">
                         RD${moneda(item.afp)}
                       </td>
 
-                      <td className="p-3 border text-right font-bold text-red-700">
+                      <td className="border p-2 text-right font-bold text-red-700">
                         RD${moneda(item.sfs)}
                       </td>
 
-                      <td className="p-3 border text-right font-bold text-red-700">
+                      <td className="border p-2 text-right font-bold text-red-700">
                         RD${moneda(item.isr)}
                       </td>
 
-                      <td className="p-3 border text-right font-bold text-red-700">
+                      <td className="border p-2 text-right font-bold text-red-700">
                         RD${moneda(item.otros_descuentos)}
                       </td>
 
-                      <td className="p-3 border text-right font-bold text-red-700">
+                      <td className="border p-2 text-right font-bold text-red-700">
                         RD${moneda(item.total_descuentos)}
                       </td>
 
-                      <td className="p-3 border text-right font-black text-blue-700">
+                      <td className="border p-2 text-right font-black text-blue-700">
                         RD${moneda(item.neto_pagar)}
                       </td>
 
-                      <td className="p-3 border text-center">
+                      <td className="border p-2 text-center">
                         <span
-                          className={`px-3 py-1 rounded-full text-xs font-bold ${
+                          className={`rounded-full px-2 py-1 text-[11px] font-bold ${
                             item.estado === "Pagada"
                               ? "bg-green-100 text-green-700"
                               : item.estado === "Aprobada"
@@ -664,7 +615,7 @@ export default function ReportesNominaPage() {
                   {reportesFiltrados.length === 0 && (
                     <tr>
                       <td
-                        className="p-6 border text-center text-slate-500"
+                        className="border p-4 text-center text-slate-500"
                         colSpan={11}
                       >
                         No hay datos para este reporte.
@@ -676,43 +627,34 @@ export default function ReportesNominaPage() {
                 {reportesFiltrados.length > 0 && (
                   <tfoot className="bg-slate-100 font-black">
                     <tr>
-                      <td className="p-3 border" colSpan={2}>
+                      <td className="border p-2" colSpan={2}>
                         Totales
                       </td>
-
-                      <td className="p-3 border text-right text-green-700">
+                      <td className="border p-2 text-right text-green-700">
                         RD${moneda(totalIngresos)}
                       </td>
-
-                      <td className="p-3 border text-right text-purple-700">
+                      <td className="border p-2 text-right text-purple-700">
                         RD${moneda(totalVacaciones)}
                       </td>
-
-                      <td className="p-3 border text-right text-red-700">
+                      <td className="border p-2 text-right text-red-700">
                         RD${moneda(totalAFP)}
                       </td>
-
-                      <td className="p-3 border text-right text-red-700">
+                      <td className="border p-2 text-right text-red-700">
                         RD${moneda(totalSFS)}
                       </td>
-
-                      <td className="p-3 border text-right text-red-700">
+                      <td className="border p-2 text-right text-red-700">
                         RD${moneda(totalISR)}
                       </td>
-
-                      <td className="p-3 border text-right text-red-700">
+                      <td className="border p-2 text-right text-red-700">
                         RD${moneda(totalOtrosDescuentos)}
                       </td>
-
-                      <td className="p-3 border text-right text-red-700">
+                      <td className="border p-2 text-right text-red-700">
                         RD${moneda(totalDescuentos)}
                       </td>
-
-                      <td className="p-3 border text-right text-blue-700">
+                      <td className="border p-2 text-right text-blue-700">
                         RD${moneda(totalNeto)}
                       </td>
-
-                      <td className="p-3 border"></td>
+                      <td className="border p-2"></td>
                     </tr>
                   </tfoot>
                 )}
@@ -732,10 +674,7 @@ export default function ReportesNominaPage() {
             font-size: 10px !important;
           }
 
-          .no-print {
-            display: none !important;
-          }
-
+          .no-print,
           aside,
           nav,
           header {
@@ -749,36 +688,6 @@ export default function ReportesNominaPage() {
             width: 100% !important;
             padding: 0 !important;
             margin: 0 !important;
-          }
-
-          .print-area .rounded-3xl,
-          .print-area .rounded-2xl {
-            border-radius: 6px !important;
-          }
-
-          .print-area .p-6,
-          .print-area .p-5 {
-            padding: 8px !important;
-          }
-
-          .print-area .gap-4,
-          .print-area .gap-6 {
-            gap: 6px !important;
-          }
-
-          .print-area h1 {
-            font-size: 20px !important;
-            line-height: 1.1 !important;
-          }
-
-          .print-area h2 {
-            font-size: 15px !important;
-            line-height: 1.1 !important;
-          }
-
-          .print-area p {
-            margin: 1px 0 !important;
-            line-height: 1.15 !important;
           }
 
           .print-area table {

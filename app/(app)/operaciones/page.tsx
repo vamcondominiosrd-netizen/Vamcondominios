@@ -3,21 +3,27 @@
 import Link from "next/link";
 import {
   AlertTriangle,
-  CalendarDays,
-  Megaphone,
-  FileText,
-  Wrench,
-  ClipboardList,
   ArrowRight,
+  CalendarDays,
+  ClipboardList,
+  FileText,
+  Megaphone,
+  Package,
+  Wrench,
 } from "lucide-react";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
 
 type ModuloOperaciones = {
   titulo: string;
   descripcion: string;
   href: string;
   icono: any;
-  fondo: string;
-  iconoColor: string;
+  color: string;
+  bg: string;
 };
 
 export default function OperacionesPage() {
@@ -25,38 +31,38 @@ export default function OperacionesPage() {
     {
       titulo: "Incidencias",
       descripcion:
-        "Registrar, revisar y dar seguimiento a reportes de propietarios.",
+        "Registrar, revisar y dar seguimiento a reportes de propietarios y residentes.",
       href: "/incidencias",
       icono: AlertTriangle,
-      fondo: "from-red-600 to-red-800",
-      iconoColor: "text-red-700",
+      color: "text-red-700",
+      bg: "bg-red-50",
     },
     {
       titulo: "Reservas",
       descripcion:
-        "Consultar y aprobar reservas de áreas sociales del condominio.",
+        "Consultar, aprobar y controlar reservas de áreas sociales del condominio.",
       href: "/reservas-areas",
       icono: CalendarDays,
-      fondo: "from-blue-600 to-blue-800",
-      iconoColor: "text-blue-700",
+      color: "text-blue-700",
+      bg: "bg-blue-50",
     },
     {
       titulo: "Anuncios",
       descripcion:
-        "Publicar avisos, comunicados e informaciones para residentes.",
+        "Publicar avisos, comunicados e informaciones para propietarios y residentes.",
       href: "/anuncios",
       icono: Megaphone,
-      fondo: "from-amber-500 to-orange-700",
-      iconoColor: "text-amber-700",
+      color: "text-amber-700",
+      bg: "bg-amber-50",
     },
     {
       titulo: "Documentos",
       descripcion:
-        "Administrar documentos internos, reglamentos y comunicados.",
-      href: "/documentos",
+        "Administrar documentos internos, reglamentos, actas y comunicados.",
+      href: "/administracion/documentos",
       icono: FileText,
-      fondo: "from-purple-600 to-purple-800",
-      iconoColor: "text-purple-700",
+      color: "text-purple-700",
+      bg: "bg-purple-50",
     },
     {
       titulo: "Mantenimiento",
@@ -64,57 +70,76 @@ export default function OperacionesPage() {
         "Asignar trabajos, reparaciones y mantenimiento de áreas comunes.",
       href: "/trabajos-tecnicos",
       icono: Wrench,
-      fondo: "from-emerald-600 to-emerald-800",
-      iconoColor: "text-emerald-700",
+      color: "text-emerald-700",
+      bg: "bg-emerald-50",
     },
     {
-      titulo: "Tareas Operativas",
+      titulo: "Inventario",
       descripcion:
-        "Seguimiento de pendientes, actividades y asignaciones internas.",
-      href: "/operaciones/tareas",
-      icono: ClipboardList,
-      fondo: "from-slate-700 to-slate-950",
-      iconoColor: "text-slate-700",
+        "Control de equipos, herramientas, activos, movimientos y mantenimiento.",
+      href: "/administracion/inventario",
+      icono: Package,
+      color: "text-slate-700",
+      bg: "bg-slate-100",
     },
   ];
 
   return (
-    <main className="space-y-5">
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide">
-              Módulo
-            </p>
+    <PageContainer>
+      <ModuleMenu
+        title="Operaciones"
+        subtitle="Gestión operativa del condominio: incidencias, reservas, anuncios, documentos, mantenimiento e inventario."
+        tone="orange"
+        items={[
+          {
+            href: "/operaciones",
+            label: "Inicio operaciones",
+            icon: ClipboardList,
+          },
+          {
+            href: "/incidencias",
+            label: "Incidencias",
+            icon: AlertTriangle,
+          },
+          {
+            href: "/reservas-areas",
+            label: "Reservas",
+            icon: CalendarDays,
+          },
+          {
+            href: "/anuncios",
+            label: "Anuncios",
+            icon: Megaphone,
+          },
+          {
+            href: "/administracion/documentos",
+            label: "Documentos",
+            icon: FileText,
+          },
+          {
+            href: "/trabajos-tecnicos",
+            label: "Mantenimiento",
+            icon: Wrench,
+          },
+          {
+            href: "/administracion/inventario",
+            label: "Inventario",
+            icon: Package,
+          },
+        ]}
+      />
 
-            <h1 className="text-2xl md:text-3xl font-black text-slate-900 mt-1">
-              Operaciones
-            </h1>
+      <ModuleToolbar
+        title="Operaciones"
+        subtitle="Administre las tareas operativas del condominio desde un solo panel."
+        icon={ClipboardList}
+      />
 
-            <p className="text-sm text-slate-500 mt-2 max-w-3xl">
-              Administre incidencias, reservas, anuncios, documentos,
-              mantenimiento de áreas comunes y tareas operativas del condominio.
-            </p>
-          </div>
-
-          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-orange-600 to-slate-900 flex items-center justify-center shadow-lg">
-            <ClipboardList className="h-9 w-9 text-white" />
-          </div>
-        </div>
-      </section>
-
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="mb-5">
-          <h2 className="text-lg font-bold text-slate-900">
-            Opciones de Operaciones
-          </h2>
-
-          <p className="text-sm text-slate-500 mt-1">
-            Seleccione una opción para continuar trabajando.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-4">
+      <SectionCard
+        title="Opciones de Operaciones"
+        subtitle="Seleccione una opción para continuar trabajando."
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-4">
           {modulos.map((modulo) => {
             const Icono = modulo.icono;
 
@@ -122,71 +147,90 @@ export default function OperacionesPage() {
               <Link
                 key={modulo.href}
                 href={modulo.href}
-                className="group rounded-2xl border bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition overflow-hidden"
+                className="group rounded-2xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
               >
-                <div
-                  className={`h-20 bg-gradient-to-br ${modulo.fondo} flex items-center justify-center relative`}
-                >
-                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top_right,_white,_transparent_35%)]" />
-
-                  <div className="h-14 w-14 rounded-2xl bg-white/95 flex items-center justify-center shadow-md relative z-10 group-hover:scale-105 transition">
-                    <Icono className={`h-8 w-8 ${modulo.iconoColor}`} />
+                <div className="flex items-start gap-4">
+                  <div
+                    className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${modulo.bg}`}
+                  >
+                    <Icono className={`h-6 w-6 ${modulo.color}`} />
                   </div>
-                </div>
 
-                <div className="p-4">
-                  <h3 className="font-black text-slate-900 text-base group-hover:text-orange-700">
-                    {modulo.titulo}
-                  </h3>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-base font-black text-slate-900 group-hover:text-orange-700">
+                      {modulo.titulo}
+                    </h3>
 
-                  <p className="text-xs text-slate-500 mt-2 min-h-[54px] leading-relaxed">
-                    {modulo.descripcion}
-                  </p>
+                    <p className="mt-1 min-h-[52px] text-sm leading-relaxed text-slate-500">
+                      {modulo.descripcion}
+                    </p>
 
-                  <div className="mt-3 flex items-center justify-between text-xs font-bold text-orange-700">
-                    <span>Abrir módulo</span>
-                    <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition" />
+                    <div className="mt-3 flex items-center gap-2 text-sm font-black text-orange-700">
+                      <span>Abrir módulo</span>
+                      <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                    </div>
                   </div>
                 </div>
               </Link>
             );
           })}
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="bg-slate-900 text-white rounded-2xl border border-slate-800 shadow-sm p-5">
-        <h2 className="text-lg font-bold">Flujo recomendado Operaciones</h2>
+      <SectionCard
+        title="Flujo recomendado de Operaciones"
+        subtitle="Orden sugerido para mantener el control operativo del condominio."
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <FlujoPaso
+            numero="1"
+            titulo="Incidencias"
+            descripcion="Recibir, revisar y clasificar reportes de residentes."
+          />
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4 text-sm">
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-orange-300 font-bold">1. Incidencias</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Recibir y clasificar reportes de los residentes.
-            </p>
-          </div>
+          <FlujoPaso
+            numero="2"
+            titulo="Seguimiento"
+            descripcion="Asignar tareas, responsables y fechas de solución."
+          />
 
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-orange-300 font-bold">2. Seguimiento</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Asignar tareas y dar respuesta a cada caso.
-            </p>
-          </div>
+          <FlujoPaso
+            numero="3"
+            titulo="Comunicación"
+            descripcion="Publicar anuncios y mantener informados a los residentes."
+          />
 
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-orange-300 font-bold">3. Comunicación</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Publicar anuncios y avisos importantes.
-            </p>
-          </div>
-
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-orange-300 font-bold">4. Control</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Mantener documentos, reservas y actividades organizadas.
-            </p>
-          </div>
+          <FlujoPaso
+            numero="4"
+            titulo="Control"
+            descripcion="Mantener documentos, reservas e inventario organizados."
+          />
         </div>
-      </section>
-    </main>
+      </SectionCard>
+    </PageContainer>
+  );
+}
+
+function FlujoPaso({
+  numero,
+  titulo,
+  descripcion,
+}: {
+  numero: string;
+  titulo: string;
+  descripcion: string;
+}) {
+  return (
+    <div className="rounded-2xl border bg-slate-50 p-4">
+      <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-orange-700 text-sm font-black text-white">
+        {numero}
+      </div>
+
+      <p className="font-black text-slate-900">{titulo}</p>
+
+      <p className="mt-1 text-sm leading-relaxed text-slate-500">
+        {descripcion}
+      </p>
+    </div>
   );
 }

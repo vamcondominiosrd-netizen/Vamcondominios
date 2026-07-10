@@ -1,8 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  BarChart3,
+  Coins,
+  FileSpreadsheet,
+  Plus,
+  Save,
+} from "lucide-react";
+
 import { supabase } from "@/app/lib/supabaseClient";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import ModuleActions from "@/components/vam/enterprise/ModuleActions";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import DataTable from "@/components/vam/enterprise/DataTable";
+import EmptyState from "@/components/vam/enterprise/EmptyState";
 
 type CajaChica = {
   id: number;
@@ -31,6 +47,18 @@ type CajaChicaFondo = {
   created_at: string | null;
 };
 
+function dinero(valor: number | null | undefined) {
+  return Number(valor || 0).toLocaleString("es-DO", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function fechaCorta(valor?: string | null) {
+  if (!valor) return "-";
+  return String(valor).split("T")[0];
+}
+
 export default function CajaChicaPage() {
   const [gastos, setGastos] = useState<CajaChica[]>([]);
   const [fondos, setFondos] = useState<CajaChicaFondo[]>([]);
@@ -50,6 +78,7 @@ export default function CajaChicaPage() {
   const [facturaArchivo, setFacturaArchivo] = useState<File | null>(null);
 
   const [fechaFondo, setFechaFondo] = useState("");
+  const [tipoFondo, setTipoFondo] = useState("fondo_inicial");
   const [montoFondo, setMontoFondo] = useState("");
   const [responsableFondo, setResponsableFondo] = useState("");
   const [descripcionFondo, setDescripcionFondo] = useState("");
@@ -86,7 +115,8 @@ export default function CajaChicaPage() {
         "id, condominio, fecha, concepto, detalle_gasto, monto, responsable, comprobante, factura_url, estado, created_at"
       )
       .eq("condominio", condominioActivo)
-      .order("fecha", { ascending: false });
+      .order("fecha", { ascending: false })
+      .order("id", { ascending: false });
 
     setLoading(false);
 
@@ -110,7 +140,8 @@ export default function CajaChicaPage() {
           "id, condominio_id, numero_fondo, condominio, fecha, tipo, monto, descripcion, responsable, created_at"
         )
         .eq("condominio_id", Number(idCondominio))
-        .order("fecha", { ascending: false });
+        .order("fecha", { ascending: false })
+        .order("id", { ascending: false });
 
       if (error) {
         alert("Error cargando fondos de caja chica: " + error.message);
@@ -128,7 +159,8 @@ export default function CajaChicaPage() {
           "id, condominio_id, numero_fondo, condominio, fecha, tipo, monto, descripcion, responsable, created_at"
         )
         .ilike("condominio", `%${nombreCondominio}%`)
-        .order("fecha", { ascending: false });
+        .order("fecha", { ascending: false })
+        .order("id", { ascending: false });
 
       if (error) {
         alert("Error cargando fondos de caja chica: " + error.message);
@@ -140,6 +172,14 @@ export default function CajaChicaPage() {
     }
 
     setFondos(fondosData);
+  }
+
+  async function refrescar() {
+    if (!condominioId) return;
+    await Promise.all([
+      cargarGastos(condominio),
+      cargarFondos(condominioId, condominio),
+    ]);
   }
 
   async function obtenerNumeroFondo() {
@@ -176,7 +216,7 @@ export default function CajaChicaPage() {
           numero_fondo: numeroFondo,
           condominio,
           fecha: fechaFondo,
-          tipo: "fondo_inicial",
+          tipo: tipoFondo,
           monto: Number(montoFondo || 0),
           descripcion: descripcionFondo || "Fondo inicial de caja chica",
           responsable: responsableFondo,
@@ -199,6 +239,7 @@ export default function CajaChicaPage() {
       const hoy = new Date().toISOString().split("T")[0];
 
       setFechaFondo(hoy);
+      setTipoFondo("fondo_inicial");
       setMontoFondo("");
       setResponsableFondo("");
       setDescripcionFondo("Fondo inicial de caja chica");
@@ -244,6 +285,19 @@ export default function CajaChicaPage() {
       return;
     }
 
+    const montoNumerico = Number(monto || 0);
+
+    if (montoNumerico > disponibleCajaChica) {
+      alert(
+        `No se puede registrar este gasto porque supera el fondo disponible de caja chica.\n\nDisponible: RD$ ${dinero(
+          disponibleCajaChica
+        )}\nMonto gasto: RD$ ${dinero(montoNumerico)}\nDiferencia: RD$ ${dinero(
+          montoNumerico - disponibleCajaChica
+        )}`
+      );
+      return;
+    }
+
     try {
       setGuardando(true);
 
@@ -259,11 +313,12 @@ export default function CajaChicaPage() {
           fecha,
           concepto,
           detalle_gasto: detalleGasto,
-          monto: Number(monto),
+          monto: montoNumerico,
           responsable,
           comprobante,
           factura_url: facturaUrl,
           estado: "registrado",
+          condominio_id: Number(condominioId),
         },
       ]);
 
@@ -299,420 +354,391 @@ export default function CajaChicaPage() {
     }
   }
 
-  const totalGastos = gastos.reduce(
-    (sum, g) => sum + Number(g.monto || 0),
-    0
-  );
-
-  const totalFondos = fondos.reduce(
-    (sum, f) => sum + Number(f.monto || 0),
-    0
-  );
-
+  const totalGastos = gastos.reduce((sum, g) => sum + Number(g.monto || 0), 0);
+  const totalFondos = fondos.reduce((sum, f) => sum + Number(f.monto || 0), 0);
   const disponibleCajaChica = totalFondos - totalGastos;
 
+  const ultimosGastos = useMemo(() => gastos.slice(0, 6), [gastos]);
+  const ultimoFondo = fondos[0];
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Caja Chica</h1>
-        <p className="text-slate-500">
-          Registro y control de fondos iniciales y gastos menores del
-          condominio activo.
-        </p>
-      </div>
+    <PageContainer>
+      <ModuleMenu
+        title="Caja Chica"
+        subtitle="Movimientos, fondos, balance y reportes."
+        tone="green"
+        items={[
+          { href: "/finanzas/caja-chica", label: "Dashboard", icon: BarChart3 },
+          { href: "/caja-chica", label: "Movimientos", icon: Coins },
+          { href: "/caja-chica/fondos", label: "Fondos", icon: BarChart3 },
+          { href: "/caja-chica/balance", label: "Balance", icon: BarChart3 },
+          { href: "/caja-chica/reporte", label: "Reportes", icon: FileSpreadsheet },
+        ]}
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Fondos registrados</p>
-          <h2 className="text-2xl font-bold">{fondos.length}</h2>
-        </div>
+      <ModuleToolbar
+        title="Movimiento de Caja Chica"
+        subtitle={`Registro rápido de gastos menores. Condominio: ${
+          condominio || "No seleccionado"
+        }.`}
+        icon={Coins}
+        actions={
+          <ModuleActions
+            onRefresh={refrescar}
+            extra={
+              <Link
+                href="/caja-chica/reporte"
+                className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Reporte
+              </Link>
+            }
+          />
+        }
+      />
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Total fondos</p>
-          <h2 className="text-2xl font-bold text-green-700">
-            RD$
-            {totalFondos.toLocaleString("es-DO", {
-              minimumFractionDigits: 2,
-            })}
-          </h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Total gastado</p>
-          <h2 className="text-2xl font-bold text-red-700">
-            RD$
-            {totalGastos.toLocaleString("es-DO", {
-              minimumFractionDigits: 2,
-            })}
-          </h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Disponible</p>
-          <h2
-            className={`text-2xl font-bold ${
-              disponibleCajaChica >= 0 ? "text-blue-700" : "text-red-700"
-            }`}
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <section className="xl:col-span-2">
+          <SectionCard
+            title="Registrar gasto"
+            subtitle="Formulario principal para uso diario."
+            action={
+              <div
+                className={`rounded-xl px-4 py-2 text-sm font-black ${
+                  disponibleCajaChica >= 0
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-red-50 text-red-700"
+                }`}
+              >
+                Disponible: RD$ {dinero(disponibleCajaChica)}
+              </div>
+            }
           >
-            RD$
-            {disponibleCajaChica.toLocaleString("es-DO", {
-              minimumFractionDigits: 2,
-            })}
-          </h2>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold mb-4">
-          Registrar fondo inicial de caja chica
-        </h2>
-
-        <form
-          onSubmit={guardarFondo}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Condominio *
-            </label>
-            <input
-              type="text"
-              value={condominio}
-              disabled
-              className="border rounded-lg px-3 py-2 w-full bg-slate-100 text-slate-700"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">Fecha *</label>
-            <input
-              type="date"
-              value={fechaFondo}
-              onChange={(e) => setFechaFondo(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Monto fondo inicial RD$ *
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              value={montoFondo}
-              onChange={(e) => setMontoFondo(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-              placeholder="0.00"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Responsable
-            </label>
-            <input
-              type="text"
-              value={responsableFondo}
-              onChange={(e) => setResponsableFondo(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-              placeholder="Persona responsable del fondo"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">
-              Descripción
-            </label>
-            <textarea
-              value={descripcionFondo}
-              onChange={(e) => setDescripcionFondo(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-              rows={2}
-              placeholder="Descripción del fondo inicial"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <button
-              type="submit"
-              disabled={guardandoFondo}
-              className="bg-green-700 text-white px-5 py-2 rounded-lg hover:bg-green-800 disabled:opacity-50"
+            <form
+              onSubmit={guardarGasto}
+              className="grid grid-cols-1 gap-4 md:grid-cols-2"
             >
-              {guardandoFondo ? "Guardando..." : "Guardar fondo inicial"}
-            </button>
-          </div>
-        </form>
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Fecha *</label>
+                <input
+                  type="date"
+                  value={fecha}
+                  onChange={(e) => setFecha(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Monto RD$ *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={monto}
+                  onChange={(e) => setMonto(e.target.value)}
+                  className={`w-full rounded-xl border px-4 py-3 ${
+                    Number(monto || 0) > disponibleCajaChica
+                      ? "border-red-300 bg-red-50"
+                      : ""
+                  }`}
+                  placeholder="0.00"
+                />
+
+                {Number(monto || 0) > disponibleCajaChica && (
+                  <div className="mt-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    <p className="font-black">Monto supera el fondo disponible</p>
+                    <p className="mt-1">
+                      Disponible: RD$ {dinero(disponibleCajaChica)} · Monto:
+                      RD$ {dinero(Number(monto || 0))} · Diferencia: RD${" "}
+                      {dinero(Number(monto || 0) - disponibleCajaChica)}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-semibold">Concepto *</label>
+                <input
+                  type="text"
+                  value={concepto}
+                  onChange={(e) => setConcepto(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Ej. Compra de bombillos, limpieza, materiales..."
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Responsable</label>
+                <input
+                  type="text"
+                  value={responsable}
+                  onChange={(e) => setResponsable(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Persona que realizó el gasto"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Comprobante / Factura
+                </label>
+                <input
+                  type="text"
+                  value={comprobante}
+                  onChange={(e) => setComprobante(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Número o referencia"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-semibold">
+                  Soporte del gasto
+                </label>
+                <input
+                  id="facturaArchivo"
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) => setFacturaArchivo(e.target.files?.[0] || null)}
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-semibold">
+                  Detalle
+                </label>
+                <textarea
+                  value={detalleGasto}
+                  onChange={(e) => setDetalleGasto(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  rows={3}
+                  placeholder="Detalle breve del gasto realizado"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <button
+                  type="submit"
+                  disabled={guardando}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {guardando ? "Guardando..." : "Guardar gasto"}
+                </button>
+              </div>
+            </form>
+          </SectionCard>
+        </section>
+
+        <section className="space-y-5">
+          <SectionCard
+            title="Registrar Fondo"
+            subtitle="Apertura inicial o reposición de caja chica."
+          >
+            <form onSubmit={guardarFondo} className="space-y-3">
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Tipo de fondo
+                </label>
+                <select
+                  value={tipoFondo}
+                  onChange={(e) => {
+                    const valor = e.target.value;
+                    setTipoFondo(valor);
+                    setDescripcionFondo(
+                      valor === "reposicion"
+                        ? "Reposición de caja chica"
+                        : "Fondo inicial de caja chica"
+                    );
+                  }}
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                >
+                  <option value="fondo_inicial">Fondo inicial</option>
+                  <option value="reposicion">Reposición</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Fecha</label>
+                <input
+                  type="date"
+                  value={fechaFondo}
+                  onChange={(e) => setFechaFondo(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Monto RD$
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={montoFondo}
+                  onChange={(e) => setMontoFondo(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Responsable
+                </label>
+                <input
+                  type="text"
+                  value={responsableFondo}
+                  onChange={(e) => setResponsableFondo(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Responsable del fondo"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Descripción
+                </label>
+                <textarea
+                  value={descripcionFondo}
+                  onChange={(e) => setDescripcionFondo(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  rows={2}
+                  placeholder="Ej. Reposición de caja chica, fondo inicial, ajuste de fondo..."
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={guardandoFondo}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+                {guardandoFondo
+                  ? "Guardando..."
+                  : tipoFondo === "reposicion"
+                  ? "Guardar reposición"
+                  : "Guardar fondo inicial"}
+              </button>
+            </form>
+          </SectionCard>
+
+          <SectionCard title="Resumen" subtitle="Estado actual de la caja.">
+            <div className="space-y-3">
+              <InfoLine label="Fondos" value={`RD$ ${dinero(totalFondos)}`} />
+              <InfoLine label="Gastado" value={`RD$ ${dinero(totalGastos)}`} />
+              <InfoLine
+                label="Disponible"
+                value={`RD$ ${dinero(disponibleCajaChica)}`}
+                highlight
+                danger={disponibleCajaChica < 0}
+              />
+              <InfoLine
+                label="Último fondo"
+                value={ultimoFondo ? fechaCorta(ultimoFondo.fecha) : "-"}
+              />
+            </div>
+          </SectionCard>
+        </section>
       </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold mb-4">
-          Fondos iniciales registrados
-        </h2>
-
-        <div className="overflow-auto border rounded-lg">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-100">
+      <SectionCard
+        title="Últimos gastos"
+        subtitle="Vista rápida. La consulta completa está en reportes."
+        action={
+          <Link
+            href="/caja-chica/reporte"
+            className="text-sm font-bold text-emerald-700 hover:underline"
+          >
+            Ver reporte
+          </Link>
+        }
+      >
+        {loading ? (
+          <p className="text-sm text-slate-500">Cargando registros...</p>
+        ) : ultimosGastos.length === 0 ? (
+          <EmptyState
+            title="Sin gastos"
+            description="No hay gastos registrados para este condominio."
+          />
+        ) : (
+          <DataTable>
+            <thead className="bg-slate-100 text-slate-600">
               <tr>
-                <th className="p-2 border">No.</th>
-                <th className="p-2 border">Fecha</th>
-                <th className="p-2 border">Condominio</th>
-                <th className="p-2 border">Monto</th>
-                <th className="p-2 border">Responsable</th>
-                <th className="p-2 border">Descripción</th>
-                <th className="p-2 border">Reporte</th>
+                <th className="px-4 py-3 text-left">Fecha</th>
+                <th className="px-4 py-3 text-left">Concepto</th>
+                <th className="px-4 py-3 text-left">Responsable</th>
+                <th className="px-4 py-3 text-right">Monto</th>
+                <th className="px-4 py-3 text-center">Factura</th>
               </tr>
             </thead>
 
-            <tbody>
-              {fondos.map((f) => (
-                <tr key={f.id}>
-                  <td className="p-2 border font-bold text-center">
-                    {String(f.numero_fondo || f.id).padStart(5, "0")}
+            <tbody className="divide-y divide-slate-200">
+              {ultimosGastos.map((g) => (
+                <tr key={g.id} className="bg-white hover:bg-slate-50">
+                  <td className="px-4 py-3">{fechaCorta(g.fecha)}</td>
+                  <td className="px-4 py-3">
+                    <p className="font-semibold">{g.concepto}</p>
+                    {g.detalle_gasto && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        {g.detalle_gasto}
+                      </p>
+                    )}
                   </td>
-                  <td className="p-2 border">{f.fecha}</td>
-                  <td className="p-2 border">{f.condominio}</td>
-                  <td className="p-2 border text-right">
-                    RD$
-                    {Number(f.monto).toLocaleString("es-DO", {
-                      minimumFractionDigits: 2,
-                    })}
+                  <td className="px-4 py-3">{g.responsable || "-"}</td>
+                  <td className="px-4 py-3 text-right font-black text-red-700">
+                    RD$ {dinero(g.monto)}
                   </td>
-                  <td className="p-2 border">{f.responsable || "-"}</td>
-                  <td className="p-2 border">{f.descripcion || "-"}</td>
-                  <td className="p-2 border text-center">
-                    <Link
-                      href={`/caja-chica/fondos/reporte/${f.id}`}
-                      className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-1 rounded-lg text-xs font-bold inline-block"
-                    >
-                      Reporte para firma
-                    </Link>
+                  <td className="px-4 py-3 text-center">
+                    {g.factura_url ? (
+                      <a
+                        href={g.factura_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block rounded-lg bg-slate-900 px-3 py-1 text-xs font-bold text-white"
+                      >
+                        Ver
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-400">Sin factura</span>
+                    )}
                   </td>
                 </tr>
               ))}
-
-              {fondos.length === 0 && (
-                <tr>
-                  <td className="p-4 border text-center" colSpan={7}>
-                    No hay fondos iniciales registrados para este condominio.
-                  </td>
-                </tr>
-              )}
             </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold mb-4">Registrar gasto de caja chica</h2>
-
-        <form
-          onSubmit={guardarGasto}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Condominio *
-            </label>
-            <input
-              type="text"
-              value={condominio}
-              disabled
-              className="border rounded-lg px-3 py-2 w-full bg-slate-100 text-slate-700"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">Fecha *</label>
-            <input
-              type="date"
-              value={fecha}
-              onChange={(e) => setFecha(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Monto RD$ *
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              value={monto}
-              onChange={(e) => setMonto(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-              placeholder="0.00"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Concepto *
-            </label>
-            <input
-              type="text"
-              value={concepto}
-              onChange={(e) => setConcepto(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-              placeholder="Ej. Compra de bombillos"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Responsable
-            </label>
-            <input
-              type="text"
-              value={responsable}
-              onChange={(e) => setResponsable(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-              placeholder="Persona que realizó el gasto"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Comprobante / Factura
-            </label>
-            <input
-              type="text"
-              value={comprobante}
-              onChange={(e) => setComprobante(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-              placeholder="No. factura o comprobante"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">
-              Subir factura del gasto
-            </label>
-            <input
-              id="facturaArchivo"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp"
-              onChange={(e) => setFacturaArchivo(e.target.files?.[0] || null)}
-              className="border rounded-lg px-3 py-2 w-full bg-white"
-            />
-            <p className="text-xs text-slate-500 mt-1">
-              Puede subir PDF o imagen de la factura.
-            </p>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">
-              Detalle del gasto
-            </label>
-            <textarea
-              value={detalleGasto}
-              onChange={(e) => setDetalleGasto(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-              rows={3}
-              placeholder="Describa el detalle del gasto realizado"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <button
-              type="submit"
-              disabled={guardando}
-              className="bg-blue-700 text-white px-5 py-2 rounded-lg hover:bg-blue-800 disabled:opacity-50"
-            >
-              {guardando ? "Guardando..." : "Guardar gasto"}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-xl font-bold">Detalle de gastos registrados</h2>
-            <p className="text-sm text-slate-500">
-              Mostrando solamente los gastos del condominio activo.
-            </p>
-          </div>
-        </div>
-
-        {loading ? (
-          <p>Cargando registros...</p>
-        ) : (
-          <div className="overflow-auto border rounded-lg">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="p-2 border">Condominio</th>
-                  <th className="p-2 border">Fecha</th>
-                  <th className="p-2 border">Concepto</th>
-                  <th className="p-2 border">Detalle</th>
-                  <th className="p-2 border">Monto</th>
-                  <th className="p-2 border">Responsable</th>
-                  <th className="p-2 border">Comprobante</th>
-                  <th className="p-2 border">Factura</th>
-                  <th className="p-2 border">Estado</th>
-                  <th className="p-2 border">Reporte</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {gastos.map((g) => (
-                  <tr key={g.id}>
-                    <td className="p-2 border font-semibold">
-                      {g.condominio}
-                    </td>
-                    <td className="p-2 border">{g.fecha}</td>
-                    <td className="p-2 border">{g.concepto}</td>
-                    <td className="p-2 border">{g.detalle_gasto}</td>
-                    <td className="p-2 border text-right">
-                      RD$
-                      {Number(g.monto).toLocaleString("es-DO", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td className="p-2 border">{g.responsable}</td>
-                    <td className="p-2 border">{g.comprobante}</td>
-                    <td className="p-2 border text-center">
-                      {g.factura_url ? (
-                        <a
-                          href={g.factura_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="bg-slate-900 text-white px-3 py-1 rounded-lg hover:bg-slate-800 inline-block"
-                        >
-                          Ver factura
-                        </a>
-                      ) : (
-                        <span className="text-slate-400">Sin factura</span>
-                      )}
-                    </td>
-                    <td className="p-2 border text-green-700 font-semibold">
-                      {g.estado}
-                    </td>
-                    <td className="p-2 border text-center">
-                      <Link
-                        href={`/caja-chica/gastos/reporte/${g.id}`}
-                        className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-1 rounded-lg text-xs font-bold inline-block"
-                      >
-                        Reporte para firma
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-
-                {gastos.length === 0 && (
-                  <tr>
-                    <td className="p-4 border text-center" colSpan={10}>
-                      No hay gastos registrados para este condominio.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          </DataTable>
         )}
-      </div>
+      </SectionCard>
+    </PageContainer>
+  );
+}
+
+function InfoLine({
+  label,
+  value,
+  highlight = false,
+  danger = false,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border bg-slate-50 px-4 py-3">
+      <span className="text-sm font-semibold text-slate-600">{label}</span>
+      <span
+        className={`text-sm font-black ${
+          danger
+            ? "text-red-700"
+            : highlight
+            ? "text-emerald-700"
+            : "text-slate-900"
+        }`}
+      >
+        {value}
+      </span>
     </div>
   );
 }

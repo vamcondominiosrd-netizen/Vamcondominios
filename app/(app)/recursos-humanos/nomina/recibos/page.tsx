@@ -9,42 +9,32 @@ type Nomina = {
   id: number;
   condominio_id: number;
   condominio: string;
-
   empleado_id: number;
   numero_empleado: string;
   nombre_empleado: string;
   cargo: string;
   departamento: string;
-
   periodo: string;
   fecha_pago: string;
-
   salario_base: number;
   dias_trabajados: number;
-
   horas_extras: number;
   monto_horas_extras: number;
   bonificacion: number;
-
   vacaciones_id: number | null;
   pago_vacaciones: number;
   dias_vacaciones: number;
-
   afp: number;
   sfs: number;
   isr: number;
   otros_descuentos: number;
-
   total_ingresos: number;
   total_descuentos: number;
   neto_pagar: number;
-
   estado: string;
   observacion: string;
-
   pagado_por: string;
   fecha_registro_pago: string;
-
   created_at: string;
 };
 
@@ -53,10 +43,8 @@ const estadosNomina = ["Todos", "Pendiente", "Aprobada", "Pagada", "Anulada"];
 export default function RecibosNominaPage() {
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
-
   const [nominas, setNominas] = useState<Nomina[]>([]);
   const [loading, setLoading] = useState(false);
-
   const [filtroPeriodo, setFiltroPeriodo] = useState(
     new Date().toISOString().slice(0, 7)
   );
@@ -70,9 +58,7 @@ export default function RecibosNominaPage() {
     setCondominioId(id);
     setCondominioNombre(nombre);
 
-    if (id) {
-      cargarRecibos(id, filtroPeriodo);
-    }
+    if (id) cargarRecibos(id, filtroPeriodo);
   }, []);
 
   async function cargarRecibos(id: string, periodoBuscar: string) {
@@ -84,9 +70,7 @@ export default function RecibosNominaPage() {
       .eq("condominio_id", Number(id))
       .order("created_at", { ascending: false });
 
-    if (periodoBuscar) {
-      query = query.eq("periodo", periodoBuscar);
-    }
+    if (periodoBuscar) query = query.eq("periodo", periodoBuscar);
 
     const { data, error } = await query;
 
@@ -112,14 +96,11 @@ export default function RecibosNominaPage() {
   }
 
   const recibosFiltrados = nominas.filter((item) => {
-    const texto = `${item.nombre_empleado || ""} ${
-      item.numero_empleado || ""
-    } ${item.cargo || ""} ${item.departamento || ""}`
-      .toLowerCase()
-      .trim();
+    const texto = `${item.nombre_empleado || ""} ${item.numero_empleado || ""} ${
+      item.cargo || ""
+    } ${item.departamento || ""}`.toLowerCase();
 
     const coincideBusqueda = texto.includes(busqueda.toLowerCase().trim());
-
     const coincideEstado =
       filtroEstado === "Todos" ? true : item.estado === filtroEstado;
 
@@ -149,96 +130,96 @@ export default function RecibosNominaPage() {
     (item) => item.estado === "Pendiente"
   ).length;
 
+  const inputClass =
+    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500";
+
+  const labelClass = "mb-1 block text-xs font-semibold text-slate-700";
+
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-7xl space-y-4 px-2 pb-6">
       <NominaMenu />
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-4xl font-black text-slate-900">
-          Recibos de Nómina
-        </h1>
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl font-black text-slate-900">
+              Recibos de Nómina
+            </h1>
+            <p className="text-sm text-slate-500">
+              Consulta, imprime y guarda los recibos de pago generados.
+            </p>
+          </div>
 
-        <p className="text-slate-500 mt-2">
-          Consulta, imprime y guarda los recibos de pago generados desde la
-          nómina.
-        </p>
+          <div className="rounded-lg bg-slate-100 px-3 py-2 text-sm">
+            <span className="text-slate-500">Condominio: </span>
+            <span className="font-bold text-slate-800">
+              {condominioNombre || "No identificado"}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <div className="bg-white rounded-2xl p-5 shadow-sm border">
-        <p className="text-sm text-slate-500">Condominio activo</p>
-
-        <h2 className="text-lg font-bold text-slate-900">
-          {condominioNombre || "No identificado"}
-        </h2>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Recibos</p>
-          <h2 className="text-3xl font-black">{recibosFiltrados.length}</h2>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <div className="rounded-xl border bg-white p-3 shadow-sm">
+          <p className="text-xs text-slate-500">Recibos</p>
+          <h2 className="text-2xl font-black">{recibosFiltrados.length}</h2>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Pagados</p>
-          <h2 className="text-3xl font-black text-green-700">
-            {totalPagados}
-          </h2>
+        <div className="rounded-xl border bg-white p-3 shadow-sm">
+          <p className="text-xs text-slate-500">Pagados</p>
+          <h2 className="text-2xl font-black text-green-700">{totalPagados}</h2>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Pendientes</p>
-          <h2 className="text-3xl font-black text-yellow-700">
+        <div className="rounded-xl border bg-white p-3 shadow-sm">
+          <p className="text-xs text-slate-500">Pendientes</p>
+          <h2 className="text-2xl font-black text-yellow-700">
             {totalPendientes}
           </h2>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Total descuentos</p>
-          <h2 className="text-2xl font-black text-red-700">
+        <div className="rounded-xl border bg-white p-3 shadow-sm">
+          <p className="text-xs text-slate-500">Descuentos</p>
+          <h2 className="text-xl font-black text-red-700">
             RD${moneda(totalDescuentos)}
           </h2>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Total neto</p>
-          <h2 className="text-2xl font-black text-blue-700">
+        <div className="rounded-xl border bg-white p-3 shadow-sm">
+          <p className="text-xs text-slate-500">Neto</p>
+          <h2 className="text-xl font-black text-blue-700">
             RD${moneda(totalNeto)}
           </h2>
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <h2 className="text-xl font-black">Buscar recibos</h2>
-
+            <h2 className="text-lg font-black text-slate-900">
+              Buscar recibos
+            </h2>
             <p className="text-sm text-slate-500">
-              Filtra los recibos por período, estado, empleado, cargo o
-              departamento.
+              Filtrar por período, estado, empleado, cargo o departamento.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 w-full md:w-auto">
+          <div className="grid w-full grid-cols-1 gap-3 md:w-auto md:grid-cols-4">
             <div>
-              <label className="block text-sm font-semibold mb-1">
-                Período
-              </label>
-
+              <label className={labelClass}>Período</label>
               <input
                 type="month"
                 value={filtroPeriodo}
                 onChange={(e) => setFiltroPeriodo(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full"
+                className={inputClass}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-semibold mb-1">Estado</label>
-
+              <label className={labelClass}>Estado</label>
               <select
                 value={filtroEstado}
                 onChange={(e) => setFiltroEstado(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full bg-white"
+                className={`${inputClass} bg-white`}
               >
                 {estadosNomina.map((item) => (
                   <option key={item} value={item}>
@@ -249,22 +230,19 @@ export default function RecibosNominaPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold mb-1">
-                Buscar empleado
-              </label>
-
+              <label className={labelClass}>Empleado</label>
               <input
                 value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full"
-                placeholder="Nombre, código, cargo..."
+                className={inputClass}
+                placeholder="Nombre, código..."
               />
             </div>
 
             <div className="flex items-end">
               <button
                 onClick={buscar}
-                className="bg-blue-700 hover:bg-blue-800 text-white px-5 py-3 rounded-xl font-bold w-full"
+                className="w-full rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800"
               >
                 Buscar
               </button>
@@ -273,14 +251,14 @@ export default function RecibosNominaPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-xl font-black">Listado de recibos</h2>
-
+            <h2 className="text-lg font-black text-slate-900">
+              Listado de recibos
+            </h2>
             <p className="text-sm text-slate-500">
-              Desde aquí puedes abrir cada recibo para imprimirlo o guardarlo en
-              PDF.
+              Abre cada recibo para imprimirlo o guardarlo en PDF.
             </p>
           </div>
 
@@ -293,55 +271,55 @@ export default function RecibosNominaPage() {
         </div>
 
         {loading ? (
-          <div>Cargando recibos...</div>
+          <div className="text-sm text-slate-500">Cargando recibos...</div>
         ) : (
           <div className="overflow-auto">
-            <table className="min-w-full text-sm">
+            <table className="min-w-full text-xs">
               <thead className="bg-slate-100">
                 <tr>
-                  <th className="p-3 border text-left">Empleado</th>
-                  <th className="p-3 border text-left">Período</th>
-                  <th className="p-3 border text-right">Ingresos</th>
-                  <th className="p-3 border text-right">Descuentos</th>
-                  <th className="p-3 border text-right">Neto</th>
-                  <th className="p-3 border text-center">Estado</th>
-                  <th className="p-3 border text-left">Fecha pago</th>
-                  <th className="p-3 border text-center">Acciones</th>
+                  <th className="border p-2 text-left">Empleado</th>
+                  <th className="border p-2 text-left">Período</th>
+                  <th className="border p-2 text-right">Ingresos</th>
+                  <th className="border p-2 text-right">Descuentos</th>
+                  <th className="border p-2 text-right">Neto</th>
+                  <th className="border p-2 text-center">Estado</th>
+                  <th className="border p-2 text-left">Fecha pago</th>
+                  <th className="border p-2 text-center">Acciones</th>
                 </tr>
               </thead>
 
               <tbody>
                 {recibosFiltrados.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="p-3 border">
+                    <td className="border p-2">
                       <p className="font-bold">{item.nombre_empleado}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-[11px] text-slate-500">
                         {item.numero_empleado || "-"} · {item.cargo || "-"}
                       </p>
                     </td>
 
-                    <td className="p-3 border">
+                    <td className="border p-2">
                       <p className="font-bold">{item.periodo}</p>
-                      <p className="text-xs text-slate-500">
-                        Recibo No. RH-{String(item.id).padStart(6, "0")}
+                      <p className="text-[11px] text-slate-500">
+                        RH-{String(item.id).padStart(6, "0")}
                       </p>
                     </td>
 
-                    <td className="p-3 border text-right font-bold text-green-700">
+                    <td className="border p-2 text-right font-bold text-green-700">
                       RD${moneda(item.total_ingresos)}
                     </td>
 
-                    <td className="p-3 border text-right font-bold text-red-700">
+                    <td className="border p-2 text-right font-bold text-red-700">
                       RD${moneda(item.total_descuentos)}
                     </td>
 
-                    <td className="p-3 border text-right font-black text-blue-700">
+                    <td className="border p-2 text-right font-black text-blue-700">
                       RD${moneda(item.neto_pagar)}
                     </td>
 
-                    <td className="p-3 border text-center">
+                    <td className="border p-2 text-center">
                       <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        className={`rounded-full px-2 py-1 text-[11px] font-bold ${
                           item.estado === "Pagada"
                             ? "bg-green-100 text-green-700"
                             : item.estado === "Aprobada"
@@ -355,25 +333,25 @@ export default function RecibosNominaPage() {
                       </span>
                     </td>
 
-                    <td className="p-3 border">
+                    <td className="border p-2">
                       <p>{item.fecha_pago || "-"}</p>
-                      <p className="text-xs text-slate-500">
-                        Pagado por: {item.pagado_por || "-"}
+                      <p className="text-[11px] text-slate-500">
+                        Por: {item.pagado_por || "-"}
                       </p>
                     </td>
 
-                    <td className="p-3 border">
-                      <div className="flex flex-wrap justify-center gap-2">
+                    <td className="border p-2">
+                      <div className="flex flex-wrap justify-center gap-1">
                         <Link
-                          href={`/recursos-humanos/nomina/recibo/${item.id}`}
-                          className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
+                          href={`/recursos-humanos/nomina/recibos/${item.id}`}
+                          className="rounded bg-purple-700 px-2 py-1 text-[11px] font-bold text-white hover:bg-purple-800"
                         >
                           Ver recibo
                         </Link>
 
                         <Link
                           href="/recursos-humanos/nomina"
-                          className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
+                          className="rounded bg-slate-700 px-2 py-1 text-[11px] font-bold text-white hover:bg-slate-800"
                         >
                           Nómina
                         </Link>
@@ -385,7 +363,7 @@ export default function RecibosNominaPage() {
                 {recibosFiltrados.length === 0 && (
                   <tr>
                     <td
-                      className="p-6 border text-center text-slate-500"
+                      className="border p-4 text-center text-slate-500"
                       colSpan={8}
                     >
                       No hay recibos registrados para esta consulta.
@@ -397,23 +375,19 @@ export default function RecibosNominaPage() {
               {recibosFiltrados.length > 0 && (
                 <tfoot className="bg-slate-100 font-black">
                   <tr>
-                    <td className="p-3 border" colSpan={2}>
+                    <td className="border p-2" colSpan={2}>
                       Totales
                     </td>
-
-                    <td className="p-3 border text-right text-green-700">
+                    <td className="border p-2 text-right text-green-700">
                       RD${moneda(totalIngresos)}
                     </td>
-
-                    <td className="p-3 border text-right text-red-700">
+                    <td className="border p-2 text-right text-red-700">
                       RD${moneda(totalDescuentos)}
                     </td>
-
-                    <td className="p-3 border text-right text-blue-700">
+                    <td className="border p-2 text-right text-blue-700">
                       RD${moneda(totalNeto)}
                     </td>
-
-                    <td className="p-3 border" colSpan={3}></td>
+                    <td className="border p-2" colSpan={3}></td>
                   </tr>
                 </tfoot>
               )}

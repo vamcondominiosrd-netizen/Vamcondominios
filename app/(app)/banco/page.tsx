@@ -2,172 +2,206 @@
 
 import Link from "next/link";
 import {
-  Upload,
-  SearchCheck,
-  WalletCards,
+  AlertTriangle,
+  BarChart3,
   FileSpreadsheet,
   Landmark,
-  ArrowRight,
+  SearchCheck,
+  Upload,
+  WalletCards,
 } from "lucide-react";
 
-type ModuloBanco = {
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import ModuleActions from "@/components/vam/enterprise/ModuleActions";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import StatCard from "@/components/vam/enterprise/StatCard";
+
+type AccesoBanco = {
   titulo: string;
   descripcion: string;
   href: string;
   icono: any;
-  fondo: string;
-  iconoColor: string;
 };
 
+const accesosBanco: AccesoBanco[] = [
+  {
+    titulo: "Importar Banco",
+    descripcion: "Subir archivo bancario del período para procesar transacciones.",
+    href: "/archivo-banco/importar",
+    icono: Upload,
+  },
+  {
+    titulo: "Identificar Pagos",
+    descripcion: "Relacionar transacciones bancarias con unidades y propietarios.",
+    href: "/archivo-banco/identificar",
+    icono: SearchCheck,
+  },
+  {
+    titulo: "Pagos Identificados",
+    descripcion: "Consultar pagos reconocidos desde el archivo del banco.",
+    href: "/pagos-identificados",
+    icono: WalletCards,
+  },
+  {
+    titulo: "Alias Apartamentos",
+    descripcion: "Administrar nombres usados por el banco para identificar unidades.",
+    href: "/apartamento-banco-alias/importar",
+    icono: FileSpreadsheet,
+  },
+  {
+    titulo: "Archivo Banco Identificados",
+    descripcion: "Subir Archivo del Banco con los Pagos Identificados.",
+    href: "/archivo-banco/importar-banco-identificado",
+    icono: SearchCheck,
+  },
+];
+
 export default function BancoPage() {
-  const modulos: ModuloBanco[] = [
-    {
-      titulo: "Importar Banco",
-      descripcion:
-        "Subir el archivo bancario del período para procesar transacciones.",
-      href: "/archivo-banco/importar",
-      icono: Upload,
-      fondo: "from-blue-600 to-blue-800",
-      iconoColor: "text-blue-700",
-    },
-    {
-      titulo: "Identificar Pagos",
-      descripcion:
-        "Relacionar transacciones bancarias con apartamentos y propietarios.",
-      href: "/archivo-banco/identificar",
-      icono: SearchCheck,
-      fondo: "from-emerald-600 to-emerald-800",
-      iconoColor: "text-emerald-700",
-    },
-    {
-      titulo: "Pagos Identificados",
-      descripcion:
-        "Consultar pagos ya reconocidos desde el archivo del banco.",
-      href: "/pagos-identificados",
-      icono: WalletCards,
-      fondo: "from-purple-600 to-purple-800",
-      iconoColor: "text-purple-700",
-    },
-    {
-      titulo: "Alias Apartamentos",
-      descripcion:
-        "Importar o administrar nombres usados por el banco para identificar apartamentos.",
-      href: "/apartamento-banco-alias/importar",
-      icono: FileSpreadsheet,
-      fondo: "from-amber-500 to-orange-700",
-      iconoColor: "text-amber-700",
-    },
-  ];
-
   return (
-    <main className="space-y-5">
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">
-              Módulo
-            </p>
+    <PageContainer>
+      <ModuleMenu
+        title="Banco"
+        subtitle="Importaciones, identificación de pagos, pagos identificados y alias."
+        tone="green"
+        items={[
+          { href: "/banco", label: "Dashboard", icon: BarChart3 },
+          { href: "/archivo-banco/importar", label: "Importar Banco", icon: Upload },
+          { href: "/archivo-banco/identificar", label: "Identificar", icon: SearchCheck },
+          { href: "/pagos-identificados", label: "Identificados", icon: WalletCards },
+          { href: "/apartamento-banco-alias/importar", label: "Alias", icon: FileSpreadsheet },
+          { href: "/archivo-banco/importar-banco-identificado", label: "Archivo Banco Identificados", icon: SearchCheck },
+        ]}
+      />
 
-            <h1 className="text-2xl md:text-3xl font-black text-slate-900 mt-1">
-              Banco
-            </h1>
+      <ModuleToolbar
+        title="Dashboard Banco"
+        subtitle="Centro operativo para importación bancaria, identificación de pagos y mantenimiento de alias."
+        icon={Landmark}
+        actions={
+          <ModuleActions
+            extra={
+              <>
+                <Link
+                  href="/archivo-banco/importar"
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800"
+                >
+                  <Upload className="h-4 w-4" />
+                  Importar banco
+                </Link>
 
-            <p className="text-sm text-slate-500 mt-2 max-w-3xl">
-              Administre la importación bancaria, identificación de pagos,
-              conciliación básica y alias de apartamentos del condominio activo.
-            </p>
-          </div>
+                <Link
+                  href="/archivo-banco/identificar"
+                  className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  <SearchCheck className="h-4 w-4" />
+                  Identificar pagos
+                </Link>
+              </>
+            }
+          />
+        }
+      />
 
-          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-indigo-600 to-slate-900 flex items-center justify-center shadow-lg">
-            <Landmark className="h-9 w-9 text-white" />
-          </div>
-        </div>
-      </section>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard
+          title="Paso 1"
+          value="Importar"
+          subtitle="Archivo bancario"
+          icon={Upload}
+          tone="blue"
+        />
 
-      <section className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="mb-5">
-          <h2 className="text-lg font-bold text-slate-900">
-            Opciones de Banco
-          </h2>
+        <StatCard
+          title="Paso 2"
+          value="Identificar"
+          subtitle="Unidades y propietarios"
+          icon={SearchCheck}
+          tone="green"
+        />
 
-          <p className="text-sm text-slate-500 mt-1">
-            Seleccione una opción para continuar trabajando.
-          </p>
-        </div>
+        <StatCard
+          title="Paso 3"
+          value="Confirmar"
+          subtitle="Pagos identificados"
+          icon={WalletCards}
+          tone="amber"
+        />
 
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-4">
-          {modulos.map((modulo) => {
-            const Icono = modulo.icono;
+        <StatCard
+          title="Paso 4"
+          value="Alias"
+          subtitle="Nombres bancarios"
+          icon={FileSpreadsheet}
+          tone="slate"
+        />
+
+         <StatCard
+          title="Paso 5"
+          value="Archivo Banco"
+          subtitle="Archivo Banco identificados"
+          icon={WalletCards}
+          tone="amber"
+        />
+
+      </div>
+
+      <SectionCard
+        title="Opciones de Banco"
+        subtitle="Seleccione una opción para continuar el flujo bancario."
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-4">
+          {accesosBanco.map((item) => {
+            const Icon = item.icono || Landmark;
 
             return (
               <Link
-                key={modulo.href}
-                href={modulo.href}
-                className="group rounded-2xl border bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition overflow-hidden"
+                key={item.href}
+                href={item.href}
+                className="group rounded-2xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg"
               >
-                <div
-                  className={`h-20 bg-gradient-to-br ${modulo.fondo} flex items-center justify-center relative`}
-                >
-                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top_right,_white,_transparent_35%)]" />
-
-                  <div className="h-14 w-14 rounded-2xl bg-white/95 flex items-center justify-center shadow-md relative z-10 group-hover:scale-105 transition">
-                    <Icono className={`h-8 w-8 ${modulo.iconoColor}`} />
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 group-hover:bg-emerald-700 group-hover:text-white">
+                    <Icon className="h-5 w-5" />
                   </div>
-                </div>
 
-                <div className="p-4">
-                  <h3 className="font-black text-slate-900 text-base group-hover:text-indigo-700">
-                    {modulo.titulo}
-                  </h3>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-black text-slate-900 group-hover:text-emerald-700">
+                      {item.titulo}
+                    </h3>
 
-                  <p className="text-xs text-slate-500 mt-2 min-h-[54px] leading-relaxed">
-                    {modulo.descripcion}
-                  </p>
+                    <p className="mt-1 min-h-[40px] text-xs leading-relaxed text-slate-500">
+                      {item.descripcion}
+                    </p>
 
-                  <div className="mt-3 flex items-center justify-between text-xs font-bold text-indigo-700">
-                    <span>Abrir módulo</span>
-                    <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition" />
+                    <p className="mt-3 text-xs font-bold text-emerald-700">
+                      Abrir módulo →
+                    </p>
                   </div>
                 </div>
               </Link>
             );
           })}
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="bg-slate-900 text-white rounded-2xl border border-slate-800 shadow-sm p-5">
-        <h2 className="text-lg font-bold">Flujo recomendado Banco</h2>
+      <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-900">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5" />
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4 text-sm">
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-indigo-300 font-bold">1. Importar</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Subir el archivo del banco del período.
-            </p>
-          </div>
+          <div>
+            <h3 className="font-black">Flujo recomendado Banco</h3>
 
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-indigo-300 font-bold">2. Identificar</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Asociar transacciones con apartamentos.
-            </p>
-          </div>
-
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-indigo-300 font-bold">3. Confirmar</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Revisar pagos identificados antes de aplicarlos.
-            </p>
-          </div>
-
-          <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-indigo-300 font-bold">4. Alias</p>
-            <p className="text-slate-300 mt-1 text-xs">
-              Mantener nombres de apartamentos usados por el banco.
+            <p className="mt-1 text-sm">
+              Primero importe el archivo bancario, luego identifique las
+              transacciones con sus unidades, revise los pagos identificados y
+              mantenga actualizado el catálogo de alias para mejorar la
+              identificación automática.
             </p>
           </div>
         </div>
       </section>
-    </main>
+    </PageContainer>
   );
 }

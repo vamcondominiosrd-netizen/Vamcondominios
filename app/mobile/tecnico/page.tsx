@@ -1,5 +1,5 @@
 "use client";
-
+import RequireAuth from "@/app/components/RequireAuth";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
@@ -76,6 +76,7 @@ export default function MenuTecnicoVAMPage() {
   ];
 
   return (
+   <RequireAuth allowedRoles={["tecnico"]} redirectTo="/mobile/tecnico/login">
     <main className="min-h-screen bg-slate-100 p-4">
       <div className="mx-auto max-w-md space-y-4">
         <section className="rounded-3xl bg-white border shadow-sm p-5">
@@ -185,5 +186,6 @@ export default function MenuTecnicoVAMPage() {
         </section>
       </div>
     </main>
+  </RequireAuth>
   );
 }

@@ -17,6 +17,7 @@ type PagoRecibo = {
   correo: string | null;
   fecha_pago: string | null;
   mes_pagado: string | null;
+  periodo?: string | null;
   monto_pagado: number | null;
   metodo_pago: string | null;
   no_referencia: string | null;
@@ -70,6 +71,7 @@ type PagoTablaPagos = {
   origen: string | null;
   tipo_fondo: string | null;
   descripcion: string | null;
+  periodo?: string | null;
   comprobante_url: string | null;
   created_at: string | null;
   unidades: {
@@ -144,6 +146,36 @@ export default function ReciboPagoPage() {
     return fecha;
   }
 
+
+
+  function formatearPeriodo(periodo?: string | null) {
+    if (!periodo) return "";
+
+    const [anioTexto, mesTexto] = String(periodo).trim().split("-");
+    const anio = Number(anioTexto);
+    const mes = Number(mesTexto);
+
+    if (!anio || !mes || mes < 1 || mes > 12) return String(periodo);
+
+    return `${MESES_NOMBRES[mes]} ${anio}`;
+  }
+
+  function formatearPeriodos(periodos?: string | null) {
+    if (!periodos) return "";
+
+    return String(periodos)
+      .split(",")
+      .map((p) => formatearPeriodo(p.trim()))
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  function extraerMesDesdeDescripcion(descripcion?: string | null) {
+    const texto = String(descripcion || "");
+    const match = texto.match(/Pago mantenimiento\s+(.+?)(?:\s+-\s+Unidad|$)/i);
+    return match?.[1]?.trim() || "";
+  }
+
   function fechaHoy() {
     const hoy = new Date();
     const day = String(hoy.getDate()).padStart(2, "0");
@@ -184,7 +216,7 @@ export default function ReciboPagoPage() {
     }
 
     if (tipo === "mantenimiento") {
-      await cargarReciboMantenimiento();
+      await cargarReciboDesdeTablaPagos();
       return;
     }
 
@@ -247,6 +279,7 @@ export default function ReciboPagoPage() {
         origen,
         tipo_fondo,
         descripcion,
+        periodo,
         comprobante_url,
         created_at,
         unidades (
@@ -279,7 +312,7 @@ export default function ReciboPagoPage() {
 
     const pagoNormalizado: PagoRecibo = {
       id: pagoTabla.id,
-      tipo_recibo: "pagos",
+      tipo_recibo: tipo === "mantenimiento" ? "mantenimiento" : "pagos",
       condominio: nombreCondominio,
       condominio_id: pagoTabla.condominio_id,
       unidad_id: pagoTabla.unidad_id,
@@ -289,7 +322,11 @@ export default function ReciboPagoPage() {
       telefono: pagoTabla.unidades?.propietario_telefono || null,
       correo: null,
       fecha_pago: pagoTabla.fecha_pago,
-      mes_pagado: "Aplicado automáticamente a cargos pendientes",
+      mes_pagado:
+        formatearPeriodos((pagoTabla as any).periodo) ||
+        extraerMesDesdeDescripcion(pagoTabla.descripcion) ||
+        "-",
+      periodo: (pagoTabla as any).periodo || null,
       monto_pagado: pagoTabla.monto,
       metodo_pago: pagoTabla.metodo_pago || pagoTabla.metodo || "-",
       no_referencia: pagoTabla.referencia,

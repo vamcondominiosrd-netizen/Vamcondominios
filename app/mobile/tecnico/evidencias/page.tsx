@@ -1,5 +1,5 @@
 "use client";
-
+import RequireAuth from "@/app/components/RequireAuth";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -250,6 +250,7 @@ export default function MobileTecnicoEvidenciasPage() {
   }, [evidencias, filtroTipo, buscar]);
 
   return (
+  <RequireAuth allowedRoles={["tecnico"]} redirectTo="/mobile/tecnico/login">
     <main className="min-h-screen bg-slate-100 p-4">
       <div className="mx-auto max-w-md space-y-4">
         <section className="rounded-3xl bg-white border shadow-sm p-5">
@@ -496,5 +497,6 @@ export default function MobileTecnicoEvidenciasPage() {
         </section>
       </div>
     </main>
+  </RequireAuth>
   );
 }

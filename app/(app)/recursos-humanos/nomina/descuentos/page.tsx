@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { supabase } from "@/app/lib/supabaseClient";
 import NominaMenu from "../NominaMenu";
 
@@ -19,7 +18,6 @@ type TipoDescuento = {
 export default function CatalogoDescuentosNominaPage() {
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
-
   const [descuentos, setDescuentos] = useState<TipoDescuento[]>([]);
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -29,7 +27,6 @@ export default function CatalogoDescuentosNominaPage() {
   const [descripcion, setDescripcion] = useState("");
   const [aplicaRecurrente, setAplicaRecurrente] = useState(false);
   const [estado, setEstado] = useState("Activo");
-
   const [filtroEstado, setFiltroEstado] = useState("Todos");
 
   useEffect(() => {
@@ -39,9 +36,7 @@ export default function CatalogoDescuentosNominaPage() {
     setCondominioId(id);
     setCondominioNombre(nombreCondominio);
 
-    if (id) {
-      cargarDescuentos(id);
-    }
+    if (id) cargarDescuentos(id);
   }, []);
 
   async function cargarDescuentos(id: string) {
@@ -77,7 +72,6 @@ export default function CatalogoDescuentosNominaPage() {
     setDescripcion(descuento.descripcion || "");
     setAplicaRecurrente(Boolean(descuento.aplica_recurrente));
     setEstado(descuento.estado || "Activo");
-
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -153,10 +147,7 @@ export default function CatalogoDescuentosNominaPage() {
   }
 
   async function cambiarEstado(descuento: TipoDescuento, nuevoEstado: string) {
-    const confirmar = confirm(
-      `¿Desea cambiar este descuento a "${nuevoEstado}"?`
-    );
-
+    const confirmar = confirm(`¿Desea cambiar este descuento a "${nuevoEstado}"?`);
     if (!confirmar) return;
 
     const { error } = await supabase
@@ -202,129 +193,119 @@ export default function CatalogoDescuentosNominaPage() {
   });
 
   const activos = descuentos.filter((item) => item.estado === "Activo").length;
-  const inactivos = descuentos.filter(
-    (item) => item.estado === "Inactivo"
-  ).length;
+  const inactivos = descuentos.filter((item) => item.estado === "Inactivo").length;
   const recurrentes = descuentos.filter((item) => item.aplica_recurrente).length;
 
+  const inputClass =
+    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500";
+
+  const labelClass = "mb-1 block text-xs font-semibold text-slate-700";
+
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-7xl space-y-4 px-2 pb-6">
       <NominaMenu />
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-4xl font-black text-slate-900">
-          Catálogo de Descuentos
-        </h1>
-
-        <p className="text-slate-500 mt-2">
-          Registra y administra los tipos de descuentos utilizados en la nómina.
-        </p>
-      </div>
-
-      <div className="bg-white rounded-2xl p-5 shadow-sm border">
-        <p className="text-sm text-slate-500">Condominio activo</p>
-
-        <h2 className="text-lg font-bold text-slate-900">
-          {condominioNombre || "No identificado"}
-        </h2>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Total descuentos</p>
-          <h2 className="text-3xl font-black">{descuentos.length}</h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Activos</p>
-          <h2 className="text-3xl font-black text-green-700">{activos}</h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Inactivos</p>
-          <h2 className="text-3xl font-black text-red-700">{inactivos}</h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Recurrentes</p>
-          <h2 className="text-3xl font-black text-blue-700">{recurrentes}</h2>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h2 className="text-xl font-black mb-4">
-          {editandoId ? "Modificar descuento" : "Registrar descuento"}
-        </h2>
-
-        <form
-          onSubmit={guardarDescuento}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <label className="block text-sm font-semibold mb-1">
-              Nombre del descuento *
-            </label>
-
-            <input
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="Ej. Préstamo empleado"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">Estado</label>
-
-            <select
-              value={estado}
-              onChange={(e) => setEstado(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
-            >
-              <option value="Activo">Activo</option>
-              <option value="Inactivo">Inactivo</option>
-            </select>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="flex items-center gap-3 bg-slate-50 border rounded-xl px-4 py-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={aplicaRecurrente}
-                onChange={(e) => setAplicaRecurrente(e.target.checked)}
-                className="h-5 w-5"
-              />
-
-              <span className="font-semibold">
-                Este descuento puede ser recurrente
-              </span>
-            </label>
-
-            <p className="text-xs text-slate-500 mt-1">
-              Ejemplo: préstamos, cooperativa, acuerdos de pago o descuentos
-              periódicos.
+            <h1 className="text-2xl font-black text-slate-900">
+              Catálogo de Descuentos
+            </h1>
+            <p className="text-sm text-slate-500">
+              Tipos de descuentos utilizados en la nómina.
             </p>
           </div>
 
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">
-              Descripción
-            </label>
+          <div className="rounded-lg bg-slate-100 px-3 py-2 text-sm">
+            <span className="text-slate-500">Condominio: </span>
+            <span className="font-bold text-slate-800">
+              {condominioNombre || "No identificado"}
+            </span>
+          </div>
+        </div>
+      </div>
 
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="rounded-xl border bg-white p-3 shadow-sm">
+          <p className="text-xs text-slate-500">Total</p>
+          <h2 className="text-2xl font-black">{descuentos.length}</h2>
+        </div>
+
+        <div className="rounded-xl border bg-white p-3 shadow-sm">
+          <p className="text-xs text-slate-500">Activos</p>
+          <h2 className="text-2xl font-black text-green-700">{activos}</h2>
+        </div>
+
+        <div className="rounded-xl border bg-white p-3 shadow-sm">
+          <p className="text-xs text-slate-500">Inactivos</p>
+          <h2 className="text-2xl font-black text-red-700">{inactivos}</h2>
+        </div>
+
+        <div className="rounded-xl border bg-white p-3 shadow-sm">
+          <p className="text-xs text-slate-500">Recurrentes</p>
+          <h2 className="text-2xl font-black text-blue-700">{recurrentes}</h2>
+        </div>
+      </div>
+
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <h2 className="mb-4 text-lg font-black text-slate-900">
+          {editandoId ? "Modificar descuento" : "Registrar descuento"}
+        </h2>
+
+        <form onSubmit={guardarDescuento} className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div className="md:col-span-2">
+              <label className={labelClass}>Nombre del descuento *</label>
+              <input
+                value={nombre}
+                onChange={(e) => setNombre(e.target.value)}
+                className={inputClass}
+                placeholder="Ej. Préstamo empleado"
+              />
+            </div>
+
+            <div>
+              <label className={labelClass}>Estado</label>
+              <select
+                value={estado}
+                onChange={(e) => setEstado(e.target.value)}
+                className={`${inputClass} bg-white`}
+              >
+                <option value="Activo">Activo</option>
+                <option value="Inactivo">Inactivo</option>
+              </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>Recurrente</label>
+              <label className="flex h-[38px] cursor-pointer items-center gap-2 rounded-lg border bg-slate-50 px-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={aplicaRecurrente}
+                  onChange={(e) => setAplicaRecurrente(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <span className="font-semibold text-slate-700">Sí aplica</span>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label className={labelClass}>Descripción</label>
             <textarea
               value={descripcion}
               onChange={(e) => setDescripcion(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              rows={3}
+              className={inputClass}
+              rows={2}
               placeholder="Detalle o política de uso de este descuento"
             />
           </div>
 
-          <div className="md:col-span-2 flex flex-col md:flex-row gap-3">
+          <div className="flex flex-col gap-2 md:flex-row">
             <button
               type="submit"
               disabled={guardando}
-              className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white px-5 py-3 rounded-xl font-bold"
+              className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800 disabled:bg-slate-400"
             >
               {guardando
                 ? "Guardando..."
@@ -337,7 +318,7 @@ export default function CatalogoDescuentosNominaPage() {
               <button
                 type="button"
                 onClick={limpiarFormulario}
-                className="bg-slate-600 hover:bg-slate-700 text-white px-5 py-3 rounded-xl font-bold"
+                className="rounded-lg bg-slate-600 px-4 py-2 text-sm font-bold text-white hover:bg-slate-700"
               >
                 Cancelar edición
               </button>
@@ -346,24 +327,23 @@ export default function CatalogoDescuentosNominaPage() {
         </form>
       </div>
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <h2 className="text-xl font-black">Listado de descuentos</h2>
-
+            <h2 className="text-lg font-black text-slate-900">
+              Listado de descuentos
+            </h2>
             <p className="text-sm text-slate-500">
-              Catálogo disponible para aplicar descuentos estructurados en la
-              nómina.
+              Catálogo disponible para aplicar descuentos estructurados.
             </p>
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">Estado</label>
-
+          <div className="w-full md:w-48">
+            <label className={labelClass}>Estado</label>
             <select
               value={filtroEstado}
               onChange={(e) => setFiltroEstado(e.target.value)}
-              className="border rounded-xl px-4 py-2 bg-white"
+              className={`${inputClass} bg-white`}
             >
               <option value="Todos">Todos</option>
               <option value="Activo">Activo</option>
@@ -373,32 +353,30 @@ export default function CatalogoDescuentosNominaPage() {
         </div>
 
         {loading ? (
-          <div>Cargando descuentos...</div>
+          <div className="text-sm text-slate-500">Cargando descuentos...</div>
         ) : (
           <div className="overflow-auto">
-            <table className="min-w-full text-sm">
+            <table className="min-w-full text-xs">
               <thead className="bg-slate-100">
                 <tr>
-                  <th className="p-3 border text-left">Descuento</th>
-                  <th className="p-3 border text-left">Descripción</th>
-                  <th className="p-3 border text-center">Recurrente</th>
-                  <th className="p-3 border text-center">Estado</th>
-                  <th className="p-3 border text-center">Acciones</th>
+                  <th className="border p-2 text-left">Descuento</th>
+                  <th className="border p-2 text-left">Descripción</th>
+                  <th className="border p-2 text-center">Recurrente</th>
+                  <th className="border p-2 text-center">Estado</th>
+                  <th className="border p-2 text-center">Acciones</th>
                 </tr>
               </thead>
 
               <tbody>
                 {descuentosFiltrados.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="p-3 border">
-                      <p className="font-bold">{item.nombre}</p>
-                    </td>
+                    <td className="border p-2 font-bold">{item.nombre}</td>
 
-                    <td className="p-3 border">{item.descripcion || "-"}</td>
+                    <td className="border p-2">{item.descripcion || "-"}</td>
 
-                    <td className="p-3 border text-center">
+                    <td className="border p-2 text-center">
                       <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        className={`rounded-full px-2 py-1 text-[11px] font-bold ${
                           item.aplica_recurrente
                             ? "bg-blue-100 text-blue-700"
                             : "bg-slate-100 text-slate-700"
@@ -408,9 +386,9 @@ export default function CatalogoDescuentosNominaPage() {
                       </span>
                     </td>
 
-                    <td className="p-3 border text-center">
+                    <td className="border p-2 text-center">
                       <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        className={`rounded-full px-2 py-1 text-[11px] font-bold ${
                           item.estado === "Activo"
                             ? "bg-green-100 text-green-700"
                             : "bg-red-100 text-red-700"
@@ -420,11 +398,11 @@ export default function CatalogoDescuentosNominaPage() {
                       </span>
                     </td>
 
-                    <td className="p-3 border">
-                      <div className="flex flex-wrap justify-center gap-2">
+                    <td className="border p-2">
+                      <div className="flex flex-wrap justify-center gap-1">
                         <button
                           onClick={() => editarDescuento(item)}
-                          className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
+                          className="rounded bg-slate-700 px-2 py-1 text-[11px] font-bold text-white hover:bg-slate-800"
                         >
                           Editar
                         </button>
@@ -432,14 +410,14 @@ export default function CatalogoDescuentosNominaPage() {
                         {item.estado !== "Activo" ? (
                           <button
                             onClick={() => cambiarEstado(item, "Activo")}
-                            className="bg-green-700 hover:bg-green-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
+                            className="rounded bg-green-700 px-2 py-1 text-[11px] font-bold text-white hover:bg-green-800"
                           >
                             Activar
                           </button>
                         ) : (
                           <button
                             onClick={() => cambiarEstado(item, "Inactivo")}
-                            className="bg-yellow-700 hover:bg-yellow-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
+                            className="rounded bg-yellow-700 px-2 py-1 text-[11px] font-bold text-white hover:bg-yellow-800"
                           >
                             Inactivar
                           </button>
@@ -447,7 +425,7 @@ export default function CatalogoDescuentosNominaPage() {
 
                         <button
                           onClick={() => eliminarDescuento(item)}
-                          className="bg-red-700 hover:bg-red-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
+                          className="rounded bg-red-700 px-2 py-1 text-[11px] font-bold text-white hover:bg-red-800"
                         >
                           Eliminar
                         </button>
@@ -459,7 +437,7 @@ export default function CatalogoDescuentosNominaPage() {
                 {descuentosFiltrados.length === 0 && (
                   <tr>
                     <td
-                      className="p-6 border text-center text-slate-500"
+                      className="border p-4 text-center text-slate-500"
                       colSpan={5}
                     >
                       No hay descuentos registrados.

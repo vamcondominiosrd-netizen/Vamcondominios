@@ -43,6 +43,19 @@ type TipoDescuento = {
   estado: string;
 };
 
+type TipoNomina = {
+  id: number;
+  codigo: string;
+  nombre: string;
+  frecuencia_pago: string;
+  requiere_afp: boolean;
+  requiere_sfs: boolean;
+  requiere_isr: boolean;
+  requiere_tss: boolean;
+  es_predeterminada: boolean;
+  estado: string;
+};
+
 type DescuentoNomina = {
   id?: number;
   tipo_descuento_id: number;
@@ -79,6 +92,8 @@ type Nomina = {
   nombre_empleado: string;
   cargo: string;
   departamento: string;
+  tipo_nomina_id: number | null;
+  tipo_nomina: string;
   periodo: string;
   fecha_pago: string;
   salario_base: number;
@@ -100,6 +115,10 @@ type Nomina = {
   observacion: string;
   pagado_por: string;
   fecha_registro_pago: string;
+  gasto_id: number | null;
+  gasto_generado: boolean;
+  solicitud_pago_id: number | null;
+  solicitud_pago_generada: boolean;
   created_at: string;
 };
 
@@ -115,6 +134,7 @@ export default function NominaPage() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [nominas, setNominas] = useState<Nomina[]>([]);
   const [tiposDescuentos, setTiposDescuentos] = useState<TipoDescuento[]>([]);
+  const [tiposNomina, setTiposNomina] = useState<TipoNomina[]>([]);
   const [descuentosNomina, setDescuentosNomina] = useState<DescuentoNomina[]>(
     []
   );
@@ -126,8 +146,11 @@ export default function NominaPage() {
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [mostrarFormulario, setMostrarFormulario] = useState(false);
 
   const [empleadoId, setEmpleadoId] = useState("");
+  const [tipoNominaId, setTipoNominaId] = useState("");
+  const [tipoNomina, setTipoNomina] = useState("");
   const [periodo, setPeriodo] = useState(new Date().toISOString().slice(0, 7));
   const [fechaPago, setFechaPago] = useState("");
 
@@ -166,6 +189,7 @@ export default function NominaPage() {
     if (id) {
       cargarConfiguracionNomina(id);
       cargarEmpleados(id);
+      cargarTiposNomina(id);
       cargarTiposDescuentos(id);
       cargarNominas(id, filtroPeriodo);
     }
@@ -219,6 +243,33 @@ export default function NominaPage() {
     }
 
     setTiposDescuentos((data as TipoDescuento[]) || []);
+  }
+
+  async function cargarTiposNomina(id: string) {
+    const { data, error } = await supabase
+      .from("rh_tipos_nomina")
+      .select(
+        "id, codigo, nombre, frecuencia_pago, requiere_afp, requiere_sfs, requiere_isr, requiere_tss, es_predeterminada, estado"
+      )
+      .eq("condominio_id", Number(id))
+      .eq("estado", "Activo")
+      .order("orden", { ascending: true })
+      .order("nombre", { ascending: true });
+
+    if (error) {
+      alert("Error cargando tipos de nómina: " + error.message);
+      return;
+    }
+
+    const registros = (data as TipoNomina[]) || [];
+    setTiposNomina(registros);
+
+    const predeterminada = registros.find((item) => item.es_predeterminada);
+
+    if (predeterminada) {
+      setTipoNominaId(String(predeterminada.id));
+      setTipoNomina(predeterminada.nombre);
+    }
   }
 
   async function cargarNominas(id: string, periodoBuscar: string) {
@@ -320,8 +371,16 @@ export default function NominaPage() {
     );
   }
 
+  function obtenerTipoNominaSeleccionado() {
+    return tiposNomina.find((item) => String(item.id) === tipoNominaId) || null;
+  }
+
   function calcularAFP() {
     if (!configNomina) return 0;
+
+    const tipoSeleccionado = obtenerTipoNominaSeleccionado();
+
+    if (tipoSeleccionado && !tipoSeleccionado.requiere_afp) return 0;
 
     return (
       calcularSalarioBruto() *
@@ -332,6 +391,10 @@ export default function NominaPage() {
   function calcularSFS() {
     if (!configNomina) return 0;
 
+    const tipoSeleccionado = obtenerTipoNominaSeleccionado();
+
+    if (tipoSeleccionado && !tipoSeleccionado.requiere_sfs) return 0;
+
     return (
       calcularSalarioBruto() *
       (Number(configNomina.porcentaje_sfs || 0) / 100)
@@ -340,6 +403,10 @@ export default function NominaPage() {
 
   function calcularISRMensual() {
     if (!configNomina) return 0;
+
+    const tipoSeleccionado = obtenerTipoNominaSeleccionado();
+
+    if (tipoSeleccionado && !tipoSeleccionado.requiere_isr) return 0;
 
     const salarioBrutoMensual = calcularSalarioBruto();
     const salarioAnual = salarioBrutoMensual * 12;
@@ -501,7 +568,11 @@ export default function NominaPage() {
   function limpiarFormulario() {
     setEditandoId(null);
 
+    const predeterminada = tiposNomina.find((item) => item.es_predeterminada);
+
     setEmpleadoId("");
+    setTipoNominaId(predeterminada ? String(predeterminada.id) : "");
+    setTipoNomina(predeterminada ? predeterminada.nombre : "");
     setPeriodo(new Date().toISOString().slice(0, 7));
     setFechaPago("");
 
@@ -528,8 +599,11 @@ export default function NominaPage() {
 
   async function editarNomina(n: Nomina) {
     setEditandoId(n.id);
+    setMostrarFormulario(true);
 
     setEmpleadoId(String(n.empleado_id));
+    setTipoNominaId(n.tipo_nomina_id ? String(n.tipo_nomina_id) : "");
+    setTipoNomina(n.tipo_nomina || "");
     setPeriodo(n.periodo || "");
     setFechaPago(n.fecha_pago || "");
 
@@ -602,6 +676,111 @@ export default function NominaPage() {
     }
   }
 
+  async function obtenerProximoNumeroSolicitud() {
+    const { data, error } = await supabase
+      .from("solicitudes_pago")
+      .select("numero_solicitud")
+      .eq("condominio_id", Number(condominioId))
+      .order("numero_solicitud", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const ultimo =
+      data && data.length > 0 ? Number(data[0].numero_solicitud || 0) : 0;
+
+    return ultimo + 1;
+  }
+
+  async function generarSolicitudPagoNomina(nominaId: number) {
+    const { data: nominaActual, error: errorNomina } = await supabase
+      .from("rh_nomina")
+      .select("*")
+      .eq("id", nominaId)
+      .eq("condominio_id", Number(condominioId))
+      .maybeSingle();
+
+    if (errorNomina) {
+      throw new Error(errorNomina.message);
+    }
+
+    if (!nominaActual) {
+      throw new Error("No se encontró la nómina para generar la solicitud de pago.");
+    }
+
+    if (nominaActual.solicitud_pago_generada && nominaActual.solicitud_pago_id) {
+      return;
+    }
+
+    const fechaSolicitud = new Date().toISOString().slice(0, 10);
+    const numeroSolicitud = await obtenerProximoNumeroSolicitud();
+
+    const concepto = `Nómina ${nominaActual.tipo_nomina || "Regular"} - ${
+      nominaActual.periodo || ""
+    }`;
+
+    const detalle = [
+      "Solicitud generada automáticamente desde Recursos Humanos / Nómina.",
+      `Empleado: ${nominaActual.nombre_empleado || "-"}`,
+      `No. empleado: ${nominaActual.numero_empleado || "-"}`,
+      `Cargo: ${nominaActual.cargo || "-"}`,
+      `Departamento: ${nominaActual.departamento || "-"}`,
+      `Tipo nómina: ${nominaActual.tipo_nomina || "Regular"}`,
+      `Período: ${nominaActual.periodo || "-"}`,
+      `Total ingresos: RD$${moneda(Number(nominaActual.total_ingresos || 0))}`,
+      `Total descuentos: RD$${moneda(Number(nominaActual.total_descuentos || 0))}`,
+      `Neto a pagar: RD$${moneda(Number(nominaActual.neto_pagar || 0))}`,
+      "Al aprobarse por tesorero y presidente, Finanzas debe registrar el pago y generar el gasto correspondiente.",
+    ].join("\n");
+
+    const { data: solicitudCreada, error: errorSolicitud } = await supabase
+      .from("solicitudes_pago")
+      .insert([
+        {
+          condominio_id: Number(condominioId),
+          condominio: condominioNombre,
+          fecha_solicitud: fechaSolicitud,
+          concepto,
+          detalle,
+          monto: Number(nominaActual.neto_pagar || 0),
+          itbis: 0,
+          total: Number(nominaActual.neto_pagar || 0),
+          no_factura: `NOM-${nominaActual.periodo || ""}-${String(
+            nominaActual.id
+          ).padStart(6, "0")}`,
+          ncf: null,
+          metodo_pago: "Pendiente",
+          cuenta_banco: null,
+          soporte_url: null,
+          prioridad: "Normal",
+          estado: "Pendiente aprobación tesorero",
+          created_by: usuarioNombre,
+          numero_solicitud: numeroSolicitud,
+        },
+      ])
+      .select("id")
+      .single();
+
+    if (errorSolicitud) {
+      throw new Error(errorSolicitud.message);
+    }
+
+    const { error: errorActualizarNomina } = await supabase
+      .from("rh_nomina")
+      .update({
+        solicitud_pago_id: Number(solicitudCreada.id),
+        solicitud_pago_generada: true,
+      })
+      .eq("id", nominaId)
+      .eq("condominio_id", Number(condominioId));
+
+    if (errorActualizarNomina) {
+      throw new Error(errorActualizarNomina.message);
+    }
+  }
+
   async function guardarNomina(e: React.FormEvent) {
     e.preventDefault();
 
@@ -622,8 +801,20 @@ export default function NominaPage() {
       return;
     }
 
+    if (!tipoNominaId) {
+      alert("Debe seleccionar el tipo de nómina.");
+      return;
+    }
+
     if (!periodo) {
       alert("Debe indicar el período de nómina.");
+      return;
+    }
+
+    if (estado === "Pagada") {
+      alert(
+        "La nómina no debe marcarse como Pagada desde este módulo. Primero debe aprobarse para generar la Solicitud de Pago y luego pagarse desde Finanzas."
+      );
       return;
     }
 
@@ -646,6 +837,14 @@ export default function NominaPage() {
       return;
     }
 
+    const tipoSeleccionado = obtenerTipoNominaSeleccionado();
+
+    if (!tipoSeleccionado) {
+      alert("Tipo de nómina no encontrado.");
+      return;
+    }
+
+    const tipoNominaNombre = tipoSeleccionado.nombre;
     const totales = calcularTotales();
 
     const registro = {
@@ -657,6 +856,9 @@ export default function NominaPage() {
       nombre_empleado: empleado.nombre || "",
       cargo: empleado.cargo || "",
       departamento: empleado.departamento || "",
+
+      tipo_nomina_id: Number(tipoNominaId),
+      tipo_nomina: tipoNomina || tipoNominaNombre,
 
       periodo,
       fecha_pago: fechaPago || null,
@@ -706,9 +908,18 @@ export default function NominaPage() {
         await guardarDetalleDescuentos(editandoId);
         await actualizarVacacionesProcesadas(editandoId);
 
+        if (estado === "Aprobada") {
+          await generarSolicitudPagoNomina(editandoId);
+        }
+
         setGuardando(false);
-        alert("Nómina modificada correctamente.");
+        alert(
+          estado === "Aprobada"
+            ? "Nómina modificada y solicitud de pago generada correctamente."
+            : "Nómina modificada correctamente."
+        );
         limpiarFormulario();
+        setMostrarFormulario(false);
         cargarNominas(condominioId, filtroPeriodo);
         return;
       }
@@ -718,6 +929,7 @@ export default function NominaPage() {
         .select("id")
         .eq("condominio_id", Number(condominioId))
         .eq("empleado_id", Number(empleadoId))
+        .eq("tipo_nomina_id", Number(tipoNominaId))
         .eq("periodo", periodo)
         .neq("estado", "Anulada")
         .maybeSingle();
@@ -728,7 +940,7 @@ export default function NominaPage() {
 
       if (existente) {
         setGuardando(false);
-        alert("Ya existe una nómina para este empleado en ese período.");
+        alert("Ya existe una nómina para este empleado, tipo de nómina y período.");
         return;
       }
 
@@ -747,9 +959,18 @@ export default function NominaPage() {
       await guardarDetalleDescuentos(nuevaNominaId);
       await actualizarVacacionesProcesadas(nuevaNominaId);
 
+      if (estado === "Aprobada") {
+        await generarSolicitudPagoNomina(nuevaNominaId);
+      }
+
       setGuardando(false);
-      alert("Nómina registrada correctamente.");
+      alert(
+        estado === "Aprobada"
+          ? "Nómina registrada y solicitud de pago generada correctamente."
+          : "Nómina registrada correctamente."
+      );
       limpiarFormulario();
+      setMostrarFormulario(false);
       cargarNominas(condominioId, filtroPeriodo);
     } catch (error: any) {
       setGuardando(false);
@@ -758,8 +979,17 @@ export default function NominaPage() {
   }
 
   async function cambiarEstado(nomina: Nomina, nuevoEstado: string) {
+    if (nuevoEstado === "Pagada") {
+      alert(
+        "La nómina debe pagarse desde Solicitudes de Pago / Finanzas. Desde aquí solo se aprueba y se genera la solicitud."
+      );
+      return;
+    }
+
     const confirmar = confirm(
-      `¿Desea cambiar esta nómina a "${nuevoEstado}"?`
+      nuevoEstado === "Aprobada"
+        ? "¿Desea aprobar esta nómina y generar la solicitud de pago?"
+        : `¿Desea cambiar esta nómina a "${nuevoEstado}"?`
     );
 
     if (!confirmar) return;
@@ -768,11 +998,8 @@ export default function NominaPage() {
       .from("rh_nomina")
       .update({
         estado: nuevoEstado,
-        pagado_por: nuevoEstado === "Pagada" ? usuarioNombre : null,
-        fecha_registro_pago:
-          nuevoEstado === "Pagada"
-            ? new Date().toISOString().slice(0, 10)
-            : null,
+        pagado_por: null,
+        fecha_registro_pago: null,
       })
       .eq("id", nomina.id)
       .eq("condominio_id", Number(condominioId));
@@ -782,7 +1009,24 @@ export default function NominaPage() {
       return;
     }
 
-    alert("Estado actualizado correctamente.");
+    if (nuevoEstado === "Aprobada") {
+      try {
+        await generarSolicitudPagoNomina(nomina.id);
+      } catch (error: any) {
+        alert(
+          "La nómina fue aprobada, pero ocurrió un error generando la solicitud de pago: " +
+            error.message
+        );
+        cargarNominas(condominioId, filtroPeriodo);
+        return;
+      }
+    }
+
+    alert(
+      nuevoEstado === "Aprobada"
+        ? "Nómina aprobada y solicitud de pago generada correctamente."
+        : "Estado actualizado correctamente."
+    );
     cargarNominas(condominioId, filtroPeriodo);
   }
 
@@ -885,131 +1129,110 @@ export default function NominaPage() {
   const pagadas = nominasFiltradas.filter((n) => n.estado === "Pagada").length;
 
   return (
-    <div className="space-y-6">
+    <main className="mx-auto max-w-7xl px-4 py-4 space-y-4">
       <NominaMenu />
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-4xl font-black text-slate-900">Procesar Nómina</h1>
+      <section className="bg-white rounded-2xl border shadow-sm px-5 py-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-wide text-cyan-700">
+              Capital Humano / Nómina
+            </p>
 
-        <p className="text-slate-500 mt-2">
-          Registro, cálculo y control de pagos de nómina del personal.
-        </p>
-      </div>
+            <h1 className="text-2xl font-black text-slate-900 leading-tight">
+              Procesar Nómina
+            </h1>
 
-      <div className="bg-white rounded-2xl p-5 shadow-sm border">
-        <p className="text-sm text-slate-500">Condominio activo</p>
+            <p className="text-sm text-slate-500 mt-1">
+              Registro, cálculo y control de pagos de nómina del personal.
+            </p>
+          </div>
 
-        <h2 className="text-lg font-bold text-slate-900">
-          {condominioNombre || "No identificado"}
-        </h2>
-      </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => {
+                limpiarFormulario();
+                setMostrarFormulario((actual) => !actual);
+              }}
+              className="rounded-xl bg-cyan-700 px-4 py-2 text-sm font-bold text-white hover:bg-cyan-800"
+            >
+              {mostrarFormulario ? "Ocultar formulario" : "+ Nueva Nómina"}
+            </button>
+
+            <button
+              type="button"
+              onClick={buscarNomina}
+              className="rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Actualizar
+            </button>
+          </div>
+        </div>
+      </section>
 
       {!configNomina && (
-        <div className="bg-red-50 border border-red-200 text-red-800 rounded-3xl p-5">
-          <h2 className="font-black text-lg">Configuración requerida</h2>
-
-          <p className="text-sm mt-1">
-            No existe una configuración activa de nómina para este condominio.
-            Debe crear o activar una configuración para calcular AFP, SFS, ISR y
-            pago de vacaciones correctamente.
-          </p>
-
-          <Link
-            href="/recursos-humanos/nomina/configuracion"
-            className="inline-block mt-3 bg-red-700 hover:bg-red-800 text-white px-5 py-3 rounded-xl font-bold"
-          >
-            Ir a configuración
-          </Link>
-        </div>
-      )}
-
-      {configNomina && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-2xl px-4 py-3">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="bg-red-50 border border-red-200 text-red-800 rounded-2xl p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="font-black text-sm">
-                Configuración activa aplicada
-              </h2>
+              <h2 className="font-black text-base">Configuración requerida</h2>
 
-              <p className="text-xs text-blue-700">
-                Estos valores se usan para calcular automáticamente AFP, SFS,
-                ISR y vacaciones.
+              <p className="text-sm mt-1">
+                No existe una configuración activa de nómina para este condominio.
+                Debe crear o activar una configuración para calcular AFP, SFS, ISR y
+                pago de vacaciones correctamente.
               </p>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-              <div className="bg-white/70 border border-blue-100 rounded-xl px-3 py-2">
-                <p className="text-blue-600">AFP</p>
-                <p className="font-black text-sm">
-                  {mostrarPorcentaje(configNomina.porcentaje_afp)}%
-                </p>
-              </div>
-
-              <div className="bg-white/70 border border-blue-100 rounded-xl px-3 py-2">
-                <p className="text-blue-600">SFS</p>
-                <p className="font-black text-sm">
-                  {mostrarPorcentaje(configNomina.porcentaje_sfs)}%
-                </p>
-              </div>
-
-              <div className="bg-white/70 border border-blue-100 rounded-xl px-3 py-2">
-                <p className="text-blue-600">ISR exento anual</p>
-                <p className="font-black text-sm">
-                  RD${moneda(configNomina.isr_exento_hasta)}
-                </p>
-              </div>
-
-              <div className="bg-white/70 border border-blue-100 rounded-xl px-3 py-2">
-                <p className="text-blue-600">Divisor vacaciones</p>
-                <p className="font-black text-sm">
-                  {moneda(configNomina.divisor_pago_vacaciones)}
-                </p>
-              </div>
-
-              <div className="bg-white/70 border border-blue-100 rounded-xl px-3 py-2">
-                <p className="text-blue-600">Vigente desde</p>
-                <p className="font-black text-sm">
-                  {configNomina.fecha_vigencia_desde || "-"}
-                </p>
-              </div>
-            </div>
+            <Link
+              href="/recursos-humanos/nomina/configuracion"
+              className="inline-block bg-red-700 hover:bg-red-800 text-white px-4 py-2 rounded-xl font-bold text-sm"
+            >
+              Ir a configuración
+            </Link>
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Registros</p>
-          <h2 className="text-3xl font-black">{nominasFiltradas.length}</h2>
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="bg-white rounded-2xl p-4 shadow-sm border">
+          <p className="text-xs font-bold uppercase text-slate-500">Registros</p>
+          <h2 className="text-2xl font-black">{nominasFiltradas.length}</h2>
+          <p className="text-xs text-slate-400">Este período</p>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Pendientes</p>
-          <h2 className="text-3xl font-black text-yellow-700">{pendientes}</h2>
+        <div className="bg-white rounded-2xl p-4 shadow-sm border">
+          <p className="text-xs font-bold uppercase text-slate-500">Pendientes</p>
+          <h2 className="text-2xl font-black text-yellow-700">{pendientes}</h2>
+          <p className="text-xs text-slate-400">Por revisar</p>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Pagadas</p>
-          <h2 className="text-3xl font-black text-green-700">{pagadas}</h2>
+        <div className="bg-white rounded-2xl p-4 shadow-sm border">
+          <p className="text-xs font-bold uppercase text-slate-500">Pagadas</p>
+          <h2 className="text-2xl font-black text-green-700">{pagadas}</h2>
+          <p className="text-xs text-slate-400">Completadas</p>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Pago vacaciones</p>
-          <h2 className="text-2xl font-black text-purple-700">
+        <div className="bg-white rounded-2xl p-4 shadow-sm border">
+          <p className="text-xs font-bold uppercase text-slate-500">Vacaciones</p>
+          <h2 className="text-xl font-black text-purple-700">
             RD${moneda(totalPagoVacaciones)}
           </h2>
+          <p className="text-xs text-slate-400">Pago aplicado</p>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Total neto</p>
-          <h2 className="text-2xl font-black text-blue-700">
+        <div className="bg-white rounded-2xl p-4 shadow-sm border">
+          <p className="text-xs font-bold uppercase text-slate-500">Total neto</p>
+          <h2 className="text-xl font-black text-blue-700">
             RD${moneda(totalNeto)}
           </h2>
+          <p className="text-xs text-slate-400">A pagar</p>
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h2 className="text-xl font-black mb-4">
+      {mostrarFormulario && (
+        <div className="bg-white rounded-2xl border shadow-sm p-5">
+        <h2 className="text-lg font-black mb-4">
           {editandoId ? "Modificar nómina" : "Registrar nómina"}
         </h2>
 
@@ -1035,6 +1258,41 @@ export default function NominaPage() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Tipo de nómina *
+            </label>
+
+            <select
+              value={tipoNominaId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setTipoNominaId(id);
+
+                const tipoSeleccionado = tiposNomina.find(
+                  (item) => String(item.id) === id
+                );
+
+                setTipoNomina(tipoSeleccionado?.nombre || "");
+              }}
+              className="border rounded-xl px-4 py-3 w-full bg-white"
+            >
+              <option value="">Seleccione tipo de nómina</option>
+
+              {tiposNomina.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.nombre}
+                </option>
+              ))}
+            </select>
+
+            {tipoNominaId && (
+              <p className="text-xs text-slate-500 mt-1">
+                AFP/SFS/ISR se aplican según la configuración del tipo seleccionado.
+              </p>
+            )}
           </div>
 
           <div>
@@ -1499,7 +1757,10 @@ export default function NominaPage() {
             {editandoId && (
               <button
                 type="button"
-                onClick={limpiarFormulario}
+                onClick={() => {
+                  limpiarFormulario();
+                  setMostrarFormulario(false);
+                }}
                 className="bg-slate-600 hover:bg-slate-700 text-white px-5 py-3 rounded-xl font-bold"
               >
                 Cancelar edición
@@ -1507,9 +1768,10 @@ export default function NominaPage() {
             )}
           </div>
         </form>
-      </div>
+        </div>
+      )}
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
+      <div className="bg-white rounded-2xl border shadow-sm p-5">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
             <h2 className="text-xl font-black">Listado de nómina</h2>
@@ -1568,6 +1830,7 @@ export default function NominaPage() {
               <thead className="bg-slate-100">
                 <tr>
                   <th className="p-3 border text-left">Empleado</th>
+                  <th className="p-3 border text-left">Tipo nómina</th>
                   <th className="p-3 border text-left">Período</th>
                   <th className="p-3 border text-right">Ingresos</th>
                   <th className="p-3 border text-right">Vacaciones</th>
@@ -1579,7 +1842,9 @@ export default function NominaPage() {
                   <th className="p-3 border text-right">Neto</th>
                   <th className="p-3 border text-center">Estado</th>
                   <th className="p-3 border text-left">Pago</th>
-                  <th className="p-3 border text-center">Acciones</th>
+                  <th className="p-3 border text-center sticky right-0 bg-slate-100 z-20">
+                    Acciones
+                  </th>
                 </tr>
               </thead>
 
@@ -1591,6 +1856,10 @@ export default function NominaPage() {
                       <p className="text-xs text-slate-500">
                         {n.numero_empleado} · {n.cargo || "-"}
                       </p>
+                    </td>
+
+                    <td className="p-3 border">
+                      <p className="font-bold">{n.tipo_nomina || "-"}</p>
                     </td>
 
                     <td className="p-3 border">
@@ -1653,15 +1922,27 @@ export default function NominaPage() {
                       <p className="text-xs text-slate-500">
                         Pagado por: {n.pagado_por || "-"}
                       </p>
+
+                      {n.solicitud_pago_generada && (
+                        <p className="text-xs text-blue-700 font-bold">
+                          Solicitud pago #{n.solicitud_pago_id}
+                        </p>
+                      )}
+
+                      {n.gasto_generado && (
+                        <p className="text-xs text-green-700 font-bold">
+                          Gasto generado #{n.gasto_id}
+                        </p>
+                      )}
                     </td>
 
-                    <td className="p-3 border">
+                    <td className="p-3 border sticky right-0 bg-white z-10 shadow-lg">
                       <div className="flex flex-wrap justify-center gap-2">
                         <Link
-                          href={`/recursos-humanos/nomina/recibo/${n.id}`}
+                          href={`/recursos-humanos/nomina/recibos/${n.id}`}
                           className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
                         >
-                          Recibo
+                          Recibos
                         </Link>
 
                         <button
@@ -1680,13 +1961,13 @@ export default function NominaPage() {
                           </button>
                         )}
 
-                        {n.estado !== "Pagada" && n.estado !== "Anulada" && (
-                          <button
-                            onClick={() => cambiarEstado(n, "Pagada")}
+                        {n.solicitud_pago_generada && n.solicitud_pago_id && (
+                          <Link
+                            href="/solicitudes-pago"
                             className="bg-green-700 hover:bg-green-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
                           >
-                            Pagar
-                          </button>
+                            Ver solicitud
+                          </Link>
                         )}
 
                         {n.estado !== "Anulada" && (
@@ -1713,7 +1994,7 @@ export default function NominaPage() {
                   <tr>
                     <td
                       className="p-6 border text-center text-slate-500"
-                      colSpan={13}
+                      colSpan={14}
                     >
                       No hay registros de nómina para esta consulta.
                     </td>
@@ -1724,7 +2005,7 @@ export default function NominaPage() {
               {nominasFiltradas.length > 0 && (
                 <tfoot className="bg-slate-100 font-black">
                   <tr>
-                    <td className="p-3 border" colSpan={2}>
+                    <td className="p-3 border" colSpan={3}>
                       Totales
                     </td>
 
@@ -1768,6 +2049,6 @@ export default function NominaPage() {
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }

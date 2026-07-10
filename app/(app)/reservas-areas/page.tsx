@@ -1,18 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  CalendarDays,
+  CheckCircle,
+  Clock,
+  RefreshCw,
+  Search,
+  Users,
+  XCircle,
+} from "lucide-react";
 import { supabase } from "@/app/lib/supabaseClient";
 
-type AreaSocial = {
-  id: number;
-  nombre_area: string;
-  costo_reserva: number;
-};
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import PageHeader from "@/components/vam/enterprise/PageHeader";
+import StatCard from "@/components/vam/enterprise/StatCard";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import ActionBar from "@/components/vam/enterprise/ActionBar";
+import DataTable from "@/components/vam/enterprise/DataTable";
+import EmptyState from "@/components/vam/enterprise/EmptyState";
+import StatusBadge from "@/components/vam/enterprise/StatusBadge";
+import PageDrawer from "@/components/vam/enterprise/PageDrawer";
 
-type Unidad = {
-  id: number;
-  codigo: string;
-};
+type AreaSocial = { id: number; nombre_area: string; costo_reserva: number };
+type Unidad = { id: number; codigo: string };
 
 type Reserva = {
   id: number;
@@ -30,19 +41,18 @@ type Reserva = {
   estado: string;
   comentario_admin: string;
   created_at: string;
-  areas_sociales?: {
-    nombre_area: string;
-  };
+  areas_sociales?: { nombre_area: string };
 };
 
 export default function ReservasAreasAdminPage() {
   const [condominio, setCondominio] = useState("");
   const [condominioId, setCondominioId] = useState("");
-
   const [areas, setAreas] = useState<AreaSocial[]>([]);
   const [unidades, setUnidades] = useState<Unidad[]>([]);
   const [reservas, setReservas] = useState<Reserva[]>([]);
   const [comentarios, setComentarios] = useState<Record<number, string>>({});
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [buscar, setBuscar] = useState("");
 
   const [areaSocialId, setAreaSocialId] = useState("");
   const [unidadId, setUnidadId] = useState("");
@@ -63,9 +73,7 @@ export default function ReservasAreasAdminPage() {
     setCondominio(nombre);
     setCondominioId(id);
 
-    if (nombre && id) {
-      cargarDatos(nombre, id);
-    }
+    if (nombre && id) cargarDatos(nombre, id);
   }, []);
 
   async function cargarDatos(nombre: string, id: string) {
@@ -113,10 +121,7 @@ export default function ReservasAreasAdminPage() {
 
     const { data, error } = await supabase
       .from("reservas_areas_sociales")
-      .select(`
-        *,
-        areas_sociales(nombre_area)
-      `)
+      .select(`*, areas_sociales(nombre_area)`)
       .eq("condominio", nombre)
       .order("created_at", { ascending: false });
 
@@ -128,6 +133,18 @@ export default function ReservasAreasAdminPage() {
     }
 
     setReservas((data as Reserva[]) || []);
+  }
+
+  function limpiarFormulario() {
+    setAreaSocialId("");
+    setUnidadId("");
+    setFechaReserva("");
+    setHoraInicio("");
+    setHoraFin("");
+    setMotivo("");
+    setCantidadPersonas("");
+    setMontoPagado("");
+    setComprobante(null);
   }
 
   async function subirComprobante() {
@@ -142,9 +159,7 @@ export default function ReservasAreasAdminPage() {
       .from("comprobantes-reservas")
       .upload(nombreArchivo, comprobante);
 
-    if (error) {
-      throw new Error(error.message);
-    }
+    if (error) throw new Error(error.message);
 
     const { data } = supabase.storage
       .from("comprobantes-reservas")
@@ -209,16 +224,8 @@ export default function ReservasAreasAdminPage() {
       }
 
       alert("Reserva registrada correctamente.");
-
-      setAreaSocialId("");
-      setUnidadId("");
-      setFechaReserva("");
-      setHoraInicio("");
-      setHoraFin("");
-      setMotivo("");
-      setCantidadPersonas("");
-      setMontoPagado("");
-      setComprobante(null);
+      limpiarFormulario();
+      setDrawerOpen(false);
 
       const inputFile = document.getElementById(
         "comprobanteReserva"
@@ -235,16 +242,12 @@ export default function ReservasAreasAdminPage() {
   async function actualizarReserva(id: number, nuevoEstado: string) {
     const comentario = comentarios[id] || "";
 
-    if (
-      (nuevoEstado === "Rechazada" || nuevoEstado === "Cancelada") &&
-      !comentario
-    ) {
+    if ((nuevoEstado === "Rechazada" || nuevoEstado === "Cancelada") && !comentario) {
       alert("Debe escribir un comentario.");
       return;
     }
 
     const confirmar = confirm(`¿Desea cambiar la reserva a ${nuevoEstado}?`);
-
     if (!confirmar) return;
 
     const { error } = await supabase
@@ -252,8 +255,7 @@ export default function ReservasAreasAdminPage() {
       .update({
         estado: nuevoEstado,
         comentario_admin: comentario,
-        fecha_aprobacion:
-          nuevoEstado === "Aprobada" ? new Date().toISOString() : null,
+        fecha_aprobacion: nuevoEstado === "Aprobada" ? new Date().toISOString() : null,
       })
       .eq("id", id)
       .eq("condominio", condominio);
@@ -267,42 +269,230 @@ export default function ReservasAreasAdminPage() {
     cargarReservas(condominio);
   }
 
-  const reservasFiltradas = reservas.filter(
-    (r) => filtroEstado === "" || r.estado === filtroEstado
-  );
+  function dinero(valor: number | null | undefined) {
+    return Number(valor || 0).toLocaleString("es-DO", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  const reservasFiltradas = useMemo(() => {
+    const texto = buscar.toLowerCase().trim();
+
+    return reservas.filter((r) => {
+      if (filtroEstado && r.estado !== filtroEstado) return false;
+
+      if (!texto) return true;
+
+      const combinado = `
+        ${r.id}
+        ${r.areas_sociales?.nombre_area || ""}
+        ${r.no_apartamento || ""}
+        ${r.nombre_propietario || ""}
+        ${r.telefono || ""}
+        ${r.fecha_reserva || ""}
+        ${r.estado || ""}
+        ${r.motivo || ""}
+      `.toLowerCase();
+
+      return combinado.includes(texto);
+    });
+  }, [reservas, buscar, filtroEstado]);
+
+  const pendientes = reservas.filter((r) => r.estado === "Pendiente aprobación").length;
+  const aprobadas = reservas.filter((r) => r.estado === "Aprobada").length;
+  const rechazadas = reservas.filter((r) => r.estado === "Rechazada").length;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Reservas de Áreas Sociales</h1>
-        <p className="text-slate-500">
-          Solicitud, aprobación y seguimiento de reservas.
-        </p>
+    <PageContainer>
+      <PageHeader
+        title="Reservas de Áreas Sociales"
+        subtitle="Solicitud, aprobación y seguimiento de reservas."
+        badge="Centro Residencial"
+        icon={CalendarDays}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                limpiarFormulario();
+                setDrawerOpen(true);
+              }}
+              className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-800"
+            >
+              + Nueva Reserva
+            </button>
+
+            <button
+              type="button"
+              onClick={() => cargarDatos(condominio, condominioId)}
+              className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Actualizar
+            </button>
+          </div>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard title="Total reservas" value={reservas.length} subtitle="Registradas" icon={CalendarDays} tone="blue" />
+        <StatCard title="Pendientes" value={pendientes} subtitle="Por aprobar" icon={Clock} tone="amber" />
+        <StatCard title="Aprobadas" value={aprobadas} subtitle="Confirmadas" icon={CheckCircle} tone="green" />
+        <StatCard title="Rechazadas" value={rechazadas} subtitle="No aprobadas" icon={XCircle} tone="red" />
       </div>
 
-      <div className="bg-white rounded-2xl border shadow-sm p-5">
-        <p className="text-xs uppercase tracking-wide text-slate-500">
-          Condominio activo
-        </p>
-        <p className="font-bold mt-1">{condominio}</p>
-      </div>
-
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold mb-4">Nueva reserva</h2>
-
-        <form
-          onSubmit={guardarReserva}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
+      <SectionCard
+        title="Listado de reservas"
+        subtitle={`Condominio activo: ${condominio || "No seleccionado"}`}
+      >
+        <ActionBar
+          search={buscar}
+          onSearch={setBuscar}
+          placeholder="Buscar reserva, propietario, apartamento, área..."
         >
+          <select
+            value={filtroEstado}
+            onChange={(e) => setFiltroEstado(e.target.value)}
+            className="rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700"
+          >
+            <option value="">Todos</option>
+            <option value="Pendiente aprobación">Pendiente aprobación</option>
+            <option value="Aprobada">Aprobada</option>
+            <option value="Rechazada">Rechazada</option>
+            <option value="Cancelada">Cancelada</option>
+            <option value="Finalizada">Finalizada</option>
+          </select>
+
+          <div className="inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700">
+            <Search className="h-4 w-4" />
+            {reservasFiltradas.length} registros
+          </div>
+        </ActionBar>
+
+        <div className="mt-4">
+          {loading ? (
+            <div className="rounded-2xl border bg-white p-6 text-sm text-slate-500">
+              Cargando reservas...
+            </div>
+          ) : reservasFiltradas.length === 0 ? (
+            <EmptyState
+              title="Sin reservas"
+              description="No hay reservas registradas para esta consulta."
+            />
+          ) : (
+            <DataTable>
+              <thead className="bg-slate-100 text-slate-600">
+                <tr>
+                  <th className="px-4 py-3 text-left">Reserva</th>
+                  <th className="px-4 py-3 text-left">Propietario</th>
+                  <th className="px-4 py-3 text-center">Fecha / Horario</th>
+                  <th className="px-4 py-3 text-right">Monto</th>
+                  <th className="px-4 py-3 text-center">Estado</th>
+                  <th className="px-4 py-3 text-center">Acciones</th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-slate-200">
+                {reservasFiltradas.map((r) => (
+                  <tr key={r.id} className="bg-white hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <p className="font-black text-slate-900">
+                        #{r.id} · {r.areas_sociales?.nombre_area || "-"}
+                      </p>
+                      <p className="text-xs text-slate-500">{r.motivo || "Sin motivo"}</p>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <p className="font-bold">{r.nombre_propietario}</p>
+                      <p className="text-xs text-slate-500">
+                        Apto. {r.no_apartamento} · {r.telefono || "-"}
+                      </p>
+                    </td>
+
+                    <td className="px-4 py-3 text-center">
+                      <p className="font-bold">{r.fecha_reserva}</p>
+                      <p className="text-xs text-slate-500">
+                        {r.hora_inicio} - {r.hora_fin}
+                      </p>
+                    </td>
+
+                    <td className="px-4 py-3 text-right font-bold text-green-700">
+                      RD$ {dinero(r.monto_pagado)}
+                    </td>
+
+                    <td className="px-4 py-3 text-center">
+                      <StatusBadge status={r.estado} />
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {r.comprobante_url && (
+                          <a
+                            href={r.comprobante_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rounded-lg bg-slate-900 px-3 py-1 text-xs font-bold text-white hover:bg-slate-800"
+                          >
+                            Comprobante
+                          </a>
+                        )}
+
+                        {r.estado === "Pendiente aprobación" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => actualizarReserva(r.id, "Aprobada")}
+                              className="rounded-lg bg-green-700 px-3 py-1 text-xs font-bold text-white hover:bg-green-800"
+                            >
+                              Aprobar
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => actualizarReserva(r.id, "Rechazada")}
+                              className="rounded-lg bg-red-700 px-3 py-1 text-xs font-bold text-white hover:bg-red-800"
+                            >
+                              Rechazar
+                            </button>
+                          </>
+                        )}
+                      </div>
+
+                      {r.estado === "Pendiente aprobación" && (
+                        <textarea
+                          value={comentarios[r.id] || ""}
+                          onChange={(e) =>
+                            setComentarios({
+                              ...comentarios,
+                              [r.id]: e.target.value,
+                            })
+                          }
+                          placeholder="Comentario para rechazar/cancelar"
+                          className="mt-2 w-full rounded-lg border px-3 py-2 text-xs"
+                          rows={2}
+                        />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </DataTable>
+          )}
+        </div>
+      </SectionCard>
+
+      <PageDrawer open={drawerOpen} title="Nueva Reserva" onClose={() => setDrawerOpen(false)}>
+        <form onSubmit={guardarReserva} className="space-y-4">
           <select
             value={areaSocialId}
             onChange={(e) => setAreaSocialId(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
+            className="w-full rounded-xl border px-4 py-3 text-sm"
           >
             <option value="">Seleccione área social</option>
             {areas.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.nombre_area} - RD${Number(a.costo_reserva || 0).toLocaleString("es-DO")}
+                {a.nombre_area} - RD${dinero(a.costo_reserva)}
               </option>
             ))}
           </select>
@@ -310,7 +500,7 @@ export default function ReservasAreasAdminPage() {
           <select
             value={unidadId}
             onChange={(e) => setUnidadId(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
+            className="w-full rounded-xl border px-4 py-3 text-sm"
           >
             <option value="">Seleccione apartamento</option>
             {unidades.map((u) => (
@@ -320,175 +510,31 @@ export default function ReservasAreasAdminPage() {
             ))}
           </select>
 
-          <input
-            type="date"
-            value={fechaReserva}
-            onChange={(e) => setFechaReserva(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-          />
+          <input type="date" value={fechaReserva} onChange={(e) => setFechaReserva(e.target.value)} className="w-full rounded-xl border px-4 py-3 text-sm" />
 
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="time"
-              value={horaInicio}
-              onChange={(e) => setHoraInicio(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-            />
-            <input
-              type="time"
-              value={horaFin}
-              onChange={(e) => setHoraFin(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <input type="time" value={horaInicio} onChange={(e) => setHoraInicio(e.target.value)} className="w-full rounded-xl border px-4 py-3 text-sm" />
+            <input type="time" value={horaFin} onChange={(e) => setHoraFin(e.target.value)} className="w-full rounded-xl border px-4 py-3 text-sm" />
           </div>
 
-          <input
-            type="number"
-            value={cantidadPersonas}
-            onChange={(e) => setCantidadPersonas(e.target.value)}
-            placeholder="Cantidad de personas"
-            className="border rounded-lg px-3 py-2 w-full"
-          />
+          <input type="number" value={cantidadPersonas} onChange={(e) => setCantidadPersonas(e.target.value)} placeholder="Cantidad de personas" className="w-full rounded-xl border px-4 py-3 text-sm" />
 
-          <input
-            type="number"
-            step="0.01"
-            value={montoPagado}
-            onChange={(e) => setMontoPagado(e.target.value)}
-            placeholder="Monto pagado RD$"
-            className="border rounded-lg px-3 py-2 w-full"
-          />
+          <input type="number" step="0.01" value={montoPagado} onChange={(e) => setMontoPagado(e.target.value)} placeholder="Monto pagado RD$" className="w-full rounded-xl border px-4 py-3 text-sm" />
 
-          <input
-            id="comprobanteReserva"
-            type="file"
-            accept=".pdf,.jpg,.jpeg,.png,.webp"
-            onChange={(e) => setComprobante(e.target.files?.[0] || null)}
-            className="border rounded-lg px-3 py-2 w-full md:col-span-2"
-          />
+          <input id="comprobanteReserva" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => setComprobante(e.target.files?.[0] || null)} className="w-full rounded-xl border px-4 py-3 text-sm" />
 
-          <textarea
-            value={motivo}
-            onChange={(e) => setMotivo(e.target.value)}
-            placeholder="Motivo de la reserva"
-            rows={3}
-            className="border rounded-lg px-3 py-2 w-full md:col-span-2"
-          />
+          <textarea value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Motivo de la reserva" rows={3} className="w-full rounded-xl border px-4 py-3 text-sm" />
 
-          <div className="md:col-span-2">
-            <button
-              type="submit"
-              className="bg-blue-700 text-white px-5 py-2 rounded-lg hover:bg-blue-800"
-            >
+          <div className="flex gap-3 pt-3">
+            <button type="submit" className="rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800">
               Guardar reserva
+            </button>
+            <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-xl border px-5 py-3 font-bold text-slate-700 hover:bg-slate-50">
+              Cancelar
             </button>
           </div>
         </form>
-      </div>
-
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <div className="flex justify-between mb-4 gap-4">
-          <h2 className="text-xl font-bold">Listado de reservas</h2>
-
-          <select
-            value={filtroEstado}
-            onChange={(e) => setFiltroEstado(e.target.value)}
-            className="border rounded-lg px-3 py-2"
-          >
-            <option value="">Todos</option>
-            <option value="Pendiente aprobación">Pendiente aprobación</option>
-            <option value="Aprobada">Aprobada</option>
-            <option value="Rechazada">Rechazada</option>
-            <option value="Cancelada">Cancelada</option>
-            <option value="Finalizada">Finalizada</option>
-          </select>
-        </div>
-
-        {loading ? (
-          <p>Cargando reservas...</p>
-        ) : (
-          <div className="space-y-4">
-            {reservasFiltradas.map((r) => (
-              <div key={r.id} className="border rounded-2xl p-5">
-                <h3 className="text-xl font-bold">
-                  Reserva #{r.id} - {r.areas_sociales?.nombre_area}
-                </h3>
-
-                <p className="text-sm text-slate-500">
-                  Apto. {r.no_apartamento} | Propietario:{" "}
-                  <strong>{r.nombre_propietario}</strong>
-                </p>
-
-                <p className="text-sm mt-2">
-                  Fecha: {r.fecha_reserva} | Horario: {r.hora_inicio} -{" "}
-                  {r.hora_fin}
-                </p>
-
-                <p className="text-sm mt-2">
-                  Estado: <strong>{r.estado}</strong>
-                </p>
-
-                {r.comprobante_url && (
-                  <a
-                    href={r.comprobante_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="bg-slate-900 text-white px-4 py-2 rounded-lg inline-block mt-3"
-                  >
-                    Ver comprobante
-                  </a>
-                )}
-
-                {r.estado === "Pendiente aprobación" && (
-                  <div className="mt-4 border-t pt-4 space-y-3">
-                    <textarea
-                      value={comentarios[r.id] || ""}
-                      onChange={(e) =>
-                        setComentarios({
-                          ...comentarios,
-                          [r.id]: e.target.value,
-                        })
-                      }
-                      placeholder="Comentario administrativo"
-                      className="border rounded-lg px-3 py-2 w-full"
-                      rows={2}
-                    />
-
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => actualizarReserva(r.id, "Aprobada")}
-                        className="bg-green-700 text-white px-4 py-2 rounded-lg"
-                      >
-                        Aprobar
-                      </button>
-
-                      <button
-                        onClick={() => actualizarReserva(r.id, "Rechazada")}
-                        className="bg-red-700 text-white px-4 py-2 rounded-lg"
-                      >
-                        Rechazar
-                      </button>
-
-                      <button
-                        onClick={() => actualizarReserva(r.id, "Cancelada")}
-                        className="bg-slate-700 text-white px-4 py-2 rounded-lg"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {reservasFiltradas.length === 0 && (
-              <div className="p-6 text-center text-slate-500">
-                No hay reservas registradas.
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+      </PageDrawer>
+    </PageContainer>
   );
 }

@@ -2,7 +2,29 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import {
+  BarChart3,
+  CheckCircle,
+  CreditCard,
+  FileSpreadsheet,
+  FileText,
+  Landmark,
+  ReceiptText,
+  RefreshCw,
+  Search,
+  WalletCards,
+} from "lucide-react";
+
 import { supabase } from "@/app/lib/supabaseClient";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import ModuleActions from "@/components/vam/enterprise/ModuleActions";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import StatCard from "@/components/vam/enterprise/StatCard";
+import DataTable from "@/components/vam/enterprise/DataTable";
+import EmptyState from "@/components/vam/enterprise/EmptyState";
 
 type Gasto = {
   id: number;
@@ -42,29 +64,23 @@ function dinero(valor: number | null | undefined) {
 
 function estadoColor(g: Gasto) {
   if (g.pagado) return "bg-green-100 text-green-700";
-
   if (g.aprobado_tesorero && g.aprobado_presidente && !g.pagado) {
     return "bg-blue-100 text-blue-700";
   }
-
   if (g.aprobado_tesorero && !g.aprobado_presidente) {
     return "bg-yellow-100 text-yellow-700";
   }
-
   return "bg-slate-100 text-slate-700";
 }
 
 function etiquetaEstado(g: Gasto) {
   if (g.pagado) return "Pagado";
-
   if (g.aprobado_tesorero && g.aprobado_presidente && !g.pagado) {
     return "Aprobado pendiente de pago";
   }
-
   if (g.aprobado_tesorero && !g.aprobado_presidente) {
     return "Pendiente presidente";
   }
-
   return g.estado || "Sin estado";
 }
 
@@ -91,7 +107,6 @@ export default function GastosPage() {
 
     setCondominioId(id);
     setCondominioNombre(nombreFinal);
-
     cargarGastos(id, nombreFinal);
   }, []);
 
@@ -183,9 +198,7 @@ export default function GastosPage() {
         g.catalogo_categoria_gastos?.nombre_categoria || ""
       } ${g.estado || ""}`.toLowerCase();
 
-      const cumpleBusqueda = texto.includes(buscar.toLowerCase().trim());
-
-      return cumpleEstado && cumpleBusqueda;
+      return cumpleEstado && texto.includes(buscar.toLowerCase().trim());
     });
   }, [gastos, buscar, filtroEstado]);
 
@@ -217,92 +230,95 @@ export default function GastosPage() {
   ).length;
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-black text-slate-900">
-              Gastos Profesionales
-            </h1>
+    <PageContainer>
+      <ModuleMenu
+        title="Finanzas"
+        subtitle="Pagos, gastos, solicitudes, caja chica, banco y reportes."
+        tone="green"
+        items={[
+          { href: "/finanzas", label: "Dashboard", icon: BarChart3 },
+          { href: "/finanzas/pagos", label: "Pagos", icon: CreditCard },
+          { href: "/pagos-mantenimiento", label: "Mantenimiento", icon: WalletCards },
+          { href: "/gastos", label: "Gastos", icon: ReceiptText },
+          { href: "/finanzas/caja-chica", label: "Caja Chica", icon: WalletCards },
+          { href: "/banco", label: "Banco", icon: Landmark },
+          { href: "/solicitudes-pago", label: "Solicitudes", icon: FileText },
+          { href: "/presupuesto", label: "Presupuesto", icon: FileSpreadsheet },
+        ]}
+      />
 
-            <p className="text-slate-500 mt-2">
-              Consulta financiera de gastos generados desde Solicitudes de Pago.
-            </p>
+      <ModuleToolbar
+        title="Gastos"
+        subtitle="Consulta financiera de gastos generados desde Solicitudes de Pago."
+        icon={ReceiptText}
+        actions={
+          <ModuleActions
+            onRefresh={() => cargarGastos(condominioId, condominioNombre)}
+            extra={
+              <Link
+                href="/solicitudes-pago"
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800"
+              >
+                <FileText className="h-4 w-4" />
+                Ir a solicitudes
+              </Link>
+            }
+          />
+        }
+      />
 
-            <p className="text-sm text-blue-700 font-bold mt-3">
-              Condominio activo: {condominioNombre || "No seleccionado"}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href="/solicitudes-pago"
-              className="bg-blue-700 text-white px-4 py-2 rounded-xl hover:bg-blue-800 font-bold"
-            >
-              Ir a solicitudes
-            </Link>
-
-            <button
-              onClick={() => cargarGastos(condominioId, condominioNombre)}
-              className="bg-slate-700 text-white px-4 py-2 rounded-xl hover:bg-slate-800 font-bold"
-            >
-              Actualizar
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-sm text-blue-800">
+      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
         Los gastos ya no se registran ni se aprueban desde este módulo. El ciclo
         completo se maneja desde <strong>Solicitudes de Pago</strong>. Este
         módulo queda como consulta financiera y contable.
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Registros filtrados</p>
-          <h2 className="text-3xl font-black text-slate-900">
-            {gastosFiltrados.length}
-          </h2>
-        </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard
+          title="Registros"
+          value={gastosFiltrados.length}
+          subtitle="Filtrados"
+          icon={ReceiptText}
+          tone="slate"
+        />
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Monto total</p>
-          <h2 className="text-2xl font-black text-red-700">
-            RD$ {dinero(totalGastos)}
-          </h2>
-        </div>
+        <StatCard
+          title="Monto total"
+          value={`RD$ ${dinero(totalGastos)}`}
+          subtitle="Según filtros"
+          icon={FileSpreadsheet}
+          tone="red"
+        />
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Pagados</p>
-          <h2 className="text-2xl font-black text-green-700">
-            {cantidadPagados}
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            RD$ {dinero(totalPagado)}
-          </p>
-        </div>
+        <StatCard
+          title="Pagados"
+          value={cantidadPagados}
+          subtitle={`RD$ ${dinero(totalPagado)}`}
+          icon={CheckCircle}
+          tone="green"
+        />
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Pendientes pago</p>
-          <h2 className="text-2xl font-black text-blue-700">
-            {cantidadPendientePago}
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            RD$ {dinero(totalPendientePago)}
-          </p>
-        </div>
+        <StatCard
+          title="Pendientes pago"
+          value={cantidadPendientePago}
+          subtitle={`RD$ ${dinero(totalPendientePago)}`}
+          icon={RefreshCw}
+          tone="blue"
+        />
       </div>
 
-      <div className="bg-white rounded-2xl p-5 shadow-sm border">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <SectionCard
+        title="Filtros"
+        subtitle={`Condominio activo: ${condominioNombre || "No seleccionado"}`}
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="block text-sm font-semibold mb-1">Estado</label>
+            <label className="mb-1 block text-sm font-semibold">Estado</label>
 
             <select
               value={filtroEstado}
               onChange={(e) => setFiltroEstado(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
+              className="w-full rounded-xl border bg-white px-4 py-3"
             >
               <option value="">Todos</option>
               <option value="pagado">Pagados</option>
@@ -313,178 +329,157 @@ export default function GastosPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">Buscar</label>
+            <label className="mb-1 block text-sm font-semibold">Buscar</label>
 
-            <input
-              type="text"
-              value={buscar}
-              onChange={(e) => setBuscar(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="Proveedor, concepto, factura, NCF o cheque..."
-            />
+            <div className="flex items-center gap-2 rounded-xl border bg-white px-4 py-3">
+              <Search className="h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                value={buscar}
+                onChange={(e) => setBuscar(e.target.value)}
+                className="w-full bg-transparent outline-none"
+                placeholder="Proveedor, concepto, factura, NCF o cheque..."
+              />
+            </div>
           </div>
         </div>
-      </div>
+      </SectionCard>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm border">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-xl font-black text-slate-900">
-              Gastos registrados
-            </h2>
-
-            <p className="text-sm text-slate-500">
-              Listado de gastos generados desde el flujo de Solicitudes de Pago.
-            </p>
-          </div>
-
+      <SectionCard
+        title="Gastos registrados"
+        subtitle="Listado de gastos generados desde el flujo de Solicitudes de Pago."
+        action={
           <div className="text-lg font-black text-red-700">
             RD$ {dinero(totalGastos)}
           </div>
-        </div>
-
+        }
+      >
         {loading ? (
           <p className="text-slate-500">Cargando gastos...</p>
+        ) : gastosFiltrados.length === 0 ? (
+          <EmptyState
+            title="Sin gastos"
+            description="No hay gastos registrados para esta consulta."
+          />
         ) : (
-          <div className="overflow-auto border rounded-2xl">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="p-3 border text-left">Fecha</th>
-                  <th className="p-3 border text-left">Proveedor</th>
-                  <th className="p-3 border text-left">Categoría</th>
-                  <th className="p-3 border text-left">Concepto</th>
-                  <th className="p-3 border text-right">Total</th>
-                  <th className="p-3 border text-center">Estado</th>
-                  <th className="p-3 border text-center">Factura</th>
-                  <th className="p-3 border text-center">Cheque</th>
-                  <th className="p-3 border text-center">Pago</th>
-                </tr>
-              </thead>
+          <DataTable>
+            <thead className="bg-slate-100 text-slate-600">
+              <tr>
+                <th className="px-4 py-3 text-left">Fecha</th>
+                <th className="px-4 py-3 text-left">Proveedor</th>
+                <th className="px-4 py-3 text-left">Categoría</th>
+                <th className="px-4 py-3 text-left">Concepto</th>
+                <th className="px-4 py-3 text-right">Total</th>
+                <th className="px-4 py-3 text-center">Estado</th>
+                <th className="px-4 py-3 text-center">Factura</th>
+                <th className="px-4 py-3 text-center">Cheque</th>
+                <th className="px-4 py-3 text-center">Pago</th>
+              </tr>
+            </thead>
 
-              <tbody>
-                {gastosFiltrados.map((g) => (
-                  <tr key={g.id} className="hover:bg-slate-50">
-                    <td className="p-3 border">{g.fecha || "-"}</td>
+            <tbody className="divide-y divide-slate-200">
+              {gastosFiltrados.map((g) => (
+                <tr key={g.id} className="bg-white hover:bg-slate-50">
+                  <td className="px-4 py-3">{g.fecha || "-"}</td>
 
-                    <td className="p-3 border">
-                      {g.catalogo_proveedores?.nombre_proveedor || "-"}
-                    </td>
+                  <td className="px-4 py-3">
+                    {g.catalogo_proveedores?.nombre_proveedor || "-"}
+                  </td>
 
-                    <td className="p-3 border">
-                      {g.catalogo_categoria_gastos?.nombre_categoria || "-"}
-                    </td>
+                  <td className="px-4 py-3">
+                    {g.catalogo_categoria_gastos?.nombre_categoria || "-"}
+                  </td>
 
-                    <td className="p-3 border">
-                      <p className="font-semibold">{g.concepto || "-"}</p>
+                  <td className="px-4 py-3">
+                    <p className="font-semibold">{g.concepto || "-"}</p>
 
-                      {g.detalle_gasto && (
-                        <p className="text-xs text-slate-500 mt-1">
-                          {g.detalle_gasto}
-                        </p>
-                      )}
+                    {g.detalle_gasto && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        {g.detalle_gasto}
+                      </p>
+                    )}
 
-                      {g.no_factura && (
-                        <p className="text-xs text-slate-500 mt-1">
-                          Factura: {g.no_factura}
-                        </p>
-                      )}
+                    <div className="mt-1 space-y-0.5 text-xs text-slate-500">
+                      {g.no_factura && <p>Factura: {g.no_factura}</p>}
+                      {g.ncf && <p>NCF: {g.ncf}</p>}
+                    </div>
+                  </td>
 
-                      {g.ncf && (
-                        <p className="text-xs text-slate-500 mt-1">
-                          NCF: {g.ncf}
-                        </p>
-                      )}
-                    </td>
+                  <td className="px-4 py-3 text-right font-bold">
+                    RD$ {dinero(g.total)}
+                  </td>
 
-                    <td className="p-3 border text-right font-bold">
-                      RD$ {dinero(g.total)}
-                    </td>
+                  <td className="px-4 py-3 text-center">
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-bold ${estadoColor(
+                        g
+                      )}`}
+                    >
+                      {etiquetaEstado(g)}
+                    </span>
+                  </td>
 
-                    <td className="p-3 border text-center">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${estadoColor(
-                          g
-                        )}`}
+                  <td className="px-4 py-3 text-center">
+                    {g.factura_url ? (
+                      <a
+                        href={g.factura_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block rounded-lg bg-slate-900 px-3 py-1 text-xs font-bold text-white"
                       >
-                        {etiquetaEstado(g)}
+                        Ver factura
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-400">Sin factura</span>
+                    )}
+                  </td>
+
+                  <td className="px-4 py-3 text-center">
+                    {g.cheque_url ? (
+                      <a
+                        href={g.cheque_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block rounded-lg bg-green-700 px-3 py-1 text-xs font-bold text-white"
+                      >
+                        Ver cheque
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-400">Sin cheque</span>
+                    )}
+
+                    {g.numero_cheque && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        No. {g.numero_cheque}
+                      </p>
+                    )}
+                  </td>
+
+                  <td className="px-4 py-3 text-center">
+                    {g.pagado ? (
+                      <div>
+                        <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
+                          Pagado
+                        </span>
+
+                        {g.fecha_pago && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            {g.fecha_pago}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-700">
+                        Pendiente
                       </span>
-                    </td>
-
-                    <td className="p-3 border text-center">
-                      {g.factura_url ? (
-                        <a
-                          href={g.factura_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="bg-slate-900 text-white px-3 py-1 rounded-lg inline-block text-xs font-bold"
-                        >
-                          Ver factura
-                        </a>
-                      ) : (
-                        <span className="text-slate-400 text-xs">
-                          Sin factura
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="p-3 border text-center">
-                      {g.cheque_url ? (
-                        <a
-                          href={g.cheque_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="bg-green-700 text-white px-3 py-1 rounded-lg inline-block text-xs font-bold"
-                        >
-                          Ver cheque
-                        </a>
-                      ) : (
-                        <span className="text-slate-400 text-xs">
-                          Sin cheque
-                        </span>
-                      )}
-
-                      {g.numero_cheque && (
-                        <p className="text-xs text-slate-500 mt-1">
-                          No. {g.numero_cheque}
-                        </p>
-                      )}
-                    </td>
-
-                    <td className="p-3 border text-center">
-                      {g.pagado ? (
-                        <div>
-                          <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">
-                            Pagado
-                          </span>
-
-                          {g.fecha_pago && (
-                            <p className="text-xs text-slate-500 mt-1">
-                              {g.fecha_pago}
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold">
-                          Pendiente
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-
-                {gastosFiltrados.length === 0 && (
-                  <tr>
-                    <td className="p-6 border text-center" colSpan={9}>
-                      No hay gastos registrados para este condominio.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
         )}
-      </div>
-    </div>
+      </SectionCard>
+    </PageContainer>
   );
 }

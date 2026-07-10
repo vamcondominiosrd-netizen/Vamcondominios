@@ -2,985 +2,903 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/app/lib/supabaseClient";
 import * as XLSX from "xlsx";
+import {
+  AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  ClipboardCheck,
+  FileText,
+  Plus,
+  Printer,
+  ShieldCheck,
+  WalletCards,
+  X,
+} from "lucide-react";
+import { supabase } from "@/app/lib/supabaseClient";
 
-type SolicitudPago = {
-  id: number;
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+
+type SolicitudPagoOperativa = {
+  solicitud_id: number;
+  numero_solicitud: number | null;
   condominio_id: number | null;
   condominio: string | null;
   fecha_solicitud: string | null;
+  proveedor_id: number | null;
+  categoria_id: number | null;
   concepto: string | null;
   detalle: string | null;
   monto: number | null;
   itbis: number | null;
-  total: number | null;
+  total_solicitud: number | null;
   no_factura: string | null;
   ncf: string | null;
   metodo_pago: string | null;
   cuenta_banco: string | null;
   soporte_url: string | null;
+  factura_url?: string | null;
+  cheque_url?: string | null;
   prioridad: string | null;
-  estado: string | null;
+  estado_solicitud: string | null;
   created_by: string | null;
-  created_at: string;
-  proveedor_id: number | null;
-  categoria_id: number | null;
+  created_at: string | null;
+  fecha_revision_tesorero: string | null;
+  comentario_tesorero: string | null;
+  fecha_revision_presidente: string | null;
+  comentario_presidente: string | null;
   gasto_generado_id: number | null;
-
-  catalogo_proveedores?: {
-    nombre_proveedor: string | null;
-  } | null;
-
-  catalogo_categoria_gastos?: {
-    nombre_categoria: string | null;
-  } | null;
-};
-
-type GastoAprobado = {
-  id: number;
-  condominio_id: number | null;
-  fecha: string | null;
-  concepto: string | null;
-  detalle_gasto: string | null;
-  total: number | null;
-  estado: string | null;
-  aprobado_tesorero: boolean | null;
-  aprobado_presidente: boolean | null;
+  gasto_generado_at: string | null;
+  gasto_id: number | null;
+  estado_gasto: string | null;
   pagado: boolean | null;
-  cheque_url: string | null;
-  numero_cheque: string | null;
   fecha_pago: string | null;
-
-  catalogo_proveedores?: {
-    nombre_proveedor: string | null;
-  } | null;
+  cuenta_bancaria_id: number | null;
+  total_gasto: number | null;
+  movimientos_banco: number | null;
+  total_banco: number | null;
+  ultimo_movimiento_banco_id: number | null;
+  ultima_fecha_banco: string | null;
+  estado_operativo: string | null;
+  proveedor_nombre?: string | null;
+  categoria_nombre?: string | null;
 };
+
+type CuentaBancaria = {
+  id: number;
+  client_id: number | null;
+  condominio_id: number;
+  nombre_banco: string;
+  numero_cuenta: string;
+  tipo_cuenta: string | null;
+  moneda: string | null;
+  activa: boolean | null;
+  balance_actual: number;
+};
+
+type PagoForm = {
+  fecha_pago: string;
+  cuenta_bancaria_id: string;
+  metodo_pago: string;
+  numero_documento: string;
+  referencia_banco: string;
+};
+
+const ESTADOS_OPERATIVOS = [
+  "Pendiente tesorero",
+  "Pendiente presidente",
+  "Aprobada sin gasto",
+  "Lista para pagar",
+  "Pagada",
+  "Revisar: pagado sin banco",
+  "Revisar: gasto no existe",
+  "Revisar: diferencia banco",
+];
+
+function normalizar(valor: string | null | undefined) {
+  return String(valor || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function dinero(valor: number | string | null | undefined) {
+  return Number(valor || 0).toLocaleString("es-DO", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatoFecha(fecha?: string | null) {
+  if (!fecha) return "-";
+  const limpia = String(fecha).split("T")[0];
+  const partes = limpia.split("-");
+  if (partes.length === 3) {
+    const [year, month, day] = partes;
+    return `${day}/${month}/${year}`;
+  }
+  return fecha;
+}
+
+function estadoColor(estado?: string | null) {
+  const e = estado || "";
+
+  if (e === "Pendiente tesorero") {
+    return "bg-yellow-100 text-yellow-800 border-yellow-200";
+  }
+
+  if (e === "Pendiente presidente") {
+    return "bg-blue-100 text-blue-800 border-blue-200";
+  }
+
+  if (e === "Aprobada sin gasto") {
+    return "bg-indigo-100 text-indigo-800 border-indigo-200";
+  }
+
+  if (e === "Lista para pagar") {
+    return "bg-purple-100 text-purple-800 border-purple-200";
+  }
+
+  if (e === "Pagada") {
+    return "bg-emerald-100 text-emerald-800 border-emerald-200";
+  }
+
+  if (e.startsWith("Revisar")) {
+    return "bg-red-100 text-red-800 border-red-200";
+  }
+
+  return "bg-slate-100 text-slate-700 border-slate-200";
+}
+
+function numeroSolicitud(s: SolicitudPagoOperativa) {
+  return s.numero_solicitud
+    ? String(s.numero_solicitud).padStart(5, "0")
+    : String(s.solicitud_id);
+}
+
+function hoyISO() {
+  return new Date().toISOString().split("T")[0];
+}
 
 export default function SolicitudesPagoPage() {
-  const [solicitudes, setSolicitudes] = useState<SolicitudPago[]>([]);
-  const [gastosAprobados, setGastosAprobados] = useState<GastoAprobado[]>([]);
-
+  const [solicitudes, setSolicitudes] = useState<SolicitudPagoOperativa[]>([]);
+  const [cuentas, setCuentas] = useState<CuentaBancaria[]>([]);
   const [loading, setLoading] = useState(false);
+  const [procesandoId, setProcesandoId] = useState<number | null>(null);
   const [buscar, setBuscar] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("");
-
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
-  const [mensaje, setMensaje] = useState("");
+  const [modalPago, setModalPago] = useState<SolicitudPagoOperativa | null>(
+    null,
+  );
+  const [pagoForm, setPagoForm] = useState<PagoForm>({
+    fecha_pago: hoyISO(),
+    cuenta_bancaria_id: "",
+    metodo_pago: "Cheque",
+    numero_documento: "",
+    referencia_banco: "",
+  });
+  const [chequeArchivo, setChequeArchivo] = useState<File | null>(null);
 
   useEffect(() => {
-    const id = localStorage.getItem("condominio_id") || "";
-    const nombre = localStorage.getItem("condominio_nombre") || "";
+    const idGuardado = localStorage.getItem("condominio_id") || "";
+    const nombreGuardado = localStorage.getItem("condominio_nombre") || "";
 
-    if (!id) {
-      setMensaje("No hay condominio activo. Debe iniciar sesión nuevamente.");
-      return;
+    setCondominioId(idGuardado);
+    setCondominioNombre(nombreGuardado);
+
+    if (idGuardado || nombreGuardado) {
+      cargarSolicitudes(idGuardado, nombreGuardado);
+      cargarCuentasBancarias(idGuardado);
     }
-
-    const nombreFinal = nombre || `Condominio ID ${id}`;
-
-    setCondominioId(id);
-    setCondominioNombre(nombreFinal);
-
-    cargarTodo(id);
   }, []);
 
-  async function cargarTodo(id: string) {
-    await Promise.all([cargarSolicitudes(id), cargarGastosAprobados(id)]);
-  }
-
-  async function cargarSolicitudes(id: string) {
-    if (!id) return;
-
-    setLoading(true);
-    setMensaje("");
+  async function cargarCuentasBancarias(idActual = condominioId) {
+    if (!idActual) {
+      setCuentas([]);
+      return;
+    }
 
     const { data, error } = await supabase
-      .from("solicitudes_pago")
-      .select(`
-        id,
-        condominio_id,
-        condominio,
-        fecha_solicitud,
-        concepto,
-        detalle,
-        monto,
-        itbis,
-        total,
-        no_factura,
-        ncf,
-        metodo_pago,
-        cuenta_banco,
-        soporte_url,
-        prioridad,
-        estado,
-        created_by,
-        created_at,
-        proveedor_id,
-        categoria_id,
-        gasto_generado_id,
-        catalogo_proveedores(nombre_proveedor),
-        catalogo_categoria_gastos(nombre_categoria)
-      `)
-      .eq("condominio_id", Number(id))
+      .from("cuentas_bancarias")
+      .select(
+        "id, client_id, condominio_id, nombre_banco, numero_cuenta, tipo_cuenta, moneda, activa, balance_actual",
+      )
+      .eq("condominio_id", Number(idActual))
+      .eq("activa", true)
+      .order("id", { ascending: true });
+
+    if (error) {
+      alert("Error cargando cuentas bancarias: " + error.message);
+      setCuentas([]);
+      return;
+    }
+
+    setCuentas((data as CuentaBancaria[]) || []);
+  }
+
+  async function cargarSolicitudes(
+    idActual = condominioId,
+    nombreActual = condominioNombre,
+  ) {
+    setLoading(true);
+
+    let query = supabase
+      .from("v_solicitudes_pago_operativas")
+      .select("*")
       .order("created_at", { ascending: false });
 
-    if (error) {
-      setMensaje("Error cargando solicitudes: " + error.message);
-      setLoading(false);
-      return;
+    if (idActual) {
+      query = query.eq("condominio_id", Number(idActual));
+    } else if (nombreActual) {
+      query = query.eq("condominio", nombreActual);
     }
 
-    setSolicitudes((data as SolicitudPago[]) || []);
+    const { data, error } = await query;
+
     setLoading(false);
-  }
-
-  async function cargarGastosAprobados(id: string) {
-    const { data, error } = await supabase
-      .from("gastos")
-      .select(`
-        id,
-        condominio_id,
-        fecha,
-        concepto,
-        detalle_gasto,
-        total,
-        estado,
-        aprobado_tesorero,
-        aprobado_presidente,
-        pagado,
-        cheque_url,
-        numero_cheque,
-        fecha_pago,
-        catalogo_proveedores(nombre_proveedor)
-      `)
-      .eq("condominio_id", Number(id))
-      .eq("aprobado_tesorero", true)
-      .eq("aprobado_presidente", true)
-      .or("pagado.eq.false,pagado.is.null")
-      .order("fecha", { ascending: false });
 
     if (error) {
-      setMensaje("Error cargando gastos aprobados: " + error.message);
+      alert("Error cargando solicitudes: " + error.message);
       return;
     }
 
-    setGastosAprobados((data as GastoAprobado[]) || []);
+    setSolicitudes((data as SolicitudPagoOperativa[]) || []);
   }
 
-  function normalizarEstado(estado: string | null | undefined) {
-    const valor = (estado || "").trim().toLowerCase();
-
-    if (
-      valor === "pendiente aprobación tesorero" ||
-      valor === "pendiente aprobacion tesorero" ||
-      valor === "pendiente_tesorero" ||
-      valor === "pendiente tesorero"
-    ) {
-      return "pendiente_tesorero";
-    }
-
-    if (
-      valor === "aprobado por tesorero" ||
-      valor === "aprobada por tesorero" ||
-      valor === "aprobado_tesorero" ||
-      valor === "pendiente_presidente" ||
-      valor === "pendiente aprobación presidente" ||
-      valor === "pendiente aprobacion presidente"
-    ) {
-      return "pendiente_presidente";
-    }
-
-    if (
-      valor === "aprobado por presidente" ||
-      valor === "aprobada por presidente" ||
-      valor === "aprobado_presidente" ||
-      valor === "aprobada_presidente" ||
-      valor === "aprobado" ||
-      valor === "aprobada" ||
-      valor === "aprobado final" ||
-      valor === "aprobado_final"
-    ) {
-      return "aprobado_presidente";
-    }
-
-    if (
-      valor === "gasto generado" ||
-      valor === "generado" ||
-      valor === "convertido en gasto"
-    ) {
-      return "gasto_generado";
-    }
-
-    if (valor.includes("rechazado") || valor.includes("rechazada")) {
-      return "rechazado";
-    }
-
-    if (
-      valor === "cancelada" ||
-      valor === "cancelado" ||
-      valor === "anulada" ||
-      valor === "anulado"
-    ) {
-      return "cancelado";
-    }
-
-    return valor || "sin_estado";
-  }
-
-  function etiquetaEstado(estado: string | null | undefined) {
-    const normalizado = normalizarEstado(estado);
-
-    if (normalizado === "pendiente_tesorero") return "Pendiente tesorero";
-    if (normalizado === "pendiente_presidente") return "Pendiente presidente";
-    if (normalizado === "aprobado_presidente") return "Aprobado presidente";
-    if (normalizado === "gasto_generado") return "Gasto generado";
-    if (normalizado === "rechazado") return estado || "Rechazado";
-    if (normalizado === "cancelado") return estado || "Cancelado";
-
-    return estado || "Sin estado";
-  }
-
-  function estadoColor(estado: string | null | undefined) {
-    const normalizado = normalizarEstado(estado);
-
-    if (normalizado === "pendiente_tesorero") {
-      return "bg-yellow-100 text-yellow-800";
-    }
-
-    if (normalizado === "pendiente_presidente") {
-      return "bg-blue-100 text-blue-800";
-    }
-
-    if (normalizado === "aprobado_presidente") {
-      return "bg-green-100 text-green-800";
-    }
-
-    if (normalizado === "gasto_generado") {
-      return "bg-emerald-100 text-emerald-800";
-    }
-
-    if (normalizado === "rechazado") {
-      return "bg-red-100 text-red-800";
-    }
-
-    if (normalizado === "cancelado") {
-      return "bg-slate-200 text-slate-700";
-    }
-
-    return "bg-slate-100 text-slate-700";
-  }
-
-  function dinero(valor: number | null | undefined) {
-    return Number(valor || 0).toLocaleString("es-DO", {
-      minimumFractionDigits: 2,
-    });
-  }
-
-  function puedeEditarOBorrar(s: SolicitudPago) {
-    const estadoNormalizado = normalizarEstado(s.estado);
-
-    return (
-      !s.gasto_generado_id &&
-      (estadoNormalizado === "pendiente_tesorero" ||
-        estadoNormalizado === "sin_estado" ||
-        !s.estado)
-    );
-  }
-
-  async function borrarSolicitud(s: SolicitudPago) {
-    if (!condominioId) {
-      alert("No hay condominio activo.");
+  async function generarGasto(s: SolicitudPagoOperativa) {
+    if (s.gasto_generado_id || s.gasto_id) {
+      alert("Esta solicitud ya tiene un gasto generado.");
       return;
     }
 
-    if (!puedeEditarOBorrar(s)) {
-      alert(
-        "Esta solicitud no puede borrarse porque ya fue aprobada o procesada."
-      );
+    if (s.estado_operativo !== "Aprobada sin gasto") {
+      alert("Esta solicitud todavía no está lista para generar gasto.");
       return;
     }
 
     const confirmar = confirm(
-      `¿Está seguro que desea borrar la solicitud #${s.id}? Esta acción no se puede deshacer.`
+      `¿Desea generar el gasto de esta solicitud?\n\nSolicitud: ${numeroSolicitud(
+        s,
+      )}\nConcepto: ${s.concepto || ""}\nTotal: RD$ ${dinero(
+        s.total_solicitud,
+      )}`,
     );
 
     if (!confirmar) return;
 
-    const { error } = await supabase
-      .from("solicitudes_pago")
-      .delete()
-      .eq("id", s.id)
-      .eq("condominio_id", Number(condominioId));
+    try {
+      setProcesandoId(s.solicitud_id);
+
+      const { data: gastoData, error: gastoError } = await supabase
+        .from("gastos")
+        .insert([
+          {
+            condominio_id:
+              s.condominio_id || (condominioId ? Number(condominioId) : null),
+            condominio: s.condominio || condominioNombre,
+            fecha: s.fecha_solicitud,
+            categoria: s.categoria_nombre || null,
+            descripcion: s.detalle || s.concepto,
+            proveedor: s.proveedor_nombre || null,
+            proveedor_id: s.proveedor_id,
+            categoria_id: s.categoria_id,
+            concepto: s.concepto,
+            detalle_gasto: s.detalle,
+            monto: Number(s.monto || 0),
+            itbis: Number(s.itbis || 0),
+            total: Number(s.total_solicitud || 0),
+            no_factura: s.no_factura,
+            ncf: s.ncf,
+            metodo_pago: s.metodo_pago,
+            cuenta_banco: s.cuenta_banco,
+            factura_url: s.soporte_url,
+            estado: "Gasto generado",
+            aprobado_tesorero: true,
+            aprobado_presidente: true,
+            fecha_aprobacion_tesorero: s.fecha_revision_tesorero || null,
+            fecha_aprobacion_presidente: s.fecha_revision_presidente || null,
+            pagado: false,
+          },
+        ])
+        .select("id")
+        .single();
+
+      if (gastoError) {
+        alert("Error generando gasto: " + gastoError.message);
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from("solicitudes_pago")
+        .update({
+          estado: "Gasto generado",
+          gasto_generado_id: gastoData.id,
+          gasto_generado_at: new Date().toISOString(),
+        })
+        .eq("id", s.solicitud_id);
+
+      if (updateError) {
+        alert(
+          "El gasto fue generado, pero ocurrió un error actualizando la solicitud: " +
+            updateError.message,
+        );
+        return;
+      }
+
+      alert("Gasto generado correctamente.");
+      cargarSolicitudes();
+    } catch (error: any) {
+      alert(error.message || "Error generando gasto.");
+    } finally {
+      setProcesandoId(null);
+    }
+  }
+
+  function facturaProveedorUrl(s: SolicitudPagoOperativa) {
+    return s.factura_url || s.soporte_url || "";
+  }
+
+  async function subirComprobantePago(archivo: File) {
+    const extension = archivo.name.split(".").pop() || "pdf";
+    const nombreArchivo = `${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(2)}.${extension}`;
+
+    const carpetaCondominio =
+      condominioId || String(modalPago?.condominio_id || "general");
+    const rutaArchivo = `${carpetaCondominio}/cheques-pagos/${nombreArchivo}`;
+
+    const { error } = await supabase.storage
+      .from("soportes-solicitudes-pago")
+      .upload(rutaArchivo, archivo);
 
     if (error) {
-      alert("Error borrando solicitud: " + error.message);
-      return;
-    }
-
-    alert("Solicitud borrada correctamente.");
-    cargarTodo(condominioId);
-  }
-
-  async function generarGasto(s: SolicitudPago) {
-    if (!condominioId) {
-      alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
-      return;
-    }
-
-    if (s.gasto_generado_id) {
-      alert("Esta solicitud ya fue convertida en gasto.");
-      return;
-    }
-
-    const estadoNormalizado = normalizarEstado(s.estado);
-
-    if (estadoNormalizado !== "aprobado_presidente") {
-      alert("Esta solicitud todavía no está aprobada por el presidente.");
-      return;
-    }
-
-    const confirmar = confirm("¿Desea generar automáticamente este gasto?");
-
-    if (!confirmar) return;
-
-    const { data: gastoData, error: gastoError } = await supabase
-      .from("gastos")
-      .insert([
-        {
-          condominio_id: Number(condominioId),
-          condominio: condominioNombre || s.condominio,
-          fecha: s.fecha_solicitud,
-          categoria_id: s.categoria_id,
-          proveedor_id: s.proveedor_id,
-          concepto: s.concepto,
-          detalle_gasto: s.detalle,
-          monto: Number(s.monto || 0),
-          itbis: Number(s.itbis || 0),
-          total: Number(s.total || 0),
-          no_factura: s.no_factura,
-          ncf: s.ncf,
-          metodo_pago: s.metodo_pago,
-          cuenta_banco: s.cuenta_banco,
-          factura_url: s.soporte_url,
-          estado: "Aprobado por presidente",
-          aprobado_tesorero: true,
-          aprobado_presidente: true,
-          pagado: false,
-        },
-      ])
-      .select()
-      .single();
-
-    if (gastoError) {
-      alert("Error generando gasto: " + gastoError.message);
-      return;
-    }
-
-    const { error: updateError } = await supabase
-      .from("solicitudes_pago")
-      .update({
-        gasto_generado_id: gastoData.id,
-        gasto_generado_at: new Date().toISOString(),
-        estado: "Gasto generado",
-      })
-      .eq("id", s.id)
-      .eq("condominio_id", Number(condominioId));
-
-    if (updateError) {
-      alert(
-        "El gasto fue generado, pero ocurrió un error actualizando la solicitud: " +
-          updateError.message
-      );
-      return;
-    }
-
-    alert("Gasto generado correctamente.");
-    cargarTodo(condominioId);
-  }
-
-  async function subirCheque(g: GastoAprobado, archivo: File) {
-    if (!archivo) return;
-
-    const extension = archivo.name.split(".").pop();
-    const nombreArchivo = `${condominioId || "general"}/${
-      g.id
-    }-${Date.now()}.${extension}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("cheques-gastos")
-      .upload(nombreArchivo, archivo);
-
-    if (uploadError) {
-      alert("Error subiendo cheque: " + uploadError.message);
-      return;
+      throw new Error("Error subiendo cheque/comprobante: " + error.message);
     }
 
     const { data } = supabase.storage
-      .from("cheques-gastos")
-      .getPublicUrl(nombreArchivo);
+      .from("soportes-solicitudes-pago")
+      .getPublicUrl(rutaArchivo);
 
-    const { error } = await supabase
-      .from("gastos")
-      .update({
-        cheque_url: data.publicUrl,
-      })
-      .eq("id", g.id)
-      .eq("condominio_id", Number(condominioId));
-
-    if (error) {
-      alert(
-        "Cheque subido, pero no se pudo actualizar el gasto: " + error.message
-      );
-      return;
-    }
-
-    alert("Cheque subido correctamente.");
-    cargarTodo(condominioId);
+    return data.publicUrl;
   }
 
-  async function marcarPagado(g: GastoAprobado) {
-    if (!condominioId) {
-      alert("No hay condominio activo.");
+  function abrirModalPago(s: SolicitudPagoOperativa) {
+    if (s.estado_operativo !== "Lista para pagar") {
+      alert("Esta solicitud no está lista para pagar.");
       return;
     }
 
-    if (!g.aprobado_tesorero || !g.aprobado_presidente) {
-      alert("Este gasto debe estar aprobado por tesorero y presidente.");
+    const cuentaDefault =
+      s.cuenta_bancaria_id || (cuentas.length === 1 ? cuentas[0].id : null);
+
+    setPagoForm({
+      fecha_pago: s.fecha_pago || s.fecha_solicitud || hoyISO(),
+      cuenta_bancaria_id: cuentaDefault ? String(cuentaDefault) : "",
+      metodo_pago: s.metodo_pago || "Cheque",
+      numero_documento: "",
+      referencia_banco: "",
+    });
+    setChequeArchivo(null);
+    setModalPago(s);
+  }
+
+  async function completarPago() {
+    if (!modalPago) return;
+
+    if (!modalPago.gasto_generado_id && !modalPago.gasto_id) {
+      alert("Primero debe generar el gasto.");
       return;
     }
 
-    const numeroCheque = prompt("Número de cheque emitido:");
-    if (!numeroCheque) return;
+    if (modalPago.estado_operativo !== "Lista para pagar") {
+      alert("Esta solicitud no está lista para pagar.");
+      return;
+    }
 
-    const fechaPago = prompt("Fecha de pago en formato YYYY-MM-DD:");
-    if (!fechaPago) return;
+    if (!pagoForm.fecha_pago) {
+      alert("Debe indicar la fecha real del pago.");
+      return;
+    }
+
+    if (!pagoForm.cuenta_bancaria_id) {
+      alert("Debe seleccionar la cuenta bancaria del condominio.");
+      return;
+    }
+
+    if (!pagoForm.metodo_pago) {
+      alert("Debe indicar el método de pago.");
+      return;
+    }
+
+    if (!pagoForm.numero_documento) {
+      alert("Debe indicar el número de cheque, transferencia o documento.");
+      return;
+    }
+
+    const referenciaBanco =
+      pagoForm.referencia_banco || pagoForm.numero_documento;
 
     const confirmar = confirm(
-      `¿Desea marcar como pagado el gasto #${g.id} por RD$ ${dinero(g.total)}?`
+      `¿Desea procesar este pago y registrar el EGRESO bancario?\n\nSolicitud: ${numeroSolicitud(
+        modalPago,
+      )}\nConcepto: ${modalPago.concepto || ""}\nTotal: RD$ ${dinero(
+        modalPago.total_solicitud,
+      )}`,
     );
 
     if (!confirmar) return;
 
-    const { error } = await supabase
-      .from("gastos")
-      .update({
-        pagado: true,
-        numero_cheque: numeroCheque,
-        fecha_pago: fechaPago,
-        estado: "Pagado",
-      })
-      .eq("id", g.id)
-      .eq("condominio_id", Number(condominioId));
+    try {
+      setProcesandoId(modalPago.solicitud_id);
 
-    if (error) {
-      alert("Error marcando como pagado: " + error.message);
-      return;
+      let chequeUrl: string | null = null;
+
+      if (chequeArchivo) {
+        chequeUrl = await subirComprobantePago(chequeArchivo);
+      }
+
+      const { data, error } = await supabase.rpc(
+        "pagar_solicitud_pago_bancaria",
+        {
+          p_solicitud_id: modalPago.solicitud_id,
+          p_cuenta_bancaria_id: Number(pagoForm.cuenta_bancaria_id),
+          p_fecha_pago: pagoForm.fecha_pago,
+          p_metodo_pago: pagoForm.metodo_pago,
+          p_numero_documento: pagoForm.numero_documento,
+          p_referencia_banco: referenciaBanco,
+          p_cheque_url: chequeUrl,
+        },
+      );
+
+      if (error) {
+        alert("Error completando el pago: " + error.message);
+        return;
+      }
+
+      alert(data?.mensaje || "Pago completado correctamente.");
+      setModalPago(null);
+      setChequeArchivo(null);
+      cargarSolicitudes();
+    } catch (error: any) {
+      alert(error.message || "Error completando el pago.");
+    } finally {
+      setProcesandoId(null);
     }
-
-    alert("Gasto marcado como pagado correctamente.");
-    cargarTodo(condominioId);
   }
 
   const solicitudesFiltradas = useMemo(() => {
+    const busqueda = normalizar(buscar);
+
     return solicitudes.filter((s) => {
-      const estadoNormalizado = normalizarEstado(s.estado);
+      const estadoOperativo = s.estado_operativo || "";
+      const cumpleEstado =
+        filtroEstado === "" || estadoOperativo === filtroEstado;
 
-      let cumpleEstado = true;
+      const texto = normalizar(
+        `${s.solicitud_id} ${s.numero_solicitud || ""} ${
+          s.concepto || ""
+        } ${s.detalle || ""} ${s.proveedor_nombre || ""} ${
+          s.categoria_nombre || ""
+        } ${s.estado_solicitud || ""} ${s.estado_operativo || ""}`,
+      );
 
-      if (filtroEstado === "pendiente_gasto") {
-        cumpleEstado =
-          estadoNormalizado === "aprobado_presidente" && !s.gasto_generado_id;
-      } else if (filtroEstado) {
-        cumpleEstado = estadoNormalizado === filtroEstado;
-      }
-
-      const texto = `${s.id || ""} ${s.concepto || ""} ${s.detalle || ""} ${
-        s.catalogo_proveedores?.nombre_proveedor || ""
-      } ${s.catalogo_categoria_gastos?.nombre_categoria || ""} ${
-        s.estado || ""
-      }`.toLowerCase();
-
-      const cumpleBusqueda = texto.includes(buscar.toLowerCase());
-
-      return cumpleEstado && cumpleBusqueda;
+      return cumpleEstado && texto.includes(busqueda);
     });
-  }, [solicitudes, buscar, filtroEstado]);
-
-  const gastosAprobadosFiltrados = useMemo(() => {
-    const textoBuscar = buscar.toLowerCase().trim();
-
-    if (!textoBuscar) return gastosAprobados;
-
-    return gastosAprobados.filter((g) => {
-      const texto = `${g.id || ""} ${g.fecha || ""} ${g.concepto || ""} ${
-        g.detalle_gasto || ""
-      } ${g.catalogo_proveedores?.nombre_proveedor || ""} ${
-        g.numero_cheque || ""
-      }`.toLowerCase();
-
-      return texto.includes(textoBuscar);
-    });
-  }, [gastosAprobados, buscar]);
+  }, [solicitudes, filtroEstado, buscar]);
 
   const totalSolicitado = solicitudesFiltradas.reduce(
-    (sum, s) => sum + Number(s.total || 0),
-    0
+    (sum, s) => sum + Number(s.total_solicitud || 0),
+    0,
   );
 
-  const totalAprobadoPendiente = gastosAprobadosFiltrados.reduce(
-    (sum, g) => sum + Number(g.total || 0),
-    0
-  );
+  const resumenEstados = useMemo(() => {
+    const base = new Map<string, { cantidad: number; total: number }>();
 
-  const totalPendienteTesorero = solicitudes.filter(
-    (s) => normalizarEstado(s.estado) === "pendiente_tesorero"
-  ).length;
-
-  const totalPendientePresidente = solicitudes.filter(
-    (s) => normalizarEstado(s.estado) === "pendiente_presidente"
-  ).length;
-
-  const totalPendienteGenerarGasto = solicitudes.filter(
-    (s) =>
-      normalizarEstado(s.estado) === "aprobado_presidente" &&
-      !s.gasto_generado_id
-  ).length;
-
-  function exportarExcel() {
-    if (
-      solicitudesFiltradas.length === 0 &&
-      gastosAprobadosFiltrados.length === 0
-    ) {
-      alert("No hay datos para exportar.");
-      return;
+    for (const s of solicitudes) {
+      const estado = s.estado_operativo || "Sin estado";
+      const actual = base.get(estado) || { cantidad: 0, total: 0 };
+      actual.cantidad += 1;
+      actual.total += Number(s.total_solicitud || 0);
+      base.set(estado, actual);
     }
 
-    const libro = XLSX.utils.book_new();
+    return Array.from(base.entries()).map(([estado, valores]) => ({
+      estado,
+      ...valores,
+    }));
+  }, [solicitudes]);
 
-    const dataSolicitudes = solicitudesFiltradas.map((s) => ({
-      ID: s.id,
-      Condominio: s.condominio || condominioNombre,
+  function exportarExcel() {
+    const dataExcel = solicitudesFiltradas.map((s) => ({
+      ID: s.solicitud_id,
+      "No. Solicitud": s.numero_solicitud || "",
+      Condominio: s.condominio || "",
       Fecha: s.fecha_solicitud || "",
-      Proveedor: s.catalogo_proveedores?.nombre_proveedor || "",
-      Categoría: s.catalogo_categoria_gastos?.nombre_categoria || "",
+      Proveedor:
+        s.proveedor_nombre || (s.proveedor_id ? `ID ${s.proveedor_id}` : ""),
+      Categoría:
+        s.categoria_nombre || (s.categoria_id ? `ID ${s.categoria_id}` : ""),
       Concepto: s.concepto || "",
-      Total: Number(s.total || 0),
-      Estado: etiquetaEstado(s.estado),
-      "Gasto generado": s.gasto_generado_id ? "Sí" : "No",
+      Monto: Number(s.monto || 0),
+      ITBIS: Number(s.itbis || 0),
+      Total: Number(s.total_solicitud || 0),
+      "Estado solicitud": s.estado_solicitud || "",
+      "Estado operativo": s.estado_operativo || "",
+      "No. Factura": s.no_factura || "",
+      NCF: s.ncf || "",
+      "Factura proveedor": facturaProveedorUrl(s),
+      "Cheque / comprobante": s.cheque_url || "",
+      "Gasto ID": s.gasto_id || s.gasto_generado_id || "",
+      "Movimientos banco": Number(s.movimientos_banco || 0),
+      "Total banco": Number(s.total_banco || 0),
     }));
 
-    const dataGastos = gastosAprobadosFiltrados.map((g) => ({
-      ID: g.id,
-      Fecha: g.fecha || "",
-      Proveedor: g.catalogo_proveedores?.nombre_proveedor || "",
-      Concepto: g.concepto || "",
-      Total: Number(g.total || 0),
-      "Aprobado tesorero": g.aprobado_tesorero ? "Sí" : "No",
-      "Aprobado presidente": g.aprobado_presidente ? "Sí" : "No",
-      "No. cheque": g.numero_cheque || "",
-      "Fecha pago": g.fecha_pago || "",
-      Pagado: g.pagado ? "Sí" : "No",
-    }));
-
-    const hojaSolicitudes = XLSX.utils.json_to_sheet(dataSolicitudes);
-    const hojaGastos = XLSX.utils.json_to_sheet(dataGastos);
-
-    XLSX.utils.book_append_sheet(libro, hojaSolicitudes, "Solicitudes");
-    XLSX.utils.book_append_sheet(libro, hojaGastos, "Gastos aprobados");
-
+    const hoja = XLSX.utils.json_to_sheet(dataExcel);
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, "Solicitudes");
     XLSX.writeFile(
       libro,
-      `Solicitudes_y_Gastos_${condominioNombre || "Condominio"}.xlsx`
+      `Solicitudes_${condominioNombre || condominioId}.xlsx`,
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-black text-slate-900">
-              Solicitudes de Pago
-            </h1>
+    <PageContainer>
+      <ModuleMenu
+        title="Solicitudes de Pago"
+        subtitle="Nueva solicitud, aprobaciones, gastos generados, pagos y control bancario."
+        tone="green"
+        items={[
+          { href: "/solicitudes-pago", label: "Listado", icon: ClipboardCheck },
+          {
+            href: "/solicitudes-pago/nueva",
+            label: "Nueva Solicitud",
+            icon: Plus,
+          },
+          {
+            href: "/solicitudes-pago/tesorero",
+            label: "Tesorero",
+            icon: ShieldCheck,
+          },
+          {
+            href: "/solicitudes-pago/presidente",
+            label: "Presidente",
+            icon: ShieldCheck,
+          },
+          {
+            href: "/solicitudes-pago/resumen",
+            label: "Resumen",
+            icon: BarChart3,
+          },
+          { href: "/gastos", label: "Gastos", icon: WalletCards },
+        ]}
+      />
 
-            <p className="text-slate-500 mt-2">
-              Control completo de solicitudes, aprobaciones, generación de
-              gastos y pagos.
-            </p>
-
-            <p className="text-sm text-blue-700 font-bold mt-3">
-              Condominio activo: {condominioNombre || "No seleccionado"}
-            </p>
-          </div>
-
+      <ModuleToolbar
+        title="Solicitudes y Pagos"
+        subtitle={`Condominio activo: ${condominioNombre || "No seleccionado"}`}
+        icon={FileText}
+        actions={
           <div className="flex flex-wrap gap-2">
             <Link
               href="/solicitudes-pago/nueva"
-              className="bg-blue-700 text-white px-4 py-2 rounded-xl hover:bg-blue-800 font-bold"
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800"
             >
+              <Plus className="h-4 w-4" />
               Nueva solicitud
             </Link>
 
             <button
               type="button"
-              onClick={() => cargarTodo(condominioId)}
-              className="bg-slate-700 text-white px-4 py-2 rounded-xl hover:bg-slate-800 font-bold"
-            >
-              Actualizar
-            </button>
-
-            <button
-              type="button"
               onClick={exportarExcel}
-              className="bg-green-700 text-white px-4 py-2 rounded-xl hover:bg-green-800 font-bold"
+              className="rounded-xl bg-green-700 px-4 py-2 text-sm font-bold text-white hover:bg-green-800"
             >
               Exportar
             </button>
           </div>
-        </div>
-      </div>
+        }
+      />
 
-      {mensaje && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">
-          {mensaje}
+      <SectionCard
+        title="Resumen operativo"
+        subtitle="Estado real calculado desde solicitud, gasto y banco."
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-5">
+          {resumenEstados.map((item) => (
+            <div
+              key={item.estado}
+              className="rounded-2xl border bg-white p-4 shadow-sm"
+            >
+              <div
+                className={`mb-2 inline-flex rounded-full border px-3 py-1 text-xs font-black ${estadoColor(
+                  item.estado,
+                )}`}
+              >
+                {item.estado}
+              </div>
+              <div className="text-2xl font-black text-slate-900">
+                {item.cantidad}
+              </div>
+              <div className="text-xs font-semibold text-slate-500">
+                RD$ {dinero(item.total)}
+              </div>
+            </div>
+          ))}
         </div>
-      )}
+      </SectionCard>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl border shadow-sm p-5">
-          <p className="text-sm text-slate-500">Pendiente tesorero</p>
-          <h2 className="text-3xl font-black text-yellow-700">
-            {totalPendienteTesorero}
-          </h2>
-        </div>
-
-        <div className="bg-white rounded-2xl border shadow-sm p-5">
-          <p className="text-sm text-slate-500">Pendiente presidente</p>
-          <h2 className="text-3xl font-black text-blue-700">
-            {totalPendientePresidente}
-          </h2>
-        </div>
-
-        <div className="bg-white rounded-2xl border shadow-sm p-5">
-          <p className="text-sm text-slate-500">Pendiente generar gasto</p>
-          <h2 className="text-3xl font-black text-green-700">
-            {totalPendienteGenerarGasto}
-          </h2>
-        </div>
-
-        <div className="bg-white rounded-2xl border shadow-sm p-5">
-          <p className="text-sm text-slate-500">Aprobados para pago</p>
-          <h2 className="text-3xl font-black text-red-700">
-            {gastosAprobadosFiltrados.length}
-          </h2>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl p-6 shadow-sm border">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <SectionCard
+        title="Filtros"
+        subtitle="Busque solicitudes por estado operativo, proveedor, concepto o número."
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
-            <label className="block text-sm font-semibold mb-1">Estado</label>
-
+            <label className="mb-1 block text-sm font-semibold">
+              Estado operativo
+            </label>
             <select
               value={filtroEstado}
               onChange={(e) => setFiltroEstado(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
+              className="w-full rounded-xl border bg-white px-4 py-3"
             >
               <option value="">Todos</option>
-              <option value="pendiente_tesorero">Pendiente tesorero</option>
-              <option value="pendiente_presidente">Pendiente presidente</option>
-              <option value="aprobado_presidente">Aprobado presidente</option>
-              <option value="pendiente_gasto">Pendiente generar gasto</option>
-              <option value="gasto_generado">Gasto generado</option>
-              <option value="rechazado">Rechazado</option>
-              <option value="cancelado">Cancelado</option>
+              {ESTADOS_OPERATIVOS.map((estado) => (
+                <option key={estado} value={estado}>
+                  {estado}
+                </option>
+              ))}
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">Buscar</label>
-
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-semibold">Buscar</label>
             <input
               type="text"
               value={buscar}
               onChange={(e) => setBuscar(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="Buscar por proveedor, concepto, detalle o cheque..."
+              className="w-full rounded-xl border px-4 py-3"
+              placeholder="Buscar por concepto, proveedor, ID, número o estado..."
             />
           </div>
         </div>
-      </div>
+      </SectionCard>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm border">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-xl font-black">
-              Gastos aprobados pendientes de pago
-            </h2>
-
-            <p className="text-sm text-slate-500">
-              Desde aquí se sube el cheque, se registra el número y se marca el
-              gasto como pagado.
-            </p>
-          </div>
-
-          <div className="text-lg font-black text-red-700">
-            RD$ {dinero(totalAprobadoPendiente)}
-          </div>
-        </div>
-
-        <div className="overflow-auto border rounded-2xl">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-100">
-              <tr>
-                <th className="p-3 border text-left">ID</th>
-                <th className="p-3 border text-left">Fecha</th>
-                <th className="p-3 border text-left">Proveedor</th>
-                <th className="p-3 border text-left">Concepto</th>
-                <th className="p-3 border text-right">Total</th>
-                <th className="p-3 border text-center">Cheque</th>
-                <th className="p-3 border text-center">Pago</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {gastosAprobadosFiltrados.map((g) => (
-                <tr key={g.id} className="hover:bg-slate-50">
-                  <td className="p-3 border font-bold">{g.id}</td>
-
-                  <td className="p-3 border">{g.fecha || "-"}</td>
-
-                  <td className="p-3 border">
-                    {g.catalogo_proveedores?.nombre_proveedor || "-"}
-                  </td>
-
-                  <td className="p-3 border">
-                    <p className="font-semibold">{g.concepto || "-"}</p>
-
-                    {g.detalle_gasto && (
-                      <p className="text-xs text-slate-500 mt-1">
-                        {g.detalle_gasto}
-                      </p>
-                    )}
-                  </td>
-
-                  <td className="p-3 border text-right font-bold">
-                    RD$ {dinero(g.total)}
-                  </td>
-
-                  <td className="p-3 border text-center">
-                    {g.cheque_url ? (
-                      <a
-                        href={g.cheque_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-green-700 text-white px-3 py-1 rounded-lg inline-block text-xs font-bold"
-                      >
-                        Ver cheque
-                      </a>
-                    ) : (
-                      <label className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-lg text-xs cursor-pointer inline-block font-bold">
-                        Subir cheque
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png,.webp"
-                          className="hidden"
-                          onChange={(e) => {
-                            const archivo = e.target.files?.[0];
-                            if (archivo) subirCheque(g, archivo);
-                            e.currentTarget.value = "";
-                          }}
-                        />
-                      </label>
-                    )}
-
-                    {g.numero_cheque && (
-                      <div className="text-xs text-slate-500 mt-1">
-                        No. {g.numero_cheque}
-                      </div>
-                    )}
-                  </td>
-
-                  <td className="p-3 border text-center">
-                    {g.pagado ? (
-                      <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">
-                        Pagado
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => marcarPagado(g)}
-                        className="bg-red-700 hover:bg-red-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
-                      >
-                        Marcar pagado
-                      </button>
-                    )}
-
-                    {g.fecha_pago && (
-                      <div className="text-xs text-slate-500 mt-1">
-                        {g.fecha_pago}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-
-              {gastosAprobadosFiltrados.length === 0 && (
-                <tr>
-                  <td
-                    className="p-6 border text-center text-slate-500"
-                    colSpan={7}
-                  >
-                    No hay gastos aprobados pendientes de pago para este
-                    condominio.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl p-6 shadow-sm border">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-xl font-black">Listado de solicitudes</h2>
-
-            <p className="text-sm text-slate-500">
-              Solicitudes registradas en el flujo de aprobación.
-            </p>
-          </div>
-
-          <div className="text-lg font-black text-green-700">
-            RD$ {dinero(totalSolicitado)}
-          </div>
-        </div>
-
+      <SectionCard
+        title="Listado de solicitudes"
+        subtitle={`${solicitudesFiltradas.length} solicitud(es). Total filtrado: RD$ ${dinero(
+          totalSolicitado,
+        )}`}
+      >
         {loading ? (
-          <p>Cargando solicitudes...</p>
+          <p className="rounded-xl border bg-slate-50 p-4 text-sm font-semibold text-slate-600">
+            Cargando solicitudes...
+          </p>
         ) : (
-          <div className="overflow-auto border rounded-2xl">
+          <div className="overflow-auto rounded-2xl border">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-100">
+              <thead className="bg-slate-100 text-slate-700">
                 <tr>
-                  <th className="p-3 border text-left">ID</th>
-                  <th className="p-3 border text-left">Proveedor</th>
-                  <th className="p-3 border text-left">Concepto</th>
-                  <th className="p-3 border text-right">Total</th>
-                  <th className="p-3 border text-center">Estado</th>
-                  <th className="p-3 border text-center">Soporte</th>
-                  <th className="p-3 border text-center">Acción</th>
+                  <th className="border p-2 text-left">No.</th>
+                  <th className="border p-2 text-left">Fecha</th>
+                  <th className="border p-2 text-left">Proveedor</th>
+                  <th className="border p-2 text-left">Concepto</th>
+                  <th className="border p-2 text-right">Total</th>
+                  <th className="border p-2 text-center">Estado operativo</th>
+                  <th className="border p-2 text-center">Banco</th>
+                  <th className="border p-2 text-center">Factura proveedor</th>
+                  <th className="border p-2 text-center">Cheque / pago</th>
+                  <th className="border p-2 text-center">Acciones</th>
                 </tr>
               </thead>
 
               <tbody>
-                {solicitudesFiltradas.map((s) => (
-                  <tr key={s.id} className="hover:bg-slate-50">
-                    <td className="p-3 border font-bold">{s.id}</td>
+                {solicitudesFiltradas.map((s) => {
+                  const estadoOperativo = s.estado_operativo || "Revisar";
+                  const puedeGenerarGasto =
+                    estadoOperativo === "Aprobada sin gasto";
+                  const puedePagar = estadoOperativo === "Lista para pagar";
+                  const esPagada = estadoOperativo === "Pagada";
+                  const requiereRevision =
+                    estadoOperativo.startsWith("Revisar");
 
-                    <td className="p-3 border">
-                      {s.catalogo_proveedores?.nombre_proveedor || "-"}
-                    </td>
+                  return (
+                    <tr key={s.solicitud_id} className="hover:bg-slate-50">
+                      <td className="border p-2 align-top">
+                        <div className="font-black text-slate-900">
+                          {numeroSolicitud(s)}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          ID {s.solicitud_id}
+                        </div>
+                      </td>
 
-                    <td className="p-3 border">
-                      <p className="font-semibold">{s.concepto || "-"}</p>
+                      <td className="border p-2 align-top">
+                        {formatoFecha(s.fecha_solicitud)}
+                      </td>
 
-                      {s.detalle && (
-                        <p className="text-xs text-slate-500 mt-1">
-                          {s.detalle}
-                        </p>
-                      )}
-                    </td>
+                      <td className="border p-2 align-top">
+                        {s.proveedor_nombre ||
+                          (s.proveedor_id
+                            ? `Proveedor ID ${s.proveedor_id}`
+                            : "-")}
+                      </td>
 
-                    <td className="p-3 border text-right font-bold">
-                      RD$ {dinero(s.total)}
-                    </td>
+                      <td className="border p-2 align-top">
+                        <div className="font-semibold text-slate-900">
+                          {s.concepto || "-"}
+                        </div>
+                        {s.detalle && (
+                          <div className="mt-1 max-w-lg text-xs text-slate-500">
+                            {s.detalle}
+                          </div>
+                        )}
+                        {(s.gasto_id || s.gasto_generado_id) && (
+                          <div className="mt-1 text-xs font-bold text-purple-700">
+                            Gasto ID: {s.gasto_id || s.gasto_generado_id}
+                          </div>
+                        )}
+                        {s.estado_solicitud && (
+                          <div className="mt-1 text-xs text-slate-400">
+                            Estado guardado: {s.estado_solicitud}
+                          </div>
+                        )}
+                      </td>
 
-                    <td className="p-3 border text-center">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${estadoColor(
-                          s.estado
-                        )}`}
-                      >
-                        {etiquetaEstado(s.estado)}
-                      </span>
-                    </td>
+                      <td className="border p-2 text-right align-top font-black text-green-700">
+                        RD$ {dinero(s.total_solicitud)}
+                      </td>
 
-                    <td className="p-3 border text-center">
-                      {s.soporte_url ? (
-                        <a
-                          href={s.soporte_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="bg-slate-900 text-white px-3 py-1 rounded-lg inline-block"
+                      <td className="border p-2 text-center align-top">
+                        <span
+                          className={`inline-flex rounded-full border px-3 py-1 text-xs font-black ${estadoColor(
+                            estadoOperativo,
+                          )}`}
                         >
-                          Ver
-                        </a>
-                      ) : (
-                        <span className="text-slate-400">Sin soporte</span>
-                      )}
-                    </td>
+                          {estadoOperativo}
+                        </span>
+                      </td>
 
-                    <td className="p-3 border text-center">
-                      <div className="flex flex-wrap justify-center gap-2">
-                        <Link
-                          href={`/solicitudes-pago/reporte/${s.id}`}
-                          className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
-                        >
-                          Reporte para firma
-                        </Link>
+                      <td className="border p-2 text-center align-top">
+                        {Number(s.movimientos_banco || 0) > 0 ? (
+                          <div className="text-xs">
+                            <div className="font-black text-emerald-700">
+                              Banco OK
+                            </div>
+                            <div className="text-slate-500">
+                              RD$ {dinero(s.total_banco)}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-xs font-semibold text-slate-400">
+                            Sin banco
+                          </div>
+                        )}
+                      </td>
 
-                        {puedeEditarOBorrar(s) && (
-                          <>
-                            <Link
-                              href={`/solicitudes-pago/editar/${s.id}`}
-                              className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                      <td className="border p-2 text-center align-top">
+                        {facturaProveedorUrl(s) ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <a
+                              href={facturaProveedorUrl(s)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex rounded-lg bg-slate-900 px-3 py-1 text-xs font-bold text-white hover:bg-slate-800"
                             >
-                              Editar
-                            </Link>
+                              Ver factura
+                            </a>
+                            {s.no_factura && (
+                              <span className="text-[11px] text-slate-500">
+                                Fact. {s.no_factura}
+                              </span>
+                            )}
+                            {s.ncf && (
+                              <span className="text-[11px] text-slate-500">
+                                NCF {s.ncf}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">
+                            Sin factura
+                          </span>
+                        )}
+                      </td>
 
+                      <td className="border p-2 text-center align-top">
+                        {s.cheque_url ? (
+                          <a
+                            href={s.cheque_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex rounded-lg bg-emerald-700 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-800"
+                          >
+                            Ver cheque
+                          </a>
+                        ) : (
+                          <span className="text-xs text-slate-400">
+                            Sin cheque
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="border p-2 align-top">
+                        <div className="flex flex-col items-center gap-2">
+                          <Link
+                            href={`/solicitudes-pago/reporte/${s.solicitud_id}`}
+                            className="w-full rounded-lg border bg-white px-3 py-2 text-center text-xs font-bold text-slate-700 hover:bg-slate-50"
+                          >
+                            <span className="inline-flex items-center justify-center gap-1">
+                              <Printer className="h-3 w-3" />
+                              Imprimir solicitud
+                            </span>
+                          </Link>
+
+                          {puedeGenerarGasto && (
                             <button
                               type="button"
-                              onClick={() => borrarSolicitud(s)}
-                              className="bg-red-700 hover:bg-red-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                              disabled={procesandoId === s.solicitud_id}
+                              onClick={() => generarGasto(s)}
+                              className="w-full rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
                             >
-                              Borrar
+                              {procesandoId === s.solicitud_id
+                                ? "Procesando..."
+                                : "Generar gasto"}
                             </button>
-                          </>
-                        )}
+                          )}
 
-                        {s.gasto_generado_id ? (
-                          <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">
-                            Gasto generado
-                          </span>
-                        ) : normalizarEstado(s.estado) ===
-                          "aprobado_presidente" ? (
-                          <button
-                            type="button"
-                            onClick={() => generarGasto(s)}
-                            className="bg-blue-700 text-white px-3 py-1 rounded-lg hover:bg-blue-800 text-xs font-bold"
-                          >
-                            Generar gasto
-                          </button>
-                        ) : (
-                          <span className="text-slate-400 text-xs">
-                            Pendiente aprobación
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {puedePagar && (
+                            <button
+                              type="button"
+                              disabled={procesandoId === s.solicitud_id}
+                              onClick={() => abrirModalPago(s)}
+                              className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+                            >
+                              Procesar pago
+                            </button>
+                          )}
+
+                          {esPagada && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
+                              <CheckCircle2 className="h-3 w-3" />
+                              Pagada
+                            </span>
+                          )}
+
+                          {requiereRevision && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-center text-xs font-black text-red-700">
+                              <AlertTriangle className="h-3 w-3" />
+                              Revisar
+                            </span>
+                          )}
+
+                          {!puedeGenerarGasto &&
+                            !puedePagar &&
+                            !esPagada &&
+                            !requiereRevision && (
+                              <span className="text-center text-xs font-semibold text-slate-400">
+                                Pendiente de aprobación
+                              </span>
+                            )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
 
                 {solicitudesFiltradas.length === 0 && (
                   <tr>
                     <td
-                      className="p-6 border text-center text-slate-500"
-                      colSpan={7}
+                      className="border p-6 text-center text-slate-500"
+                      colSpan={10}
                     >
-                      No hay solicitudes registradas para este condominio.
+                      No hay solicitudes registradas.
                     </td>
                   </tr>
                 )}
@@ -988,7 +906,215 @@ export default function SolicitudesPagoPage() {
             </table>
           </div>
         )}
-      </div>
-    </div>
+      </SectionCard>
+
+      {modalPago && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">
+                  Procesar pago
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Solicitud {numeroSolicitud(modalPago)} · RD${" "}
+                  {dinero(modalPago.total_solicitud)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setModalPago(null);
+                  setChequeArchivo(null);
+                }}
+                className="rounded-full bg-slate-100 p-2 text-slate-600 hover:bg-slate-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mb-4 rounded-2xl border bg-slate-50 p-4">
+              <div className="text-sm font-black text-slate-900">
+                {modalPago.concepto || "Solicitud sin concepto"}
+              </div>
+              {modalPago.detalle && (
+                <div className="mt-1 text-sm text-slate-600">
+                  {modalPago.detalle}
+                </div>
+              )}
+
+              <div className="mt-3 grid grid-cols-1 gap-2 text-xs md:grid-cols-3">
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="font-black text-slate-700">No. factura</div>
+                  <div className="text-slate-600">{modalPago.no_factura || "-"}</div>
+                </div>
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="font-black text-slate-700">NCF</div>
+                  <div className="text-slate-600">{modalPago.ncf || "-"}</div>
+                </div>
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="font-black text-slate-700">Factura proveedor</div>
+                  {facturaProveedorUrl(modalPago) ? (
+                    <a
+                      href={facturaProveedorUrl(modalPago)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-bold text-blue-700 underline"
+                    >
+                      Ver factura / soporte
+                    </a>
+                  ) : (
+                    <div className="text-slate-500">Sin factura</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Fecha real de pago
+                </label>
+                <input
+                  type="date"
+                  value={pagoForm.fecha_pago}
+                  onChange={(e) =>
+                    setPagoForm((prev) => ({
+                      ...prev,
+                      fecha_pago: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border px-4 py-3"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Cuenta bancaria del condominio
+                </label>
+                <select
+                  value={pagoForm.cuenta_bancaria_id}
+                  onChange={(e) =>
+                    setPagoForm((prev) => ({
+                      ...prev,
+                      cuenta_bancaria_id: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                >
+                  <option value="">Seleccione cuenta</option>
+                  {cuentas.map((cuenta) => (
+                    <option key={cuenta.id} value={cuenta.id}>
+                      {cuenta.nombre_banco} · {cuenta.numero_cuenta} · RD${" "}
+                      {dinero(cuenta.balance_actual)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Método de pago
+                </label>
+                <select
+                  value={pagoForm.metodo_pago}
+                  onChange={(e) =>
+                    setPagoForm((prev) => ({
+                      ...prev,
+                      metodo_pago: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                >
+                  <option value="Cheque">Cheque</option>
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="Pago electrónico">Pago electrónico</option>
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Otro">Otro</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Número documento
+                </label>
+                <input
+                  type="text"
+                  value={pagoForm.numero_documento}
+                  onChange={(e) =>
+                    setPagoForm((prev) => ({
+                      ...prev,
+                      numero_documento: e.target.value,
+                      referencia_banco:
+                        prev.referencia_banco || e.target.value || "",
+                    }))
+                  }
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Cheque, transferencia o documento"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-semibold">
+                  Referencia bancaria
+                </label>
+                <input
+                  type="text"
+                  value={pagoForm.referencia_banco}
+                  onChange={(e) =>
+                    setPagoForm((prev) => ({
+                      ...prev,
+                      referencia_banco: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Si está vacío usa el número de documento"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-semibold">
+                  Cheque / comprobante de pago
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) =>
+                    setChequeArchivo(e.target.files?.[0] || null)
+                  }
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Este archivo se guardará en el gasto como cheque_url y quedará disponible para consulta.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setModalPago(null);
+                  setChequeArchivo(null);
+                }}
+                className="rounded-xl border px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={procesandoId === modalPago.solicitud_id}
+                onClick={completarPago}
+                className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                {procesandoId === modalPago.solicitud_id
+                  ? "Procesando..."
+                  : "Registrar egreso bancario"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </PageContainer>
   );
 }

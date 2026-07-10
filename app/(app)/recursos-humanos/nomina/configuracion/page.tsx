@@ -8,11 +8,9 @@ type ConfigNomina = {
   id: number;
   condominio_id: number;
   condominio: string;
-
   porcentaje_afp: number;
   porcentaje_sfs: number;
   porcentaje_isr: number;
-
   isr_exento_hasta: number;
   isr_tramo1_hasta: number;
   isr_tramo1_porcentaje: number;
@@ -21,20 +19,16 @@ type ConfigNomina = {
   isr_tramo2_porcentaje: number;
   isr_tramo3_monto_fijo: number;
   isr_tramo3_porcentaje: number;
-
   fecha_vigencia_desde: string;
   fecha_vigencia_hasta: string;
-
   estado: string;
   observacion: string;
-
   created_at: string;
 };
 
 export default function ConfiguracionNominaPage() {
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
-
   const [configuraciones, setConfiguraciones] = useState<ConfigNomina[]>([]);
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -42,36 +36,25 @@ export default function ConfiguracionNominaPage() {
 
   const [porcentajeAfp, setPorcentajeAfp] = useState("2.87");
   const [porcentajeSfs, setPorcentajeSfs] = useState("3.04");
-
   const [isrExentoHasta, setIsrExentoHasta] = useState("416220");
   const [isrTramo1Hasta, setIsrTramo1Hasta] = useState("624329");
   const [isrTramo1Porcentaje, setIsrTramo1Porcentaje] = useState("15");
-
   const [isrTramo2Hasta, setIsrTramo2Hasta] = useState("867123");
   const [isrTramo2MontoFijo, setIsrTramo2MontoFijo] = useState("31216");
   const [isrTramo2Porcentaje, setIsrTramo2Porcentaje] = useState("20");
-
   const [isrTramo3MontoFijo, setIsrTramo3MontoFijo] = useState("79776");
   const [isrTramo3Porcentaje, setIsrTramo3Porcentaje] = useState("25");
-
-  const [fechaDesde, setFechaDesde] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  const [fechaDesde, setFechaDesde] = useState(new Date().toISOString().slice(0, 10));
   const [fechaHasta, setFechaHasta] = useState("");
-
   const [estado, setEstado] = useState("Activo");
   const [observacion, setObservacion] = useState("");
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
     const nombre = localStorage.getItem("condominio_nombre") || "";
-
     setCondominioId(id);
     setCondominioNombre(nombre);
-
-    if (id) {
-      cargarConfiguraciones(id);
-    }
+    if (id) cargarConfiguraciones(id);
   }, []);
 
   async function cargarConfiguraciones(id: string) {
@@ -95,51 +78,38 @@ export default function ConfiguracionNominaPage() {
 
   function limpiarFormulario() {
     setEditandoId(null);
-
     setPorcentajeAfp("2.87");
     setPorcentajeSfs("3.04");
-
     setIsrExentoHasta("416220");
     setIsrTramo1Hasta("624329");
     setIsrTramo1Porcentaje("15");
-
     setIsrTramo2Hasta("867123");
     setIsrTramo2MontoFijo("31216");
     setIsrTramo2Porcentaje("20");
-
     setIsrTramo3MontoFijo("79776");
     setIsrTramo3Porcentaje("25");
-
     setFechaDesde(new Date().toISOString().slice(0, 10));
     setFechaHasta("");
-
     setEstado("Activo");
     setObservacion("");
   }
 
   function editarConfiguracion(config: ConfigNomina) {
     setEditandoId(config.id);
-
     setPorcentajeAfp(String(config.porcentaje_afp ?? 2.87));
     setPorcentajeSfs(String(config.porcentaje_sfs ?? 3.04));
-
     setIsrExentoHasta(String(config.isr_exento_hasta ?? 416220));
     setIsrTramo1Hasta(String(config.isr_tramo1_hasta ?? 624329));
     setIsrTramo1Porcentaje(String(config.isr_tramo1_porcentaje ?? 15));
-
     setIsrTramo2Hasta(String(config.isr_tramo2_hasta ?? 867123));
     setIsrTramo2MontoFijo(String(config.isr_tramo2_monto_fijo ?? 31216));
     setIsrTramo2Porcentaje(String(config.isr_tramo2_porcentaje ?? 20));
-
     setIsrTramo3MontoFijo(String(config.isr_tramo3_monto_fijo ?? 79776));
     setIsrTramo3Porcentaje(String(config.isr_tramo3_porcentaje ?? 25));
-
     setFechaDesde(config.fecha_vigencia_desde || "");
     setFechaHasta(config.fecha_vigencia_hasta || "");
-
     setEstado(config.estado || "Activo");
     setObservacion(config.observacion || "");
-
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -148,9 +118,7 @@ export default function ConfiguracionNominaPage() {
 
     await supabase
       .from("rh_configuracion_nomina")
-      .update({
-        estado: "Inactivo",
-      })
+      .update({ estado: "Inactivo" })
       .eq("condominio_id", Number(condominioId))
       .eq("estado", "Activo");
   }
@@ -202,25 +170,19 @@ export default function ConfiguracionNominaPage() {
     const registro = {
       condominio_id: Number(condominioId),
       condominio: condominioNombre,
-
       porcentaje_afp: Number(porcentajeAfp || 0),
       porcentaje_sfs: Number(porcentajeSfs || 0),
       porcentaje_isr: 0,
-
       isr_exento_hasta: Number(isrExentoHasta || 0),
       isr_tramo1_hasta: Number(isrTramo1Hasta || 0),
       isr_tramo1_porcentaje: Number(isrTramo1Porcentaje || 0),
-
       isr_tramo2_hasta: Number(isrTramo2Hasta || 0),
       isr_tramo2_monto_fijo: Number(isrTramo2MontoFijo || 0),
       isr_tramo2_porcentaje: Number(isrTramo2Porcentaje || 0),
-
       isr_tramo3_monto_fijo: Number(isrTramo3MontoFijo || 0),
       isr_tramo3_porcentaje: Number(isrTramo3Porcentaje || 0),
-
       fecha_vigencia_desde: fechaDesde || null,
       fecha_vigencia_hasta: fechaHasta || null,
-
       estado,
       observacion: observacion.trim(),
     };
@@ -229,9 +191,7 @@ export default function ConfiguracionNominaPage() {
       if (estado === "Activo") {
         await supabase
           .from("rh_configuracion_nomina")
-          .update({
-            estado: "Inactivo",
-          })
+          .update({ estado: "Inactivo" })
           .eq("condominio_id", Number(condominioId))
           .eq("estado", "Activo")
           .neq("id", editandoId);
@@ -273,18 +233,13 @@ export default function ConfiguracionNominaPage() {
   }
 
   async function cambiarEstado(config: ConfigNomina, nuevoEstado: string) {
-    const confirmar = confirm(
-      `¿Desea cambiar esta configuración a "${nuevoEstado}"?`
-    );
-
+    const confirmar = confirm(`¿Desea cambiar esta configuración a "${nuevoEstado}"?`);
     if (!confirmar) return;
 
     if (nuevoEstado === "Activo") {
       await supabase
         .from("rh_configuracion_nomina")
-        .update({
-          estado: "Inactivo",
-        })
+        .update({ estado: "Inactivo" })
         .eq("condominio_id", Number(condominioId))
         .eq("estado", "Activo")
         .neq("id", config.id);
@@ -292,9 +247,7 @@ export default function ConfiguracionNominaPage() {
 
     const { error } = await supabase
       .from("rh_configuracion_nomina")
-      .update({
-        estado: nuevoEstado,
-      })
+      .update({ estado: nuevoEstado })
       .eq("id", config.id)
       .eq("condominio_id", Number(condominioId));
 
@@ -308,10 +261,7 @@ export default function ConfiguracionNominaPage() {
   }
 
   async function eliminarConfiguracion(config: ConfigNomina) {
-    const confirmar = confirm(
-      "¿Seguro que desea eliminar esta configuración de nómina?"
-    );
-
+    const confirmar = confirm("¿Seguro que desea eliminar esta configuración de nómina?");
     if (!confirmar) return;
 
     const { error } = await supabase
@@ -344,305 +294,267 @@ export default function ConfiguracionNominaPage() {
     });
   }
 
+  const inputClass =
+    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500";
+
+  const labelClass = "mb-1 block text-xs font-semibold text-slate-700";
+
   return (
-    <div className="space-y-6">
-     <NominaMenu />
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-4xl font-black text-slate-900">
-          Configuración de Nómina
-        </h1>
+    <div className="mx-auto max-w-7xl space-y-4 px-2 pb-6">
+      <NominaMenu />
 
-        <p className="text-slate-500 mt-2">
-          Configura AFP, SFS y la escala progresiva de ISR usada para calcular
-          la nómina.
-        </p>
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl font-black text-slate-900">
+              Configuración de Nómina
+            </h1>
+            <p className="text-sm text-slate-500">
+              AFP, SFS e ISR para el cálculo automático de nómina.
+            </p>
+          </div>
+
+          <div className="rounded-lg bg-slate-100 px-3 py-2 text-sm">
+            <span className="text-slate-500">Condominio: </span>
+            <span className="font-bold text-slate-800">
+              {condominioNombre || "No identificado"}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <div className="bg-white rounded-2xl p-5 shadow-sm border">
-        <p className="text-sm text-slate-500">Condominio activo</p>
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-black text-blue-900">
+            Configuración activa
+          </h2>
 
-        <h2 className="text-lg font-bold text-slate-900">
-          {condominioNombre || "No identificado"}
-        </h2>
-      </div>
-
-      <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-3xl p-5">
-        <h2 className="font-black text-lg">Configuración activa</h2>
+          {activa && (
+            <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
+              Activo
+            </span>
+          )}
+        </div>
 
         {activa ? (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
-            <div>
-              <p className="text-sm">AFP</p>
-              <p className="text-3xl font-black">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="rounded-lg border bg-white p-3">
+              <p className="text-xs text-slate-500">AFP</p>
+              <p className="text-xl font-black text-slate-900">
                 {mostrarPorcentaje(activa.porcentaje_afp)}%
               </p>
             </div>
 
-            <div>
-              <p className="text-sm">SFS</p>
-              <p className="text-3xl font-black">
+            <div className="rounded-lg border bg-white p-3">
+              <p className="text-xs text-slate-500">SFS</p>
+              <p className="text-xl font-black text-slate-900">
                 {mostrarPorcentaje(activa.porcentaje_sfs)}%
               </p>
             </div>
 
-            <div>
-              <p className="text-sm">ISR exento hasta</p>
-              <p className="text-2xl font-black">
+            <div className="rounded-lg border bg-white p-3">
+              <p className="text-xs text-slate-500">ISR exento anual</p>
+              <p className="text-lg font-black text-slate-900">
                 RD${moneda(activa.isr_exento_hasta)}
               </p>
             </div>
 
-            <div>
-              <p className="text-sm">Vigente desde</p>
-              <p className="text-xl font-black">
+            <div className="rounded-lg border bg-white p-3">
+              <p className="text-xs text-slate-500">Vigente desde</p>
+              <p className="text-lg font-black text-slate-900">
                 {activa.fecha_vigencia_desde || "-"}
               </p>
             </div>
           </div>
         ) : (
-          <p className="text-sm mt-2">
-            No hay configuración activa. Registra una configuración para que el
-            módulo de nómina pueda calcular AFP, SFS e ISR automáticamente.
+          <p className="text-sm text-blue-800">
+            No hay configuración activa registrada.
           </p>
         )}
       </div>
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h2 className="text-xl font-black mb-4">
-          {editandoId
-            ? "Modificar configuración"
-            : "Registrar configuración"}
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <h2 className="mb-4 text-lg font-black text-slate-900">
+          {editandoId ? "Modificar configuración" : "Registrar configuración"}
         </h2>
 
-        <form
-          onSubmit={guardarConfiguracion}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
-          <div className="md:col-span-2">
-            <h3 className="font-black border-b pb-2">
+        <form onSubmit={guardarConfiguracion} className="space-y-4">
+          <div>
+            <h3 className="mb-3 border-b pb-2 text-sm font-black text-slate-800">
               Descuentos porcentuales
             </h3>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+              <div>
+                <label className={labelClass}>AFP %</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={porcentajeAfp}
+                  onChange={(e) => setPorcentajeAfp(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>SFS %</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={porcentajeSfs}
+                  onChange={(e) => setPorcentajeSfs(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Vigencia desde *</label>
+                <input
+                  type="date"
+                  value={fechaDesde}
+                  onChange={(e) => setFechaDesde(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Vigencia hasta</label>
+                <input
+                  type="date"
+                  value={fechaHasta}
+                  onChange={(e) => setFechaHasta(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+            </div>
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">AFP %</label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={porcentajeAfp}
-              onChange={(e) => setPorcentajeAfp(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="2.87"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">SFS %</label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={porcentajeSfs}
-              onChange={(e) => setPorcentajeSfs(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="3.04"
-            />
-          </div>
-
-          <div className="md:col-span-2 mt-4">
-            <h3 className="font-black border-b pb-2">
+            <h3 className="mb-3 border-b pb-2 text-sm font-black text-slate-800">
               Escala anual ISR asalariados
             </h3>
 
-            <p className="text-sm text-slate-500 mt-1">
-              El sistema calcula el ISR mensual anualizando el salario bruto,
-              aplicando esta escala y dividiendo el ISR anual entre 12.
-            </p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+              <div>
+                <label className={labelClass}>Exento hasta RD$</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={isrExentoHasta}
+                  onChange={(e) => setIsrExentoHasta(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Tramo 1 hasta RD$</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={isrTramo1Hasta}
+                  onChange={(e) => setIsrTramo1Hasta(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Tramo 1 %</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={isrTramo1Porcentaje}
+                  onChange={(e) => setIsrTramo1Porcentaje(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Tramo 2 hasta RD$</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={isrTramo2Hasta}
+                  onChange={(e) => setIsrTramo2Hasta(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Tramo 2 monto fijo RD$</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={isrTramo2MontoFijo}
+                  onChange={(e) => setIsrTramo2MontoFijo(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Tramo 2 %</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={isrTramo2Porcentaje}
+                  onChange={(e) => setIsrTramo2Porcentaje(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Tramo 3 monto fijo RD$</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={isrTramo3MontoFijo}
+                  onChange={(e) => setIsrTramo3MontoFijo(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Tramo 3 %</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={isrTramo3Porcentaje}
+                  onChange={(e) => setIsrTramo3Porcentaje(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Exento hasta RD$
-            </label>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div>
+              <label className={labelClass}>Estado</label>
+              <select
+                value={estado}
+                onChange={(e) => setEstado(e.target.value)}
+                className={`${inputClass} bg-white`}
+              >
+                <option value="Activo">Activo</option>
+                <option value="Inactivo">Inactivo</option>
+              </select>
+            </div>
 
-            <input
-              type="number"
-              step="0.01"
-              value={isrExentoHasta}
-              onChange={(e) => setIsrExentoHasta(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="416220"
-            />
+            <div className="md:col-span-3">
+              <label className={labelClass}>Observación</label>
+              <textarea
+                value={observacion}
+                onChange={(e) => setObservacion(e.target.value)}
+                className={inputClass}
+                rows={2}
+                placeholder="Observación o referencia legal"
+              />
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Tramo 1 hasta RD$
-            </label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={isrTramo1Hasta}
-              onChange={(e) => setIsrTramo1Hasta(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="624329"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Tramo 1 %
-            </label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={isrTramo1Porcentaje}
-              onChange={(e) => setIsrTramo1Porcentaje(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="15"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Tramo 2 hasta RD$
-            </label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={isrTramo2Hasta}
-              onChange={(e) => setIsrTramo2Hasta(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="867123"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Tramo 2 monto fijo RD$
-            </label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={isrTramo2MontoFijo}
-              onChange={(e) => setIsrTramo2MontoFijo(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="31216"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Tramo 2 %
-            </label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={isrTramo2Porcentaje}
-              onChange={(e) => setIsrTramo2Porcentaje(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="20"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Tramo 3 monto fijo RD$
-            </label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={isrTramo3MontoFijo}
-              onChange={(e) => setIsrTramo3MontoFijo(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="79776"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Tramo 3 %
-            </label>
-
-            <input
-              type="number"
-              step="0.01"
-              value={isrTramo3Porcentaje}
-              onChange={(e) => setIsrTramo3Porcentaje(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              placeholder="25"
-            />
-          </div>
-
-          <div className="md:col-span-2 mt-4">
-            <h3 className="font-black border-b pb-2">Vigencia</h3>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Vigencia desde *
-            </label>
-
-            <input
-              type="date"
-              value={fechaDesde}
-              onChange={(e) => setFechaDesde(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">
-              Vigencia hasta
-            </label>
-
-            <input
-              type="date"
-              value={fechaHasta}
-              onChange={(e) => setFechaHasta(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">Estado</label>
-
-            <select
-              value={estado}
-              onChange={(e) => setEstado(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
-            >
-              <option value="Activo">Activo</option>
-              <option value="Inactivo">Inactivo</option>
-            </select>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">
-              Observación
-            </label>
-
-            <textarea
-              value={observacion}
-              onChange={(e) => setObservacion(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
-              rows={3}
-              placeholder="Observación o referencia legal de la configuración"
-            />
-          </div>
-
-          <div className="md:col-span-2 flex flex-col md:flex-row gap-3">
+          <div className="flex flex-col gap-2 md:flex-row">
             <button
               type="submit"
               disabled={guardando}
-              className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white px-5 py-3 rounded-xl font-bold"
+              className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800 disabled:bg-slate-400"
             >
               {guardando
                 ? "Guardando..."
@@ -655,7 +567,7 @@ export default function ConfiguracionNominaPage() {
               <button
                 type="button"
                 onClick={limpiarFormulario}
-                className="bg-slate-600 hover:bg-slate-700 text-white px-5 py-3 rounded-xl font-bold"
+                className="rounded-lg bg-slate-600 px-4 py-2 text-sm font-bold text-white hover:bg-slate-700"
               >
                 Cancelar edición
               </button>
@@ -664,83 +576,81 @@ export default function ConfiguracionNominaPage() {
         </form>
       </div>
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h2 className="text-xl font-black mb-4">
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <h2 className="mb-4 text-lg font-black text-slate-900">
           Historial de configuraciones
         </h2>
 
         {loading ? (
-          <div>Cargando configuraciones...</div>
+          <div className="text-sm text-slate-500">
+            Cargando configuraciones...
+          </div>
         ) : (
           <div className="overflow-auto">
-            <table className="min-w-full text-sm">
+            <table className="min-w-full text-xs">
               <thead className="bg-slate-100">
                 <tr>
-                  <th className="p-3 border text-left">Vigencia</th>
-                  <th className="p-3 border text-right">AFP %</th>
-                  <th className="p-3 border text-right">SFS %</th>
-                  <th className="p-3 border text-right">ISR exento</th>
-                  <th className="p-3 border text-right">Tramo 1</th>
-                  <th className="p-3 border text-right">Tramo 2</th>
-                  <th className="p-3 border text-right">Tramo 3</th>
-                  <th className="p-3 border text-center">Estado</th>
-                  <th className="p-3 border text-left">Observación</th>
-                  <th className="p-3 border text-center">Acciones</th>
+                  <th className="border p-2 text-left">Vigencia</th>
+                  <th className="border p-2 text-right">AFP</th>
+                  <th className="border p-2 text-right">SFS</th>
+                  <th className="border p-2 text-right">ISR exento</th>
+                  <th className="border p-2 text-right">Tramo 1</th>
+                  <th className="border p-2 text-right">Tramo 2</th>
+                  <th className="border p-2 text-right">Tramo 3</th>
+                  <th className="border p-2 text-center">Estado</th>
+                  <th className="border p-2 text-left">Observación</th>
+                  <th className="border p-2 text-center">Acciones</th>
                 </tr>
               </thead>
 
               <tbody>
                 {configuraciones.map((config) => (
                   <tr key={config.id} className="hover:bg-slate-50">
-                    <td className="p-3 border">
+                    <td className="border p-2">
                       <p>Desde: {config.fecha_vigencia_desde || "-"}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-[11px] text-slate-500">
                         Hasta: {config.fecha_vigencia_hasta || "Indefinido"}
                       </p>
                     </td>
 
-                    <td className="p-3 border text-right font-bold">
+                    <td className="border p-2 text-right font-bold">
                       {mostrarPorcentaje(config.porcentaje_afp)}%
                     </td>
 
-                    <td className="p-3 border text-right font-bold">
+                    <td className="border p-2 text-right font-bold">
                       {mostrarPorcentaje(config.porcentaje_sfs)}%
                     </td>
 
-                    <td className="p-3 border text-right font-bold">
+                    <td className="border p-2 text-right font-bold">
                       RD${moneda(config.isr_exento_hasta)}
                     </td>
 
-                    <td className="p-3 border text-right">
-                      <p>Hasta RD${moneda(config.isr_tramo1_hasta)}</p>
-                      <p className="text-xs font-bold">
+                    <td className="border p-2 text-right">
+                      <p>RD${moneda(config.isr_tramo1_hasta)}</p>
+                      <p className="font-bold">
                         {mostrarPorcentaje(config.isr_tramo1_porcentaje)}%
                       </p>
                     </td>
 
-                    <td className="p-3 border text-right">
-                      <p>Hasta RD${moneda(config.isr_tramo2_hasta)}</p>
-                      <p className="text-xs">
-                        Fijo RD${moneda(config.isr_tramo2_monto_fijo)}
-                      </p>
-                      <p className="text-xs font-bold">
+                    <td className="border p-2 text-right">
+                      <p>RD${moneda(config.isr_tramo2_hasta)}</p>
+                      <p>Fijo RD${moneda(config.isr_tramo2_monto_fijo)}</p>
+                      <p className="font-bold">
                         {mostrarPorcentaje(config.isr_tramo2_porcentaje)}%
                       </p>
                     </td>
 
-                    <td className="p-3 border text-right">
+                    <td className="border p-2 text-right">
                       <p>Más de RD${moneda(config.isr_tramo2_hasta)}</p>
-                      <p className="text-xs">
-                        Fijo RD${moneda(config.isr_tramo3_monto_fijo)}
-                      </p>
-                      <p className="text-xs font-bold">
+                      <p>Fijo RD${moneda(config.isr_tramo3_monto_fijo)}</p>
+                      <p className="font-bold">
                         {mostrarPorcentaje(config.isr_tramo3_porcentaje)}%
                       </p>
                     </td>
 
-                    <td className="p-3 border text-center">
+                    <td className="border p-2 text-center">
                       <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        className={`rounded-full px-2 py-1 text-[11px] font-bold ${
                           config.estado === "Activo"
                             ? "bg-green-100 text-green-700"
                             : "bg-red-100 text-red-700"
@@ -750,15 +660,13 @@ export default function ConfiguracionNominaPage() {
                       </span>
                     </td>
 
-                    <td className="p-3 border">
-                      {config.observacion || "-"}
-                    </td>
+                    <td className="border p-2">{config.observacion || "-"}</td>
 
-                    <td className="p-3 border">
-                      <div className="flex flex-wrap justify-center gap-2">
+                    <td className="border p-2">
+                      <div className="flex flex-wrap justify-center gap-1">
                         <button
                           onClick={() => editarConfiguracion(config)}
-                          className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
+                          className="rounded bg-slate-700 px-2 py-1 text-[11px] font-bold text-white hover:bg-slate-800"
                         >
                           Editar
                         </button>
@@ -766,14 +674,14 @@ export default function ConfiguracionNominaPage() {
                         {config.estado !== "Activo" ? (
                           <button
                             onClick={() => cambiarEstado(config, "Activo")}
-                            className="bg-green-700 hover:bg-green-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
+                            className="rounded bg-green-700 px-2 py-1 text-[11px] font-bold text-white hover:bg-green-800"
                           >
                             Activar
                           </button>
                         ) : (
                           <button
                             onClick={() => cambiarEstado(config, "Inactivo")}
-                            className="bg-yellow-700 hover:bg-yellow-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
+                            className="rounded bg-yellow-700 px-2 py-1 text-[11px] font-bold text-white hover:bg-yellow-800"
                           >
                             Inactivar
                           </button>
@@ -781,7 +689,7 @@ export default function ConfiguracionNominaPage() {
 
                         <button
                           onClick={() => eliminarConfiguracion(config)}
-                          className="bg-red-700 hover:bg-red-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
+                          className="rounded bg-red-700 px-2 py-1 text-[11px] font-bold text-white hover:bg-red-800"
                         >
                           Eliminar
                         </button>
@@ -793,7 +701,7 @@ export default function ConfiguracionNominaPage() {
                 {configuraciones.length === 0 && (
                   <tr>
                     <td
-                      className="p-6 border text-center text-slate-500"
+                      className="border p-4 text-center text-slate-500"
                       colSpan={10}
                     >
                       No hay configuraciones de nómina registradas.

@@ -1,7 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  CheckCircle,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  UserCog,
+  Users,
+} from "lucide-react";
 import { supabase } from "@/app/lib/supabaseClient";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import PageHeader from "@/components/vam/enterprise/PageHeader";
+import StatCard from "@/components/vam/enterprise/StatCard";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import ActionBar from "@/components/vam/enterprise/ActionBar";
 
 type Directiva = {
   id: number;
@@ -32,16 +46,14 @@ export default function DirectivaUsuariosPage() {
   const [condominioNombre, setCondominioNombre] = useState("");
 
   const [tab, setTab] = useState<"directiva" | "usuarios">("directiva");
-
   const [directiva, setDirectiva] = useState<Directiva[]>([]);
   const [usuarios, setUsuarios] = useState<UsuarioAdmin[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState("");
-
   const [editandoId, setEditandoId] = useState<number | null>(null);
-
+  const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [buscar, setBuscar] = useState("");
 
   const [nombre, setNombre] = useState("");
@@ -122,6 +134,7 @@ export default function DirectivaUsuariosPage() {
 
   function editarDirectiva(item: Directiva) {
     setEditandoId(item.id);
+    setMostrarFormulario(true);
     setNombre(item.nombre || "");
     setCargo(item.cargo || "Presidente");
     setCedula(item.cedula || "");
@@ -132,10 +145,7 @@ export default function DirectivaUsuariosPage() {
     setEstado(item.estado || "Activo");
     setObservacion(item.observacion || "");
 
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function guardarDirectiva(e: React.FormEvent) {
@@ -188,13 +198,12 @@ export default function DirectivaUsuariosPage() {
 
       setMensaje("Miembro de directiva actualizado correctamente.");
       limpiarFormulario();
+      setMostrarFormulario(false);
       cargarDirectiva(condominioId);
       return;
     }
 
-    const { error } = await supabase
-      .from("directiva_condominio")
-      .insert([registro]);
+    const { error } = await supabase.from("directiva_condominio").insert([registro]);
 
     setGuardando(false);
 
@@ -205,23 +214,19 @@ export default function DirectivaUsuariosPage() {
 
     setMensaje("Miembro de directiva registrado correctamente.");
     limpiarFormulario();
+    setMostrarFormulario(false);
     cargarDirectiva(condominioId);
   }
 
   async function cambiarEstadoDirectiva(item: Directiva) {
     const nuevoEstado = item.estado === "Activo" ? "Inactivo" : "Activo";
-
-    const confirmar = confirm(
-      `¿Desea cambiar el estado de ${item.nombre} a ${nuevoEstado}?`
-    );
+    const confirmar = confirm(`¿Desea cambiar el estado de ${item.nombre} a ${nuevoEstado}?`);
 
     if (!confirmar) return;
 
     const { error } = await supabase
       .from("directiva_condominio")
-      .update({
-        estado: nuevoEstado,
-      })
+      .update({ estado: nuevoEstado })
       .eq("id", item.id)
       .eq("condominio_id", Number(condominioId));
 
@@ -234,9 +239,7 @@ export default function DirectivaUsuariosPage() {
   }
 
   async function borrarDirectiva(item: Directiva) {
-    const confirmar = confirm(
-      `¿Seguro que desea borrar de la directiva a ${item.nombre}?`
-    );
+    const confirmar = confirm(`¿Seguro que desea borrar de la directiva a ${item.nombre}?`);
 
     if (!confirmar) return;
 
@@ -257,18 +260,13 @@ export default function DirectivaUsuariosPage() {
 
   async function cambiarEstadoUsuario(usuario: UsuarioAdmin) {
     const nuevoEstado = usuario.estado === "Activo" ? "Inactivo" : "Activo";
-
-    const confirmar = confirm(
-      `¿Desea cambiar el usuario ${usuario.nombre} a ${nuevoEstado}?`
-    );
+    const confirmar = confirm(`¿Desea cambiar el usuario ${usuario.nombre} a ${nuevoEstado}?`);
 
     if (!confirmar) return;
 
     const { error } = await supabase
       .from("usuarios_admin")
-      .update({
-        estado: nuevoEstado,
-      })
+      .update({ estado: nuevoEstado })
       .eq("id", usuario.id)
       .eq("condominio_id", Number(condominioId));
 
@@ -315,72 +313,25 @@ export default function DirectivaUsuariosPage() {
     });
   }, [usuarios, buscar]);
 
-  const totalDirectivaActiva = directiva.filter(
-    (d) => d.estado === "Activo"
-  ).length;
-
-  const totalUsuariosActivos = usuarios.filter(
-    (u) => u.estado === "Activo"
-  ).length;
+  const totalDirectivaActiva = directiva.filter((d) => d.estado === "Activo").length;
+  const totalUsuariosActivos = usuarios.filter((u) => u.estado === "Activo").length;
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-4xl font-black text-slate-900">
-          Directiva y Usuarios
-        </h1>
-
-        <p className="text-slate-500 mt-2">
-          Registro de directiva del condominio y control de usuarios administrativos.
-        </p>
-
-        <p className="text-sm text-blue-700 font-bold mt-3">
-          Condominio activo: {condominioNombre || "No seleccionado"}
-        </p>
-      </div>
-
-      {mensaje && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-xl p-4 text-sm">
-          {mensaje}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Miembros directiva</p>
-          <h2 className="text-3xl font-black">{directiva.length}</h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Directiva activa</p>
-          <h2 className="text-3xl font-black text-green-700">
-            {totalDirectivaActiva}
-          </h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Usuarios</p>
-          <h2 className="text-3xl font-black">{usuarios.length}</h2>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-sm text-slate-500">Usuarios activos</p>
-          <h2 className="text-3xl font-black text-blue-700">
-            {totalUsuariosActivos}
-          </h2>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border shadow-sm p-4">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+    <PageContainer>
+      <PageHeader
+        title="Directiva y Usuarios"
+        subtitle="Registro de directiva del condominio y control de usuarios administrativos."
+        badge="Centro Residencial"
+        icon={ShieldCheck}
+        action={
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setTab("directiva")}
-              className={`px-4 py-2 rounded-xl font-bold ${
+              className={`rounded-xl px-4 py-2.5 text-sm font-bold ${
                 tab === "directiva"
                   ? "bg-blue-700 text-white"
-                  : "bg-slate-100 text-slate-700"
+                  : "border bg-white text-slate-700 hover:bg-slate-50"
               }`}
             >
               Directiva
@@ -389,316 +340,314 @@ export default function DirectivaUsuariosPage() {
             <button
               type="button"
               onClick={() => setTab("usuarios")}
-              className={`px-4 py-2 rounded-xl font-bold ${
+              className={`rounded-xl px-4 py-2.5 text-sm font-bold ${
                 tab === "usuarios"
                   ? "bg-blue-700 text-white"
-                  : "bg-slate-100 text-slate-700"
+                  : "border bg-white text-slate-700 hover:bg-slate-50"
               }`}
             >
-              Usuarios del sistema
+              Usuarios
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (tab === "directiva") {
+                  limpiarFormulario();
+                  setMostrarFormulario((actual) => !actual);
+                }
+              }}
+              className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-800"
+            >
+              {mostrarFormulario ? "Ocultar formulario" : "+ Nueva Directiva"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => cargarTodo(condominioId)}
+              className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Actualizar
             </button>
           </div>
+        }
+      />
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">Buscar</label>
-
-            <input
-              type="text"
-              value={buscar}
-              onChange={(e) => setBuscar(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full md:w-96"
-              placeholder="Buscar..."
-            />
-          </div>
-        </div>
-      </div>
-
-      {tab === "directiva" && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-3xl p-6 shadow-sm border">
-            <h2 className="text-xl font-black mb-4">
-              {editandoId ? "Modificar miembro de directiva" : "Registrar miembro de directiva"}
-            </h2>
-
-            <form
-              onSubmit={guardarDirectiva}
-              className="grid grid-cols-1 md:grid-cols-3 gap-4"
-            >
-              <div>
-                <label className="block text-sm font-semibold mb-1">
-                  Nombre completo *
-                </label>
-
-                <input
-                  type="text"
-                  value={nombre}
-                  onChange={(e) => setNombre(e.target.value)}
-                  className="border rounded-xl px-4 py-3 w-full"
-                  placeholder="Nombre del miembro"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-1">
-                  Cargo *
-                </label>
-
-                <select
-                  value={cargo}
-                  onChange={(e) => setCargo(e.target.value)}
-                  className="border rounded-xl px-4 py-3 w-full bg-white"
-                >
-                  <option value="Presidente">Presidente</option>
-                  <option value="Vicepresidente">Vicepresidente</option>
-                  <option value="Tesorero">Tesorero</option>
-                  <option value="Secretario">Secretario</option>
-                  <option value="Vocal">Vocal</option>
-                  <option value="Administrador">Administrador</option>
-                  <option value="Representante">Representante</option>
-                  <option value="Otro">Otro</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-1">
-                  Cédula
-                </label>
-
-                <input
-                  type="text"
-                  value={cedula}
-                  onChange={(e) => setCedula(e.target.value)}
-                  className="border rounded-xl px-4 py-3 w-full"
-                  placeholder="000-0000000-0"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-1">
-                  Teléfono
-                </label>
-
-                <input
-                  type="text"
-                  value={telefono}
-                  onChange={(e) => setTelefono(e.target.value)}
-                  className="border rounded-xl px-4 py-3 w-full"
-                  placeholder="809-000-0000"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-1">
-                  Correo
-                </label>
-
-                <input
-                  type="email"
-                  value={correo}
-                  onChange={(e) => setCorreo(e.target.value)}
-                  className="border rounded-xl px-4 py-3 w-full"
-                  placeholder="correo@ejemplo.com"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-1">
-                  Estado
-                </label>
-
-                <select
-                  value={estado}
-                  onChange={(e) => setEstado(e.target.value)}
-                  className="border rounded-xl px-4 py-3 w-full bg-white"
-                >
-                  <option value="Activo">Activo</option>
-                  <option value="Inactivo">Inactivo</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-1">
-                  Fecha inicio
-                </label>
-
-                <input
-                  type="date"
-                  value={fechaInicio}
-                  onChange={(e) => setFechaInicio(e.target.value)}
-                  className="border rounded-xl px-4 py-3 w-full"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-1">
-                  Fecha fin
-                </label>
-
-                <input
-                  type="date"
-                  value={fechaFin}
-                  onChange={(e) => setFechaFin(e.target.value)}
-                  className="border rounded-xl px-4 py-3 w-full"
-                />
-              </div>
-
-              <div className="md:col-span-3">
-                <label className="block text-sm font-semibold mb-1">
-                  Observación
-                </label>
-
-                <textarea
-                  value={observacion}
-                  onChange={(e) => setObservacion(e.target.value)}
-                  className="border rounded-xl px-4 py-3 w-full"
-                  rows={3}
-                  placeholder="Observaciones adicionales"
-                />
-              </div>
-
-              <div className="md:col-span-3 flex flex-col md:flex-row gap-3">
-                <button
-                  type="submit"
-                  disabled={guardando}
-                  className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white px-5 py-3 rounded-xl font-bold"
-                >
-                  {guardando
-                    ? "Guardando..."
-                    : editandoId
-                    ? "Guardar cambios"
-                    : "Guardar directiva"}
-                </button>
-
-                {editandoId && (
-                  <button
-                    type="button"
-                    onClick={limpiarFormulario}
-                    className="bg-slate-600 hover:bg-slate-700 text-white px-5 py-3 rounded-xl font-bold"
-                  >
-                    Cancelar edición
-                  </button>
-                )}
-              </div>
-            </form>
-          </div>
-
-          <div className="bg-white rounded-3xl p-6 shadow-sm border">
-            <h2 className="text-xl font-black mb-4">
-              Directiva registrada
-            </h2>
-
-            {loading ? (
-              <p>Cargando directiva...</p>
-            ) : (
-              <div className="overflow-x-auto border rounded-2xl">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left">Nombre</th>
-                      <th className="px-4 py-3 text-left">Cargo</th>
-                      <th className="px-4 py-3 text-left">Teléfono</th>
-                      <th className="px-4 py-3 text-left">Correo</th>
-                      <th className="px-4 py-3 text-center">Estado</th>
-                      <th className="px-4 py-3 text-center">Acción</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {directivaFiltrada.map((d) => (
-                      <tr key={d.id} className="border-t">
-                        <td className="px-4 py-3">
-                          <p className="font-bold">{d.nombre}</p>
-                          <p className="text-xs text-slate-500">
-                            Cédula: {d.cedula || "-"}
-                          </p>
-                        </td>
-
-                        <td className="px-4 py-3">{d.cargo}</td>
-
-                        <td className="px-4 py-3">{d.telefono || "-"}</td>
-
-                        <td className="px-4 py-3">{d.correo || "-"}</td>
-
-                        <td className="px-4 py-3 text-center">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              d.estado === "Activo"
-                                ? "bg-green-100 text-green-700"
-                                : "bg-red-100 text-red-700"
-                            }`}
-                          >
-                            {d.estado}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex flex-wrap justify-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => editarDirectiva(d)}
-                              className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
-                            >
-                              Editar
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => cambiarEstadoDirectiva(d)}
-                              className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
-                            >
-                              {d.estado === "Activo" ? "Inactivar" : "Activar"}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => borrarDirectiva(d)}
-                              className="bg-red-700 hover:bg-red-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
-                            >
-                              Borrar
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-
-                    {directivaFiltrada.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={6}
-                          className="px-4 py-8 text-center text-slate-500"
-                        >
-                          No hay miembros de directiva registrados.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+      {mensaje && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+          {mensaje}
         </div>
       )}
 
-      {tab === "usuarios" && (
-        <div className="bg-white rounded-3xl p-6 shadow-sm border">
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4">
-            <div>
-              <h2 className="text-xl font-black">Usuarios del sistema</h2>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard
+          title="Miembros"
+          value={directiva.length}
+          subtitle="Directiva registrada"
+          icon={Users}
+          tone="blue"
+        />
 
-              <p className="text-sm text-slate-500">
-                Estos son los usuarios administrativos asociados al condominio activo.
-              </p>
-            </div>
+        <StatCard
+          title="Directiva activa"
+          value={totalDirectivaActiva}
+          subtitle="Miembros activos"
+          icon={CheckCircle}
+          tone="green"
+        />
 
-            <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 text-sm max-w-xl">
-              La creación de usuarios con correo y clave se manejará desde el
-              panel Full Administrador para garantizar seguridad.
+        <StatCard
+          title="Usuarios"
+          value={usuarios.length}
+          subtitle="Usuarios admin"
+          icon={UserCog}
+          tone="slate"
+        />
+
+        <StatCard
+          title="Usuarios activos"
+          value={totalUsuariosActivos}
+          subtitle="Con acceso activo"
+          icon={ShieldCheck}
+          tone="blue"
+        />
+      </div>
+
+      {tab === "directiva" && mostrarFormulario && (
+        <SectionCard
+          title={editandoId ? "Modificar miembro de directiva" : "Registrar miembro de directiva"}
+          subtitle="Complete los datos del miembro o representante del condominio."
+        >
+          <form
+            onSubmit={guardarDirectiva}
+            className="grid grid-cols-1 gap-4 md:grid-cols-3"
+          >
+            <input
+              type="text"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="Nombre completo *"
+            />
+
+            <select
+              value={cargo}
+              onChange={(e) => setCargo(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+            >
+              <option value="Presidente">Presidente</option>
+              <option value="Vicepresidente">Vicepresidente</option>
+              <option value="Tesorero">Tesorero</option>
+              <option value="Secretario">Secretario</option>
+              <option value="Vocal">Vocal</option>
+              <option value="Administrador">Administrador</option>
+              <option value="Representante">Representante</option>
+              <option value="Otro">Otro</option>
+            </select>
+
+            <input
+              type="text"
+              value={cedula}
+              onChange={(e) => setCedula(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="Cédula"
+            />
+
+            <input
+              type="text"
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="Teléfono"
+            />
+
+            <input
+              type="email"
+              value={correo}
+              onChange={(e) => setCorreo(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="Correo"
+            />
+
+            <select
+              value={estado}
+              onChange={(e) => setEstado(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+            >
+              <option value="Activo">Activo</option>
+              <option value="Inactivo">Inactivo</option>
+            </select>
+
+            <input
+              type="date"
+              value={fechaInicio}
+              onChange={(e) => setFechaInicio(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+            />
+
+            <input
+              type="date"
+              value={fechaFin}
+              onChange={(e) => setFechaFin(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+            />
+
+            <textarea
+              value={observacion}
+              onChange={(e) => setObservacion(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm md:col-span-3"
+              rows={2}
+              placeholder="Observación"
+            />
+
+            <div className="flex flex-col gap-3 md:col-span-3 md:flex-row">
+              <button
+                type="submit"
+                disabled={guardando}
+                className="rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:bg-slate-400"
+              >
+                {guardando
+                  ? "Guardando..."
+                  : editandoId
+                  ? "Guardar cambios"
+                  : "Guardar directiva"}
+              </button>
+
+              {editandoId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    limpiarFormulario();
+                    setMostrarFormulario(false);
+                  }}
+                  className="rounded-xl bg-slate-600 px-5 py-3 font-bold text-white hover:bg-slate-700"
+                >
+                  Cancelar edición
+                </button>
+              )}
             </div>
+          </form>
+        </SectionCard>
+      )}
+
+      <SectionCard
+        title={tab === "directiva" ? "Directiva registrada" : "Usuarios del sistema"}
+        subtitle={`Condominio activo: ${condominioNombre || "No seleccionado"}`}
+      >
+        <ActionBar
+          search={buscar}
+          onSearch={setBuscar}
+          placeholder={
+            tab === "directiva"
+              ? "Buscar directiva, cargo, cédula, teléfono..."
+              : "Buscar usuario, rol o estado..."
+          }
+        >
+          <div className="inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700">
+            <Search className="h-4 w-4" />
+            {tab === "directiva"
+              ? `${directivaFiltrada.length} registros`
+              : `${usuariosFiltrados.length} usuarios`}
           </div>
+        </ActionBar>
 
-          <div className="overflow-x-auto border rounded-2xl">
+        <div className="mt-4 overflow-x-auto rounded-2xl border">
+          {tab === "directiva" ? (
+            loading ? (
+              <div className="p-6 text-sm text-slate-500">Cargando directiva...</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-slate-100 text-slate-600">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Nombre</th>
+                    <th className="px-4 py-3 text-left">Cargo</th>
+                    <th className="px-4 py-3 text-left">Contacto</th>
+                    <th className="px-4 py-3 text-left">Período</th>
+                    <th className="px-4 py-3 text-center">Estado</th>
+                    <th className="px-4 py-3 text-center">Acción</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-200">
+                  {directivaFiltrada.map((d) => (
+                    <tr key={d.id} className="bg-white hover:bg-slate-50">
+                      <td className="px-4 py-3">
+                        <p className="font-bold text-slate-900">{d.nombre}</p>
+                        <p className="text-xs text-slate-500">
+                          Cédula: {d.cedula || "-"}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-3 font-semibold">{d.cargo}</td>
+
+                      <td className="px-4 py-3">
+                        <p>{d.telefono || "-"}</p>
+                        <p className="text-xs text-slate-500">{d.correo || "-"}</p>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <p>{d.fecha_inicio || "-"}</p>
+                        <p className="text-xs text-slate-500">
+                          Hasta: {d.fecha_fin || "-"}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-3 text-center">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            d.estado === "Activo"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-red-100 text-red-700"
+                          }`}
+                        >
+                          {d.estado}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex flex-wrap justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => editarDirectiva(d)}
+                            className="rounded-lg bg-slate-700 px-3 py-1 text-xs font-bold text-white hover:bg-slate-800"
+                          >
+                            Editar
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => cambiarEstadoDirectiva(d)}
+                            className="rounded-lg bg-blue-700 px-3 py-1 text-xs font-bold text-white hover:bg-blue-800"
+                          >
+                            {d.estado === "Activo" ? "Inactivar" : "Activar"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => borrarDirectiva(d)}
+                            className="rounded-lg bg-red-700 px-3 py-1 text-xs font-bold text-white hover:bg-red-800"
+                          >
+                            Borrar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {directivaFiltrada.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        No hay miembros de directiva registrados.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )
+          ) : (
             <table className="w-full text-sm">
-              <thead className="bg-slate-50">
+              <thead className="bg-slate-100 text-slate-600">
                 <tr>
                   <th className="px-4 py-3 text-left">Nombre</th>
                   <th className="px-4 py-3 text-left">Rol</th>
@@ -707,16 +656,14 @@ export default function DirectivaUsuariosPage() {
                 </tr>
               </thead>
 
-              <tbody>
+              <tbody className="divide-y divide-slate-200">
                 {usuariosFiltrados.map((u) => (
-                  <tr key={u.id} className="border-t">
+                  <tr key={u.id} className="bg-white hover:bg-slate-50">
                     <td className="px-4 py-3 font-bold">{u.nombre}</td>
-
                     <td className="px-4 py-3">{u.rol}</td>
-
                     <td className="px-4 py-3 text-center">
                       <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
                           u.estado === "Activo"
                             ? "bg-green-100 text-green-700"
                             : "bg-red-100 text-red-700"
@@ -725,15 +672,14 @@ export default function DirectivaUsuariosPage() {
                         {u.estado}
                       </span>
                     </td>
-
                     <td className="px-4 py-3 text-center">
                       <button
                         type="button"
                         onClick={() => cambiarEstadoUsuario(u)}
                         className={
                           u.estado === "Activo"
-                            ? "bg-red-700 hover:bg-red-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
-                            : "bg-green-700 hover:bg-green-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                            ? "rounded-lg bg-red-700 px-3 py-1 text-xs font-bold text-white hover:bg-red-800"
+                            : "rounded-lg bg-green-700 px-3 py-1 text-xs font-bold text-white hover:bg-green-800"
                         }
                       >
                         {u.estado === "Activo" ? "Inactivar" : "Activar"}
@@ -744,19 +690,16 @@ export default function DirectivaUsuariosPage() {
 
                 {usuariosFiltrados.length === 0 && (
                   <tr>
-                    <td
-                      colSpan={4}
-                      className="px-4 py-8 text-center text-slate-500"
-                    >
+                    <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
                       No hay usuarios administrativos registrados para este condominio.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
+          )}
         </div>
-      )}
-    </div>
+      </SectionCard>
+    </PageContainer>
   );
 }

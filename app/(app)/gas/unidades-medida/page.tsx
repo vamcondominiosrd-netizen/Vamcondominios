@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { supabase } from "@/app/lib/supabaseClient";
 
 type UnidadMedidaGas = {
   id: number;
+  condominio_id: number;
   nombre: string;
   abreviatura: string | null;
   estado: string | null;
@@ -13,6 +14,7 @@ type UnidadMedidaGas = {
 };
 
 export default function GasUnidadesMedidaPage() {
+  const [condominioId, setCondominioId] = useState<number | null>(null);
   const [unidades, setUnidades] = useState<UnidadMedidaGas[]>([]);
   const [loading, setLoading] = useState(false);
   const [mensaje, setMensaje] = useState("");
@@ -24,16 +26,98 @@ export default function GasUnidadesMedidaPage() {
   const [buscar, setBuscar] = useState("");
 
   useEffect(() => {
-    cargarUnidades();
+    iniciarModulo();
   }, []);
 
-  async function cargarUnidades() {
+  function leerCondominioLocal(): number | null {
+    if (typeof window === "undefined") return null;
+
+    const posiblesKeys = [
+      "condominio_id",
+      "condominioId",
+      "activeCondominioId",
+      "condominio_activo_id",
+    ];
+
+    for (const key of posiblesKeys) {
+      const valor = window.localStorage.getItem(key);
+      const numero = valor ? Number(valor) : NaN;
+
+      if (Number.isFinite(numero) && numero > 0) {
+        return numero;
+      }
+    }
+
+    return null;
+  }
+
+  async function obtenerCondominioActivo(): Promise<number | null> {
+    const localId = leerCondominioLocal();
+
+    if (localId) {
+      return localId;
+    }
+
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData?.user?.id;
+
+    if (!userId) {
+      return null;
+    }
+
+    const { data: perfil } = await supabase
+      .from("profiles")
+      .select("condominio_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const perfilCondominioId = Number(perfil?.condominio_id || 0);
+
+    if (perfilCondominioId > 0) {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("condominio_id", String(perfilCondominioId));
+      }
+
+      return perfilCondominioId;
+    }
+
+    return null;
+  }
+
+  async function iniciarModulo() {
+    setLoading(true);
+    setMensaje("");
+
+    const id = await obtenerCondominioActivo();
+
+    if (!id) {
+      setMensaje(
+        "No se pudo identificar el condominio activo. Revisa el perfil del usuario o el condominio seleccionado."
+      );
+      setLoading(false);
+      return;
+    }
+
+    setCondominioId(id);
+    await cargarUnidades(id);
+    setLoading(false);
+  }
+
+  async function cargarUnidades(idParam?: number) {
+    const id = idParam || condominioId;
+
+    if (!id) {
+      setMensaje("No se encontró el condominio activo.");
+      return;
+    }
+
     setLoading(true);
     setMensaje("");
 
     const { data, error } = await supabase
       .from("gas_unidades_medida")
-      .select("id, nombre, abreviatura, estado, created_at")
+      .select("id, condominio_id, nombre, abreviatura, estado, created_at")
+      .eq("condominio_id", id)
       .order("nombre", { ascending: true });
 
     if (error) {
@@ -61,8 +145,41 @@ export default function GasUnidadesMedidaPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function guardarUnidad(e: React.FormEvent<HTMLFormElement>) {
+  async function validarNombreDuplicado(
+    nombreFinal: string,
+    idActual?: number | null
+  ) {
+    if (!condominioId) return false;
+
+    const { data, error } = await supabase
+      .from("gas_unidades_medida")
+      .select("id")
+      .eq("condominio_id", condominioId)
+      .ilike("nombre", nombreFinal);
+
+    if (error) {
+      console.error("Error validando duplicado:", error.message);
+      return false;
+    }
+
+    const registros = data || [];
+
+    return registros.some((item) => item.id !== idActual);
+  }
+
+  async function guardarUnidad(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
+    const id = condominioId || (await obtenerCondominioActivo());
+
+    if (!id) {
+      alert("No se encontró el condominio activo.");
+      return;
+    }
+
+    if (!condominioId) {
+      setCondominioId(id);
+    }
 
     const nombreFinal = nombre.trim();
     const abreviaturaFinal = abreviatura.trim().toUpperCase();
@@ -75,6 +192,17 @@ export default function GasUnidadesMedidaPage() {
     setLoading(true);
     setMensaje("");
 
+    const existeDuplicado = await validarNombreDuplicado(
+      nombreFinal,
+      editandoId
+    );
+
+    if (existeDuplicado) {
+      alert("Ya existe una unidad de medida con ese nombre en este condominio.");
+      setLoading(false);
+      return;
+    }
+
     if (editandoId) {
       const { error } = await supabase
         .from("gas_unidades_medida")
@@ -83,7 +211,8 @@ export default function GasUnidadesMedidaPage() {
           abreviatura: abreviaturaFinal || null,
           estado,
         })
-        .eq("id", editandoId);
+        .eq("id", editandoId)
+        .eq("condominio_id", id);
 
       if (error) {
         alert("Error actualizando unidad: " + error.message);
@@ -95,6 +224,7 @@ export default function GasUnidadesMedidaPage() {
     } else {
       const { error } = await supabase.from("gas_unidades_medida").insert([
         {
+          condominio_id: id,
           nombre: nombreFinal,
           abreviatura: abreviaturaFinal || null,
           estado,
@@ -111,11 +241,16 @@ export default function GasUnidadesMedidaPage() {
     }
 
     limpiarFormulario();
-    await cargarUnidades();
+    await cargarUnidades(id);
     setLoading(false);
   }
 
   async function cambiarEstado(unidad: UnidadMedidaGas) {
+    if (!condominioId) {
+      alert("No se encontró el condominio activo.");
+      return;
+    }
+
     const nuevoEstado = unidad.estado === "Activo" ? "Inactivo" : "Activo";
 
     const confirmar = confirm(
@@ -124,17 +259,22 @@ export default function GasUnidadesMedidaPage() {
 
     if (!confirmar) return;
 
+    setLoading(true);
+
     const { error } = await supabase
       .from("gas_unidades_medida")
       .update({ estado: nuevoEstado })
-      .eq("id", unidad.id);
+      .eq("id", unidad.id)
+      .eq("condominio_id", condominioId);
 
     if (error) {
       alert("Error cambiando estado: " + error.message);
+      setLoading(false);
       return;
     }
 
-    cargarUnidades();
+    await cargarUnidades(condominioId);
+    setLoading(false);
   }
 
   const unidadesFiltradas = useMemo(() => {
@@ -170,8 +310,15 @@ export default function GasUnidadesMedidaPage() {
 
               <p className="text-slate-500 mt-2 max-w-3xl">
                 Catálogo de unidades usadas para registrar la recepción de gas.
-                Por defecto el sistema trabajará con Galones.
+                Esta pantalla trabaja únicamente con el condominio activo.
               </p>
+
+              {condominioId && (
+                <p className="text-xs text-slate-400 mt-2">
+                  Condominio activo ID:{" "}
+                  <span className="font-bold">{condominioId}</span>
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -184,8 +331,9 @@ export default function GasUnidadesMedidaPage() {
 
               <button
                 type="button"
-                onClick={cargarUnidades}
-                className="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-xl font-bold"
+                onClick={() => cargarUnidades()}
+                disabled={loading || !condominioId}
+                className="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-xl font-bold disabled:opacity-60"
               >
                 Actualizar
               </button>
@@ -241,6 +389,7 @@ export default function GasUnidadesMedidaPage() {
                 onChange={(e) => setNombre(e.target.value)}
                 className="border rounded-xl px-4 py-3 w-full"
                 placeholder="Ej. Galones"
+                disabled={!condominioId}
               />
             </div>
 
@@ -254,6 +403,7 @@ export default function GasUnidadesMedidaPage() {
                 onChange={(e) => setAbreviatura(e.target.value)}
                 className="border rounded-xl px-4 py-3 w-full uppercase"
                 placeholder="Ej. GLS"
+                disabled={!condominioId}
               />
             </div>
 
@@ -265,6 +415,7 @@ export default function GasUnidadesMedidaPage() {
                 value={estado}
                 onChange={(e) => setEstado(e.target.value)}
                 className="border rounded-xl px-4 py-3 w-full bg-white"
+                disabled={!condominioId}
               >
                 <option value="Activo">Activo</option>
                 <option value="Inactivo">Inactivo</option>
@@ -274,7 +425,7 @@ export default function GasUnidadesMedidaPage() {
             <div className="flex gap-2">
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !condominioId}
                 className="bg-purple-700 hover:bg-purple-800 text-white px-5 py-3 rounded-xl font-bold disabled:opacity-60"
               >
                 {editandoId ? "Actualizar" : "Guardar"}
@@ -300,8 +451,7 @@ export default function GasUnidadesMedidaPage() {
                 Listado de unidades
               </h2>
               <p className="text-sm text-slate-500">
-                Galones debe permanecer activo para usarse por defecto en la
-                recepción de gas.
+                Solo se muestran las unidades del condominio activo.
               </p>
             </div>
 
@@ -379,7 +529,9 @@ export default function GasUnidadesMedidaPage() {
                       colSpan={5}
                       className="p-6 border text-center text-slate-500"
                     >
-                      No hay unidades registradas.
+                      {loading
+                        ? "Cargando unidades..."
+                        : "No hay unidades registradas para este condominio."}
                     </td>
                   </tr>
                 )}

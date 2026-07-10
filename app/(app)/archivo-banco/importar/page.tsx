@@ -1,8 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  Banknote,
+  Download,
+  FileSpreadsheet,
+  Filter,
+  ListChecks,
+  RefreshCw,
+  Save,
+  Search,
+  SearchCheck,
+  UploadCloud,
+} from "lucide-react";
 import * as XLSX from "xlsx";
+
 import { supabase } from "@/app/lib/supabaseClient";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import ModuleActions from "@/components/vam/enterprise/ModuleActions";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import DataTable from "@/components/vam/enterprise/DataTable";
+import EmptyState from "@/components/vam/enterprise/EmptyState";
 
 type BancoRow = {
   condominio_id: number;
@@ -30,7 +52,7 @@ function obtenerValor(row: any, posiblesNombres: string[]) {
 
   for (const nombre of posiblesNombres) {
     const key = keys.find(
-      (k) => k.trim().toLowerCase() === nombre.trim().toLowerCase()
+      (k) => k.trim().toLowerCase() === nombre.trim().toLowerCase(),
     );
 
     if (key) return row[key];
@@ -106,7 +128,7 @@ function limpiarTexto(value: any) {
     .trim();
 }
 
-function formatearMoneda(valor: number) {
+function formatearMoneda(valor: number | null | undefined) {
   return new Intl.NumberFormat("es-DO", {
     style: "currency",
     currency: "DOP",
@@ -147,6 +169,11 @@ function obtenerRangoMes(mes: string) {
   return { desde, hasta };
 }
 
+function fechaCorta(valor?: string | null) {
+  if (!valor) return "-";
+  return String(valor).split("T")[0];
+}
+
 export default function ImportarArchivoBancoPage() {
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
@@ -173,10 +200,17 @@ export default function ImportarArchivoBancoPage() {
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
-    const nombre = localStorage.getItem("condominio_nombre") || "";
+    const nombre =
+      localStorage.getItem("condominio_nombre") ||
+      localStorage.getItem("condominio") ||
+      "";
 
     setCondominioId(id);
     setCondominioNombre(nombre);
+
+    if (!id) {
+      alert("No se encontró el condominio activo. Debe iniciar sesión nuevamente.");
+    }
   }, []);
 
   useEffect(() => {
@@ -186,12 +220,14 @@ export default function ImportarArchivoBancoPage() {
   }, [condominioId, mesFiltro]);
 
   async function cargarGuardados(id: string, mes: string) {
+    if (!id) return;
+
     setCargandoGuardados(true);
 
     let query = supabase
       .from("archivo_banco")
       .select(
-        "id, condominio_id, condominio, fecha_posteo, monto_transaccion, no_serial, descripcion, estado"
+        "id, condominio_id, condominio, fecha_posteo, monto_transaccion, no_serial, descripcion, estado",
       )
       .eq("condominio_id", Number(id))
       .order("fecha_posteo", { ascending: false })
@@ -209,10 +245,16 @@ export default function ImportarArchivoBancoPage() {
 
     if (error) {
       alert("Error cargando archivo banco: " + error.message);
+      setGuardados([]);
       return;
     }
 
     setGuardados((data as BancoGuardado[]) || []);
+  }
+
+  async function refrescar() {
+    if (!condominioId) return;
+    await cargarGuardados(condominioId, mesFiltro);
   }
 
   function descargarPlantilla() {
@@ -234,8 +276,14 @@ export default function ImportarArchivoBancoPage() {
     const hoja = XLSX.utils.json_to_sheet(data);
     const libro = XLSX.utils.book_new();
 
-    XLSX.utils.book_append_sheet(libro, hoja, "Plantilla Banco");
+    hoja["!cols"] = [
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 18 },
+      { wch: 45 },
+    ];
 
+    XLSX.utils.book_append_sheet(libro, hoja, "Plantilla Banco");
     XLSX.writeFile(libro, "plantilla-importacion-banco.xlsx");
   }
 
@@ -244,9 +292,7 @@ export default function ImportarArchivoBancoPage() {
 
     const { data, error } = await supabase
       .from("archivo_banco")
-      .select(
-        "id, condominio_id, fecha_posteo, monto_transaccion, no_serial, descripcion"
-      )
+      .select("id, condominio_id, fecha_posteo, monto_transaccion, no_serial, descripcion")
       .eq("condominio_id", Number(condominioId));
 
     if (error) {
@@ -262,12 +308,12 @@ export default function ImportarArchivoBancoPage() {
           monto_transaccion: Number(item.monto_transaccion || 0),
           no_serial: item.no_serial || "",
           descripcion: item.descripcion || "",
-        })
-      )
+        }),
+      ),
     );
 
     const duplicados = registros.filter((row) =>
-      clavesExistentes.has(claveTransaccion(row))
+      clavesExistentes.has(claveTransaccion(row)),
     ).length;
 
     return duplicados;
@@ -311,7 +357,7 @@ export default function ImportarArchivoBancoPage() {
               "Fecha Movimiento",
               "Fecha Banco",
               "Fecha Pago",
-            ])
+            ]),
           );
 
           const monto = normalizarMonto(
@@ -326,7 +372,7 @@ export default function ImportarArchivoBancoPage() {
               "Crédito",
               "Deposito",
               "Depósito",
-            ])
+            ]),
           );
 
           const serial = limpiarTexto(
@@ -338,7 +384,7 @@ export default function ImportarArchivoBancoPage() {
               "Referencia Banco",
               "Documento",
               "No Documento",
-            ])
+            ]),
           );
 
           const descripcion = limpiarTexto(
@@ -351,7 +397,7 @@ export default function ImportarArchivoBancoPage() {
               "Concepto",
               "Concepto Banco",
               "Comentario",
-            ])
+            ]),
           );
 
           return {
@@ -384,18 +430,18 @@ export default function ImportarArchivoBancoPage() {
 
       if (mapped.length === 0) {
         alert(
-          "El archivo no contiene registros válidos. Verifique que tenga Fecha Posteo, Monto Transacción, No Serial y Descripción."
+          "El archivo no contiene registros válidos. Verifique que tenga Fecha Posteo, Monto Transacción, No Serial y Descripción.",
         );
         return;
       }
 
       if (duplicadosBD === mapped.length) {
         alert(
-          "ALERTA: Este archivo parece que ya fue subido anteriormente. Todos los registros ya existen en el sistema."
+          "ALERTA: Este archivo parece que ya fue subido anteriormente. Todos los registros ya existen en el sistema.",
         );
       } else if (duplicadosBD > 0) {
         alert(
-          `ALERTA: Se encontraron ${duplicadosBD} registros que ya existen. El sistema solo importará los registros nuevos.`
+          `ALERTA: Se encontraron ${duplicadosBD} registros que ya existen. El sistema solo importará los registros nuevos.`,
         );
       }
     };
@@ -418,9 +464,7 @@ export default function ImportarArchivoBancoPage() {
 
     const { data: existentes, error: errorExistentes } = await supabase
       .from("archivo_banco")
-      .select(
-        "id, condominio_id, fecha_posteo, monto_transaccion, no_serial, descripcion"
-      )
+      .select("id, condominio_id, fecha_posteo, monto_transaccion, no_serial, descripcion")
       .eq("condominio_id", Number(condominioId));
 
     if (errorExistentes) {
@@ -437,18 +481,18 @@ export default function ImportarArchivoBancoPage() {
           monto_transaccion: Number(item.monto_transaccion || 0),
           no_serial: item.no_serial || "",
           descripcion: item.descripcion || "",
-        })
-      )
+        }),
+      ),
     );
 
     const registrosNuevos = rows.filter(
-      (row) => !clavesExistentes.has(claveTransaccion(row))
+      (row) => !clavesExistentes.has(claveTransaccion(row)),
     );
 
     if (registrosNuevos.length === 0) {
       setLoading(false);
       alert(
-        "ALERTA: Este archivo ya fue subido anteriormente. No se importó ningún registro duplicado."
+        "ALERTA: Este archivo ya fue subido anteriormente. No se importó ningún registro duplicado.",
       );
       return;
     }
@@ -459,7 +503,7 @@ export default function ImportarArchivoBancoPage() {
         `Registros del archivo actual: ${rows.length}\n` +
         `Registros nuevos a importar: ${registrosNuevos.length}\n` +
         `Duplicados omitidos: ${rows.length - registrosNuevos.length}\n\n` +
-        `¿Desea continuar?`
+        `¿Desea continuar?`,
     );
 
     if (!confirmar) {
@@ -467,9 +511,7 @@ export default function ImportarArchivoBancoPage() {
       return;
     }
 
-    const { error } = await supabase
-      .from("archivo_banco")
-      .insert(registrosNuevos);
+    const { error } = await supabase.from("archivo_banco").insert(registrosNuevos);
 
     setLoading(false);
 
@@ -489,22 +531,24 @@ export default function ImportarArchivoBancoPage() {
     cargarGuardados(condominioId, mesFiltro);
   }
 
-  const guardadosFiltrados = guardados.filter((item) => {
-    const texto = `${item.fecha_posteo || ""} ${item.monto_transaccion || ""} ${
-      item.no_serial || ""
-    } ${item.descripcion || ""} ${item.estado || ""}`
-      .toLowerCase()
-      .trim();
+  const guardadosFiltrados = useMemo(() => {
+    return guardados.filter((item) => {
+      const texto = `${item.fecha_posteo || ""} ${item.monto_transaccion || ""} ${
+        item.no_serial || ""
+      } ${item.descripcion || ""} ${item.estado || ""}`
+        .toLowerCase()
+        .trim();
 
-    const coincideBusqueda = texto.includes(busqueda.toLowerCase().trim());
+      const coincideBusqueda = texto.includes(busqueda.toLowerCase().trim());
 
-    const estadoReal = item.estado || "Revisar";
+      const estadoReal = item.estado || "Revisar";
 
-    const coincideEstado =
-      filtroEstado === "Todos" ? true : estadoReal === filtroEstado;
+      const coincideEstado =
+        filtroEstado === "Todos" ? true : estadoReal === filtroEstado;
 
-    return coincideBusqueda && coincideEstado;
-  });
+      return coincideBusqueda && coincideEstado;
+    });
+  }, [guardados, busqueda, filtroEstado]);
 
   function exportarExcel() {
     const data = guardadosFiltrados.map((item) => ({
@@ -524,6 +568,15 @@ export default function ImportarArchivoBancoPage() {
     const hoja = XLSX.utils.json_to_sheet(data);
     const libro = XLSX.utils.book_new();
 
+    hoja["!cols"] = [
+      { wch: 35 },
+      { wch: 15 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 45 },
+      { wch: 18 },
+    ];
+
     XLSX.utils.book_append_sheet(libro, hoja, "Archivo Banco");
 
     const nombreArchivo = `archivo-banco-${condominioNombre || "condominio"}-${
@@ -539,7 +592,7 @@ export default function ImportarArchivoBancoPage() {
 
   const montoPreview = rows.reduce(
     (sum, item) => sum + Number(item.monto_transaccion || 0),
-    0
+    0,
   );
 
   const registrosNuevosPreview = Math.max(totalPreview - duplicadosExistentes, 0);
@@ -547,405 +600,461 @@ export default function ImportarArchivoBancoPage() {
   const totalGuardados = guardados.length;
 
   const totalRevisar = guardados.filter(
-    (item) => (item.estado || "Revisar") === "Revisar"
+    (item) => (item.estado || "Revisar") === "Revisar",
   ).length;
 
   const totalIdentificados = guardados.filter(
-    (item) => item.estado === "Identificado"
+    (item) => item.estado === "Identificado",
   ).length;
 
   const montoGuardado = guardadosFiltrados.reduce(
     (sum, item) => sum + Number(item.monto_transaccion || 0),
-    0
+    0,
   );
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-3xl font-black text-slate-900">
-          Importar Archivo del Banco
-        </h1>
+    <PageContainer>
+      <ModuleMenu
+        title="Pagos Bancarios"
+        subtitle="Importación, identificación y validación de pagos."
+        tone="blue"
+        items={[
+          {
+            href: "/archivo-banco/importar",
+            label: "Importar banco",
+            icon: Banknote,
+          },
+          {
+            href: "/archivo-banco/identificar",
+            label: "Identificar pagos",
+            icon: SearchCheck,
+          },
+          {
+            href: "/pagos-identificados",
+            label: "Pagos identificados",
+            icon: ListChecks,
+          },
+          {
+            href: "/archivo-banco/importar-banco-identificado",
+            label: "Archivo Banco identificados",
+            icon: SearchCheck,
+          },
+        ]}
+      />
 
-        <p className="text-slate-500 mt-2">
-          Descarga la plantilla, completa los datos del banco y sube el archivo.
-          El sistema mostrará solo el archivo actual antes de guardarlo y
-          validará si ya fue importado anteriormente.
-        </p>
-      </div>
+      <ModuleToolbar
+        title="Importar Archivo del Banco"
+        subtitle={`Carga de archivo bancario para identificación de pagos. Condominio: ${
+          condominioNombre || "No identificado"
+        }.`}
+        icon={UploadCloud}
+        actions={
+          <ModuleActions
+            onRefresh={refrescar}
+            extra={
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={descargarPlantilla}
+                  className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  <Download className="h-4 w-4" />
+                  Plantilla
+                </button>
 
-      <div className="bg-white rounded-2xl p-5 shadow-sm border">
-        <p className="text-sm text-slate-500">Condominio activo</p>
+                <button
+                  type="button"
+                  onClick={exportarExcel}
+                  className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Exportar
+                </button>
+              </div>
+            }
+          />
+        }
+      />
 
-        <h2 className="text-lg font-bold text-slate-900">
-          {condominioNombre || "No identificado"}
-        </h2>
+      {!condominioId && (
+        <SectionCard
+          title="Condominio no identificado"
+          subtitle="No se encontró el condominio activo."
+        >
+          <EmptyState
+            title="Debe iniciar sesión nuevamente"
+            description="El sistema no pudo identificar el condominio activo para importar el archivo del banco."
+          />
+        </SectionCard>
+      )}
 
-        {!condominioId && (
-          <p className="text-sm text-red-600 mt-2">
-            No se encontró condominio activo. Debe iniciar sesión nuevamente.
-          </p>
-        )}
-      </div>
-
-      <div className="border rounded-2xl p-5 bg-white shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-xl font-black text-slate-900">
-              Plantilla de inicio
-            </h2>
-
-            <p className="text-sm text-slate-500 mt-1">
-              Descarga esta plantilla para llenar los datos del archivo del
-              banco con el formato correcto.
-            </p>
-          </div>
-
-          <button
-            onClick={descargarPlantilla}
-            className="bg-green-700 hover:bg-green-800 text-white px-5 py-3 rounded-xl font-bold"
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <section className="xl:col-span-2">
+          <SectionCard
+            title="Cargar archivo del banco"
+            subtitle="Seleccione un archivo Excel o CSV para revisar antes de guardar."
+            action={
+              <div className="rounded-xl bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">
+                {nombreArchivoActual || "Sin archivo seleccionado"}
+              </div>
+            }
           >
-            Descargar plantilla Excel
-          </button>
-        </div>
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                <div className="flex items-start gap-3">
+                  <UploadCloud className="mt-1 h-5 w-5 text-blue-700" />
 
-        <div className="bg-slate-50 border rounded-2xl p-4">
-          <p className="text-sm font-semibold text-slate-700">
-            Columnas requeridas:
-          </p>
+                  <div>
+                    <p className="text-sm font-black uppercase text-blue-800">
+                      Importación bancaria
+                    </p>
 
-          <p className="text-sm text-slate-500 mt-1">
-            Fecha Posteo, Monto Transacción, No Serial y Descripción.
-          </p>
-        </div>
-      </div>
+                    <p className="mt-1 text-sm text-slate-600">
+                      El sistema mostrará una vista previa antes de guardar y
+                      validará duplicados contra registros ya importados.
+                    </p>
+                  </div>
+                </div>
+              </div>
 
-      <div className="border rounded-2xl p-5 bg-white shadow-sm">
-        <label className="block text-sm font-semibold mb-2">
-          Seleccionar archivo Excel o CSV
-        </label>
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Seleccionar archivo Excel o CSV
+                </label>
 
-        <input
-          type="file"
-          accept=".xlsx,.xls,.csv"
-          onChange={handleFile}
-          className="block w-full border rounded-xl px-4 py-3"
-        />
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleFile}
+                  className="block w-full rounded-xl border bg-white px-4 py-3 text-sm"
+                />
 
-        <p className="text-xs text-slate-500 mt-2">
-          Al seleccionar el archivo, se mostrará una vista previa solamente del
-          archivo que se está cargando.
-        </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Columnas requeridas: Fecha Posteo, Monto Transacción, No
+                  Serial y Descripción.
+                </p>
+              </div>
+
+              {rows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={guardarEnSupabase}
+                  disabled={loading || registrosNuevosPreview === 0}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {loading ? "Guardando..." : "Guardar en Archivo Banco"}
+                </button>
+              )}
+            </div>
+          </SectionCard>
+        </section>
+
+        <section className="space-y-5">
+          <SectionCard title="Condominio activo" subtitle="Importación actual.">
+            <div className="space-y-3">
+              <InfoLine label="Condominio" value={condominioNombre || "No identificado"} />
+              <InfoLine label="Mes consultado" value={mesFiltro || "Todos"} />
+              <InfoLine label="Registros guardados" value={`${totalGuardados}`} />
+              <InfoLine
+                label="Monto visible"
+                value={formatearMoneda(montoGuardado)}
+                highlight
+              />
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Plantilla"
+            subtitle="Archivo base para importar correctamente."
+          >
+            <button
+              type="button"
+              onClick={descargarPlantilla}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800"
+            >
+              <Download className="h-4 w-4" />
+              Descargar plantilla Excel
+            </button>
+          </SectionCard>
+        </section>
       </div>
 
       {rows.length > 0 && (
-        <div className="space-y-4">
-          <div
-            className={`border rounded-2xl p-4 ${
-              duplicadosExistentes === rows.length
-                ? "bg-red-50 border-red-200"
-                : duplicadosExistentes > 0
-                ? "bg-yellow-50 border-yellow-200"
-                : "bg-blue-50 border-blue-200"
-            }`}
+        <section className="space-y-5">
+          <SectionCard
+            title="Revisión previa del archivo actual"
+            subtitle={`Archivo seleccionado: ${nombreArchivoActual || "Sin nombre"}`}
+            action={
+              duplicadosExistentes > 0 ? (
+                <div className="inline-flex items-center gap-2 rounded-xl bg-yellow-50 px-4 py-2 text-sm font-black text-yellow-700">
+                  <AlertTriangle className="h-4 w-4" />
+                  Duplicados: {duplicadosExistentes}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">
+                  Sin duplicados existentes
+                </div>
+              )
+            }
           >
-            <h2
-              className={`text-lg font-black ${
-                duplicadosExistentes === rows.length
-                  ? "text-red-900"
-                  : duplicadosExistentes > 0
-                  ? "text-yellow-900"
-                  : "text-blue-900"
-              }`}
-            >
-              Revisión previa del archivo actual
-            </h2>
+            <div className="space-y-4">
+              {duplicadosExistentes === rows.length && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">
+                  ALERTA: Este archivo parece que ya fue subido anteriormente.
+                  No se recomienda volver a importarlo.
+                </div>
+              )}
 
-            <p
-              className={`text-sm mt-1 ${
-                duplicadosExistentes === rows.length
-                  ? "text-red-700"
-                  : duplicadosExistentes > 0
-                  ? "text-yellow-700"
-                  : "text-blue-700"
-              }`}
-            >
-              Archivo seleccionado: {nombreArchivoActual || "Sin nombre"}
-            </p>
+              {duplicadosExistentes > 0 && duplicadosExistentes < rows.length && (
+                <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-4 text-sm font-bold text-yellow-700">
+                  ALERTA: Hay registros duplicados. El sistema solo importará
+                  los registros nuevos.
+                </div>
+              )}
 
-            {duplicadosExistentes === rows.length && (
-              <p className="text-sm text-red-700 font-bold mt-2">
-                ALERTA: Este archivo parece que ya fue subido anteriormente. No
-                se recomienda volver a importarlo.
-              </p>
-            )}
+              {duplicadosInternos > 0 && (
+                <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4 text-sm font-bold text-orange-700">
+                  Se encontraron {duplicadosInternos} registros repetidos dentro
+                  del mismo archivo y fueron omitidos en la vista previa.
+                </div>
+              )}
 
-            {duplicadosExistentes > 0 && duplicadosExistentes < rows.length && (
-              <p className="text-sm text-yellow-700 font-bold mt-2">
-                ALERTA: Hay registros duplicados. El sistema solo importará los
-                registros nuevos.
-              </p>
-            )}
-
-            {duplicadosInternos > 0 && (
-              <p className="text-sm text-orange-700 font-bold mt-2">
-                También se encontraron {duplicadosInternos} registros repetidos
-                dentro del mismo archivo y fueron omitidos en la vista previa.
-              </p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white rounded-2xl p-5 shadow-sm border">
-              <p className="text-sm text-slate-500">Registros del archivo</p>
-              <h2 className="text-3xl font-black">{totalPreview}</h2>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                <InfoBox label="Registros" value={`${totalPreview}`} />
+                <InfoBox
+                  label="Nuevos"
+                  value={`${registrosNuevosPreview}`}
+                  tone="emerald"
+                />
+                <InfoBox
+                  label="Duplicados"
+                  value={`${duplicadosExistentes}`}
+                  tone="red"
+                />
+                <InfoBox
+                  label="Monto total"
+                  value={formatearMoneda(montoPreview)}
+                  tone="blue"
+                />
+              </div>
             </div>
+          </SectionCard>
 
-            <div className="bg-white rounded-2xl p-5 shadow-sm border">
-              <p className="text-sm text-slate-500">Registros nuevos</p>
-              <h2 className="text-3xl font-black text-green-700">
-                {registrosNuevosPreview}
-              </h2>
-            </div>
-
-            <div className="bg-white rounded-2xl p-5 shadow-sm border">
-              <p className="text-sm text-slate-500">Duplicados</p>
-              <h2 className="text-3xl font-black text-red-700">
-                {duplicadosExistentes}
-              </h2>
-            </div>
-
-            <div className="bg-white rounded-2xl p-5 shadow-sm border">
-              <p className="text-sm text-slate-500">Monto total</p>
-              <h2 className="text-2xl font-black text-blue-700">
-                {formatearMoneda(montoPreview)}
-              </h2>
-            </div>
-          </div>
-
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white rounded-2xl border shadow-sm p-5">
-            <div>
-              <h2 className="text-lg font-bold">
-                Vista previa del archivo actual
-              </h2>
-
-              <p className="text-sm text-slate-500">
-                Estos registros se guardarán con estado inicial Revisar.
-              </p>
-            </div>
-
-            <button
-              onClick={guardarEnSupabase}
-              disabled={loading || registrosNuevosPreview === 0}
-              className="bg-blue-700 text-white px-5 py-3 rounded-xl hover:bg-blue-800 disabled:opacity-50 font-bold"
-            >
-              {loading ? "Guardando..." : "Guardar en Archivo Banco"}
-            </button>
-          </div>
-
-          <div className="overflow-auto border rounded-2xl bg-white shadow-sm">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-100">
+          <SectionCard
+            title="Vista previa del archivo actual"
+            subtitle="Estos registros se guardarán con estado inicial Revisar."
+          >
+            <DataTable>
+              <thead className="bg-slate-100 text-slate-600">
                 <tr>
-                  <th className="p-3 border text-left">Condominio</th>
-                  <th className="p-3 border text-left">Fecha Posteo</th>
-                  <th className="p-3 border text-right">Monto</th>
-                  <th className="p-3 border text-left">No Serial</th>
-                  <th className="p-3 border text-left">Descripción</th>
-                  <th className="p-3 border text-center">Estado</th>
+                  <th className="px-4 py-3 text-left">Condominio</th>
+                  <th className="px-4 py-3 text-left">Fecha Posteo</th>
+                  <th className="px-4 py-3 text-right">Monto</th>
+                  <th className="px-4 py-3 text-left">No Serial</th>
+                  <th className="px-4 py-3 text-left">Descripción</th>
+                  <th className="px-4 py-3 text-center">Estado</th>
                 </tr>
               </thead>
 
-              <tbody>
+              <tbody className="divide-y divide-slate-200">
                 {rows.map((r, i) => (
-                  <tr key={i}>
-                    <td className="p-3 border font-semibold">
-                      {r.condominio}
-                    </td>
-
-                    <td className="p-3 border font-bold">
-                      {r.fecha_posteo}
-                    </td>
-
-                    <td className="p-3 border text-right font-bold">
+                  <tr key={i} className="bg-white hover:bg-slate-50">
+                    <td className="px-4 py-3 font-semibold">{r.condominio}</td>
+                    <td className="px-4 py-3 font-bold">{fechaCorta(r.fecha_posteo)}</td>
+                    <td className="px-4 py-3 text-right font-black">
                       {formatearMoneda(r.monto_transaccion)}
                     </td>
-
-                    <td className="p-3 border">{r.no_serial || "-"}</td>
-
-                    <td className="p-3 border">{r.descripcion}</td>
-
-                    <td className="p-3 border text-center">
-                      <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold">
+                    <td className="px-4 py-3">{r.no_serial || "-"}</td>
+                    <td className="max-w-[420px] truncate px-4 py-3">
+                      {r.descripcion}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="rounded-full bg-yellow-50 px-3 py-1 text-xs font-black text-yellow-700">
                         {r.estado}
                       </span>
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
-        </div>
+            </DataTable>
+          </SectionCard>
+        </section>
       )}
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
-          <div>
-            <h2 className="text-xl font-black">
-              Archivos del banco importados
-            </h2>
+      <SectionCard
+        title="Archivos del banco importados"
+        subtitle="Consulta las transacciones ya importadas por mes, estado y búsqueda."
+        action={
+          cargandoGuardados ? (
+            <div className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              Cargando
+            </div>
+          ) : (
+            <div className="rounded-xl bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">
+              Registros: {guardadosFiltrados.length}
+            </div>
+          )
+        }
+      >
+        <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-4">
+          <InfoBox label="Total del mes" value={`${totalGuardados}`} />
+          <InfoBox label="En revisar" value={`${totalRevisar}`} tone="yellow" />
+          <InfoBox
+            label="Identificados"
+            value={`${totalIdentificados}`}
+            tone="emerald"
+          />
+          <InfoBox
+            label="Monto visible"
+            value={formatearMoneda(montoGuardado)}
+            tone="blue"
+          />
+        </div>
 
-            <p className="text-sm text-slate-500">
-              Consulta las transacciones ya importadas por mes, estado y
-              búsqueda.
-            </p>
+        <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-4">
+          <div>
+            <label className="mb-1 block text-sm font-semibold">Mes</label>
+            <input
+              type="month"
+              value={mesFiltro}
+              onChange={(e) => setMesFiltro(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+            />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 w-full md:w-auto">
-            <div>
-              <label className="block text-sm font-semibold mb-1">Mes</label>
+          <div>
+            <label className="mb-1 block text-sm font-semibold">Estado</label>
+            <select
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+            >
+              <option value="Todos">Todos</option>
+              <option value="Revisar">Revisar</option>
+              <option value="Identificado">Identificado</option>
+            </select>
+          </div>
 
-              <input
-                type="month"
-                value={mesFiltro}
-                onChange={(e) => setMesFiltro(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full bg-white"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">Estado</label>
-
-              <select
-                value={filtroEstado}
-                onChange={(e) => setFiltroEstado(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full bg-white"
-              >
-                <option value="Todos">Todos</option>
-                <option value="Revisar">Revisar</option>
-                <option value="Identificado">Identificado</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">Buscar</label>
-
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-semibold">Buscar</label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-4 top-3.5 h-4 w-4 text-slate-400" />
               <input
                 value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
-                className="border rounded-xl px-4 py-3 w-full"
+                className="w-full rounded-xl border px-10 py-3 text-sm"
                 placeholder="Fecha, descripción, serial..."
               />
             </div>
-
-            <div className="flex items-end">
-              <button
-                onClick={() => cargarGuardados(condominioId, mesFiltro)}
-                className="bg-slate-700 hover:bg-slate-800 text-white px-5 py-3 rounded-xl font-bold w-full"
-              >
-                Actualizar
-              </button>
-            </div>
-
-            <div className="flex items-end">
-              <button
-                onClick={exportarExcel}
-                className="bg-green-700 hover:bg-green-800 text-white px-5 py-3 rounded-xl font-bold w-full"
-              >
-                Exportar Excel
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
-          <div className="bg-slate-50 rounded-2xl p-5 border">
-            <p className="text-sm text-slate-500">Total del mes</p>
-            <h2 className="text-3xl font-black">{totalGuardados}</h2>
-          </div>
-
-          <div className="bg-slate-50 rounded-2xl p-5 border">
-            <p className="text-sm text-slate-500">En revisar</p>
-            <h2 className="text-3xl font-black text-yellow-700">
-              {totalRevisar}
-            </h2>
-          </div>
-
-          <div className="bg-slate-50 rounded-2xl p-5 border">
-            <p className="text-sm text-slate-500">Identificados</p>
-            <h2 className="text-3xl font-black text-green-700">
-              {totalIdentificados}
-            </h2>
-          </div>
-
-          <div className="bg-slate-50 rounded-2xl p-5 border">
-            <p className="text-sm text-slate-500">Monto visible</p>
-            <h2 className="text-2xl font-black text-blue-700">
-              {formatearMoneda(montoGuardado)}
-            </h2>
           </div>
         </div>
 
         {cargandoGuardados ? (
-          <div>Cargando archivo banco...</div>
+          <p className="text-sm text-slate-500">Cargando archivo banco...</p>
+        ) : guardadosFiltrados.length === 0 ? (
+          <EmptyState
+            title="Sin registros"
+            description="No hay registros del banco cargados para esta consulta."
+          />
         ) : (
-          <div className="overflow-auto border rounded-2xl bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-100">
-                <tr>
-                  <th className="p-3 border text-left">Fecha</th>
-                  <th className="p-3 border text-right">Monto</th>
-                  <th className="p-3 border text-left">No Serial</th>
-                  <th className="p-3 border text-left">Descripción</th>
-                  <th className="p-3 border text-center">Estado</th>
-                </tr>
-              </thead>
+          <DataTable>
+            <thead className="bg-slate-100 text-slate-600">
+              <tr>
+                <th className="px-4 py-3 text-left">Fecha</th>
+                <th className="px-4 py-3 text-right">Monto</th>
+                <th className="px-4 py-3 text-left">No Serial</th>
+                <th className="px-4 py-3 text-left">Descripción</th>
+                <th className="px-4 py-3 text-center">Estado</th>
+              </tr>
+            </thead>
 
-              <tbody>
-                {guardadosFiltrados.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="p-3 border font-bold">
-                      {item.fecha_posteo || "-"}
-                    </td>
+            <tbody className="divide-y divide-slate-200">
+              {guardadosFiltrados.map((item) => (
+                <tr key={item.id} className="bg-white hover:bg-slate-50">
+                  <td className="px-4 py-3 font-bold">
+                    {fechaCorta(item.fecha_posteo)}
+                  </td>
 
-                    <td className="p-3 border text-right font-bold">
-                      {formatearMoneda(item.monto_transaccion)}
-                    </td>
+                  <td className="px-4 py-3 text-right font-black">
+                    {formatearMoneda(item.monto_transaccion)}
+                  </td>
 
-                    <td className="p-3 border">{item.no_serial || "-"}</td>
+                  <td className="px-4 py-3">{item.no_serial || "-"}</td>
 
-                    <td className="p-3 border">
-                      {item.descripcion || "-"}
-                    </td>
+                  <td className="max-w-[520px] truncate px-4 py-3">
+                    {item.descripcion || "-"}
+                  </td>
 
-                    <td className="p-3 border text-center">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${
-                          item.estado === "Identificado"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-yellow-100 text-yellow-700"
-                        }`}
-                      >
-                        {item.estado || "Revisar"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-
-                {guardadosFiltrados.length === 0 && (
-                  <tr>
-                    <td
-                      className="p-6 border text-center text-slate-500"
-                      colSpan={5}
+                  <td className="px-4 py-3 text-center">
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-black ${
+                        item.estado === "Identificado"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-yellow-50 text-yellow-700"
+                      }`}
                     >
-                      No hay registros del banco cargados para esta consulta.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                      {item.estado || "Revisar"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
         )}
-      </div>
+      </SectionCard>
+    </PageContainer>
+  );
+}
+
+function InfoBox({
+  label,
+  value,
+  tone = "slate",
+}: {
+  label: string;
+  value: string;
+  tone?: "slate" | "emerald" | "red" | "blue" | "yellow";
+}) {
+  const toneClass =
+    tone === "emerald"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+      : tone === "red"
+        ? "bg-red-50 text-red-700 border-red-100"
+        : tone === "blue"
+          ? "bg-blue-50 text-blue-700 border-blue-100"
+          : tone === "yellow"
+            ? "bg-yellow-50 text-yellow-700 border-yellow-100"
+            : "bg-white text-slate-800 border-slate-200";
+
+  return (
+    <div className={`rounded-2xl border p-5 shadow-sm ${toneClass}`}>
+      <p className="text-sm font-bold opacity-80">{label}</p>
+      <h2 className="mt-2 text-2xl font-black">{value}</h2>
+    </div>
+  );
+}
+
+function InfoLine({
+  label,
+  value,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-xl border bg-slate-50 px-4 py-3">
+      <span className="text-sm font-semibold text-slate-600">{label}</span>
+      <span
+        className={`text-right text-sm font-black ${
+          highlight ? "text-blue-700" : "text-slate-900"
+        }`}
+      >
+        {value}
+      </span>
     </div>
   );
 }
