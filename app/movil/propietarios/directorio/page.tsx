@@ -1,18 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  Phone,
+  Building2,
+  ChevronDown,
+  Flame,
+  Loader2,
   Mail,
   MessageCircle,
-  UserRound,
+  Phone,
+  RefreshCw,
+  Search,
   Shield,
-  Wrench,
-  Flame,
   Trash2,
-  Building2,
+  UserRound,
+  UsersRound,
+  Wrench,
 } from "lucide-react";
 import { supabase } from "@/app/lib/supabaseClient";
 
@@ -20,6 +25,7 @@ type PropietarioActual = {
   propietario_id: number;
   condominio_id: number;
   condominio_nombre: string;
+  condominio_logo_url?: string;
   unidad_id: number;
   no_apartamento: string;
   nombre_propietario: string;
@@ -39,15 +45,29 @@ function limpiarTelefono(telefono?: string | null) {
   return String(telefono || "").replace(/\D/g, "");
 }
 
-function iconoTipo(tipo?: string | null) {
-  const t = String(tipo || "").toLowerCase();
+function telefonoWhatsApp(telefono?: string | null) {
+  const numeros = limpiarTelefono(telefono);
 
-  if (t.includes("seguridad")) return Shield;
-  if (t.includes("mantenimiento")) return Wrench;
-  if (t.includes("gas")) return Flame;
-  if (t.includes("basura") || t.includes("limpieza")) return Trash2;
-  if (t.includes("administración") || t.includes("administracion"))
+  if (!numeros) return "";
+  if (numeros.length === 10) return `1${numeros}`;
+  if (numeros.length === 11 && numeros.startsWith("1")) return numeros;
+
+  return numeros;
+}
+
+function iconoTipo(tipo?: string | null) {
+  const valor = String(tipo || "").toLowerCase();
+
+  if (valor.includes("seguridad")) return Shield;
+  if (valor.includes("mantenimiento")) return Wrench;
+  if (valor.includes("gas")) return Flame;
+  if (valor.includes("basura") || valor.includes("limpieza")) return Trash2;
+  if (
+    valor.includes("administración") ||
+    valor.includes("administracion")
+  ) {
     return Building2;
+  }
 
   return UserRound;
 }
@@ -55,29 +75,57 @@ function iconoTipo(tipo?: string | null) {
 export default function DirectorioMovilPage() {
   const router = useRouter();
 
-  const [propietario, setPropietario] = useState<PropietarioActual | null>(
-    null
-  );
+  const [propietario, setPropietario] =
+    useState<PropietarioActual | null>(null);
   const [contactos, setContactos] = useState<ContactoDirectorio[]>([]);
   const [tipoFiltro, setTipoFiltro] = useState("Todos");
-  const [loading, setLoading] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [actualizando, setActualizando] = useState(false);
   const [mensaje, setMensaje] = useState("");
 
   useEffect(() => {
-    const raw = localStorage.getItem("propietario_actual");
+    void inicializar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    if (!raw) {
-      router.push("/movil/propietarios/login");
-      return;
-    }
-
-    const prop = JSON.parse(raw);
-    setPropietario(prop);
-    cargarContactos(prop);
-  }, [router]);
-
-  async function cargarContactos(prop: PropietarioActual) {
+  async function inicializar() {
     setLoading(true);
+    setMensaje("");
+
+    try {
+      const raw = localStorage.getItem("propietario_actual");
+
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
+        return;
+      }
+
+      const sesion = JSON.parse(raw) as PropietarioActual;
+
+      if (
+        !sesion?.propietario_id ||
+        !sesion?.condominio_id ||
+        !sesion?.unidad_id
+      ) {
+        router.replace("/movil/propietarios/login");
+        return;
+      }
+
+      setPropietario(sesion);
+      await cargarContactos(sesion);
+    } catch {
+      setMensaje("No se pudo cargar la información del propietario.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function cargarContactos(
+    prop: PropietarioActual,
+    modoActualizacion = false
+  ) {
+    if (modoActualizacion) setActualizando(true);
     setMensaje("");
 
     const { data, error } = await supabase
@@ -96,166 +144,303 @@ export default function DirectorioMovilPage() {
       .order("tipo_contacto", { ascending: true })
       .order("nombre", { ascending: true });
 
-    setLoading(false);
-
     if (error) {
-      setMensaje("Error cargando directorio: " + error.message);
-      return;
+      setMensaje(`No se pudo cargar el directorio: ${error.message}`);
+      setContactos([]);
+    } else {
+      setContactos((data || []) as ContactoDirectorio[]);
     }
 
-    setContactos(data || []);
+    if (modoActualizacion) setActualizando(false);
   }
 
-  const tipos = [
-    "Todos",
-    ...Array.from(
-      new Set(contactos.map((c) => c.tipo_contacto || "General"))
-    ),
-  ];
+  const tipos = useMemo(
+    () => [
+      "Todos",
+      ...Array.from(
+        new Set(
+          contactos.map((contacto) => contacto.tipo_contacto || "General")
+        )
+      ),
+    ],
+    [contactos]
+  );
 
-  const contactosFiltrados =
-    tipoFiltro === "Todos"
-      ? contactos
-      : contactos.filter((c) => (c.tipo_contacto || "General") === tipoFiltro);
+  const contactosFiltrados = useMemo(() => {
+    const texto = busqueda.trim().toLowerCase();
 
-  if (!propietario) {
-    return <div className="p-6 text-center text-slate-500">Cargando...</div>;
+    return contactos.filter((contacto) => {
+      const coincideTipo =
+        tipoFiltro === "Todos" ||
+        (contacto.tipo_contacto || "General") === tipoFiltro;
+
+      if (!coincideTipo) return false;
+      if (!texto) return true;
+
+      return [
+        contacto.nombre,
+        contacto.cargo,
+        contacto.empresa,
+        contacto.telefono,
+        contacto.correo,
+        contacto.tipo_contacto,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(texto);
+    });
+  }, [contactos, tipoFiltro, busqueda]);
+
+  if (loading) {
+    return (
+      <main className="min-h-dvh bg-slate-100 px-4 py-6">
+        <div className="mx-auto flex min-h-[70vh] max-w-lg items-center justify-center">
+          <div className="flex items-center gap-3 rounded-2xl bg-white px-5 py-4 text-sm font-semibold text-slate-600 shadow-sm">
+            <Loader2 size={20} className="animate-spin text-blue-700" />
+            Cargando directorio...
+          </div>
+        </div>
+      </main>
+    );
   }
+
+  if (!propietario) return null;
 
   return (
-    <div className="p-4 space-y-4">
-      <header className="bg-slate-950 text-white rounded-3xl p-5 shadow">
-        <button
-          onClick={() => router.push("/movil/propietarios/dashboard")}
-          className="flex items-center gap-2 text-sm text-slate-300 mb-4"
-        >
-          <ArrowLeft size={18} />
-          Volver
-        </button>
+    <main className="min-h-dvh bg-slate-100 pb-8">
+      <header className="bg-gradient-to-br from-slate-950 via-blue-950 to-blue-800 px-4 pb-7 pt-4 text-white">
+        <div className="mx-auto max-w-lg">
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => router.push("/movil/propietarios/dashboard")}
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10"
+              aria-label="Volver"
+            >
+              <ArrowLeft size={19} />
+            </button>
 
-        <p className="text-sm text-slate-300">Contactos importantes</p>
-        <h1 className="text-xl font-bold">Directorio</h1>
+            <div className="min-w-0 flex-1 text-center">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-blue-200">
+                Contactos importantes
+              </p>
+              <h1 className="truncate text-base font-black">
+                Directorio
+              </h1>
+            </div>
 
-        <p className="text-xs text-slate-300">
-          {propietario.condominio_nombre} · {propietario.no_apartamento}
-        </p>
+            <button
+              type="button"
+              onClick={() => cargarContactos(propietario, true)}
+              disabled={actualizando}
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60"
+              aria-label="Actualizar"
+            >
+              <RefreshCw
+                size={18}
+                className={actualizando ? "animate-spin" : ""}
+              />
+            </button>
+          </div>
+
+          <div className="mt-5 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/10 p-3">
+            {propietario.condominio_logo_url ? (
+              <img
+                src={propietario.condominio_logo_url}
+                alt={propietario.condominio_nombre}
+                className="h-11 w-11 rounded-xl bg-white object-contain p-1.5"
+              />
+            ) : (
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-xs font-black text-blue-900">
+                VAM
+              </div>
+            )}
+
+            <div className="min-w-0">
+              <p className="truncate text-sm font-extrabold">
+                {propietario.condominio_nombre}
+              </p>
+              <p className="mt-0.5 text-[11px] text-blue-100">
+                Unidad {propietario.no_apartamento}
+              </p>
+            </div>
+          </div>
+        </div>
       </header>
 
-      {mensaje && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-3 text-sm">
-          {mensaje}
-        </div>
-      )}
+      <div className="mx-auto max-w-lg space-y-4 px-4 pt-4">
+        <section className="grid grid-cols-2 gap-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+              <UsersRound size={18} />
+            </span>
+            <p className="mt-3 text-[11px] font-bold uppercase text-slate-400">
+              Contactos
+            </p>
+            <p className="mt-1 text-xl font-black text-slate-900">
+              {contactos.length}
+            </p>
+          </div>
 
-      <section className="bg-white rounded-3xl border shadow-sm p-4">
-        <label className="block text-sm font-bold text-slate-700 mb-1">
-          Filtrar por tipo
-        </label>
-
-        <select
-          value={tipoFiltro}
-          onChange={(e) => setTipoFiltro(e.target.value)}
-          className="w-full border rounded-2xl px-4 py-3 bg-white"
-        >
-          {tipos.map((tipo) => (
-            <option key={tipo}>{tipo}</option>
-          ))}
-        </select>
-      </section>
-
-      {loading ? (
-        <div className="bg-white rounded-3xl p-5 text-center text-slate-500">
-          Cargando directorio...
-        </div>
-      ) : contactosFiltrados.length === 0 ? (
-        <div className="bg-white rounded-3xl border shadow-sm p-6 text-center">
-          <UserRound className="mx-auto text-slate-400 mb-2" size={36} />
-
-          <p className="font-bold text-slate-700">No hay contactos</p>
-
-          <p className="text-sm text-slate-500 mt-1">
-            Cuando la administración registre contactos, aparecerán aquí.
-          </p>
-        </div>
-      ) : (
-        <section className="space-y-3">
-          {contactosFiltrados.map((contacto) => {
-            const Icono = iconoTipo(contacto.tipo_contacto);
-            const telefonoLimpio = limpiarTelefono(contacto.telefono);
-            const whatsappUrl = telefonoLimpio
-              ? `https://wa.me/1${telefonoLimpio}`
-              : "";
-
-            return (
-              <div
-                key={contacto.id}
-                className="bg-white rounded-3xl border shadow-sm p-5"
-              >
-                <div className="flex gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center shrink-0">
-                    <Icono className="text-blue-700" size={24} />
-                  </div>
-
-                  <div className="flex-1">
-                    <p className="text-xs font-bold text-blue-700">
-                      {contacto.tipo_contacto || "General"}
-                    </p>
-
-                    <h2 className="font-bold text-slate-900 leading-tight mt-1">
-                      {contacto.nombre}
-                    </h2>
-
-                    {contacto.cargo && (
-                      <p className="text-sm text-slate-500 mt-1">
-                        {contacto.cargo}
-                      </p>
-                    )}
-
-                    {contacto.empresa && (
-                      <p className="text-xs text-slate-400">
-                        {contacto.empresa}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-2 mt-4">
-                  {contacto.telefono && (
-                    <a
-                      href={`tel:${telefonoLimpio}`}
-                      className="inline-flex items-center justify-center gap-2 bg-green-600 text-white rounded-2xl py-3 font-bold"
-                    >
-                      <Phone size={18} />
-                      Llamar {contacto.telefono}
-                    </a>
-                  )}
-
-                  {telefonoLimpio && (
-                    <a
-                      href={whatsappUrl}
-                      target="_blank"
-                      className="inline-flex items-center justify-center gap-2 bg-emerald-100 text-emerald-700 rounded-2xl py-3 font-bold"
-                    >
-                      <MessageCircle size={18} />
-                      WhatsApp
-                    </a>
-                  )}
-
-                  {contacto.correo && (
-                    <a
-                      href={`mailto:${contacto.correo}`}
-                      className="inline-flex items-center justify-center gap-2 bg-slate-100 text-slate-700 rounded-2xl py-3 font-bold"
-                    >
-                      <Mail size={18} />
-                      Enviar correo
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-emerald-700">
+              <Phone size={18} />
+            </span>
+            <p className="mt-3 text-[11px] font-bold uppercase text-emerald-700">
+              Disponibles
+            </p>
+            <p className="mt-1 text-xl font-black text-emerald-800">
+              {
+                contactos.filter(
+                  (contacto) => contacto.telefono || contacto.correo
+                ).length
+              }
+            </p>
+          </div>
         </section>
-      )}
-    </div>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="space-y-3">
+            <div className="relative">
+              <Search
+                size={17}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                value={busqueda}
+                onChange={(event) => setBusqueda(event.target.value)}
+                placeholder="Buscar nombre, cargo o empresa"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+
+            <div className="relative">
+              <select
+                value={tipoFiltro}
+                onChange={(event) => setTipoFiltro(event.target.value)}
+                className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 pr-9 text-sm font-semibold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              >
+                {tipos.map((tipo) => (
+                  <option key={tipo} value={tipo}>
+                    {tipo}
+                  </option>
+                ))}
+              </select>
+
+              <ChevronDown
+                size={16}
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+            </div>
+          </div>
+        </section>
+
+        {mensaje && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs leading-5 text-red-700">
+            {mensaje}
+          </div>
+        )}
+
+        <section className="space-y-3">
+          {contactosFiltrados.length === 0 ? (
+            <div className="rounded-[1.4rem] border border-slate-200 bg-white px-5 py-8 text-center shadow-sm">
+              <UserRound className="mx-auto text-blue-700" size={32} />
+              <p className="mt-3 text-sm font-black text-slate-900">
+                No hay contactos
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Cuando la administración registre contactos, aparecerán aquí.
+              </p>
+            </div>
+          ) : (
+            contactosFiltrados.map((contacto) => {
+              const Icono = iconoTipo(contacto.tipo_contacto);
+              const telefonoLimpio = limpiarTelefono(contacto.telefono);
+              const whatsapp = telefonoWhatsApp(contacto.telefono);
+
+              return (
+                <article
+                  key={contacto.id}
+                  className="rounded-[1.4rem] border border-slate-200 bg-white p-4 shadow-sm"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+                      <Icono size={23} />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-blue-700">
+                        {contacto.tipo_contacto || "General"}
+                      </p>
+
+                      <h2 className="mt-1 text-sm font-black leading-5 text-slate-900">
+                        {contacto.nombre}
+                      </h2>
+
+                      {contacto.cargo && (
+                        <p className="mt-1 text-xs text-slate-600">
+                          {contacto.cargo}
+                        </p>
+                      )}
+
+                      {contacto.empresa && (
+                        <p className="mt-0.5 text-[11px] text-slate-400">
+                          {contacto.empresa}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    {contacto.telefono && (
+                      <a
+                        href={`tel:${telefonoLimpio}`}
+                        className="flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-800 text-xs font-extrabold text-white"
+                      >
+                        <Phone size={15} />
+                        Llamar
+                      </a>
+                    )}
+
+                    {whatsapp && (
+                      <a
+                        href={`https://wa.me/${whatsapp}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 text-xs font-extrabold text-emerald-700"
+                      >
+                        <MessageCircle size={15} />
+                        WhatsApp
+                      </a>
+                    )}
+
+                    {contacto.correo && (
+                      <a
+                        href={`mailto:${contacto.correo}`}
+                        className="col-span-2 flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-extrabold text-slate-700"
+                      >
+                        <Mail size={15} />
+                        Enviar correo
+                      </a>
+                    )}
+                  </div>
+
+                  {(contacto.telefono || contacto.correo) && (
+                    <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-[10px] text-slate-400">
+                      {contacto.telefono && (
+                        <p>Tel.: {contacto.telefono}</p>
+                      )}
+                      {contacto.correo && (
+                        <p className="break-all">Correo: {contacto.correo}</p>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })
+          )}
+        </section>
+      </div>
+    </main>
   );
 }

@@ -83,6 +83,27 @@ type PagoTablaPagos = {
   } | null;
 };
 
+type PagoAplicacionDetalle = {
+  id: number;
+  pago_id: number | null;
+  cargo_periodico_id: number | null;
+  monto_aplicado: number | null;
+  fecha_aplicacion: string | null;
+  observacion: string | null;
+  cargos_periodicos: {
+    id: number;
+    periodo: string | null;
+    anio: number | null;
+    mes: number | null;
+    concepto: string | null;
+    tipo_cargo: string | null;
+    monto: number | null;
+    monto_pagado: number | null;
+    balance: number | null;
+    estado: string | null;
+  } | null;
+};
+
 const MESES_NOMBRES: Record<number, string> = {
   1: "Enero",
   2: "Febrero",
@@ -111,6 +132,7 @@ export default function ReciboPagoPage() {
   const [pago, setPago] = useState<PagoRecibo | null>(null);
   const [propietario, setPropietario] = useState<Propietario | null>(null);
   const [cargos, setCargos] = useState<CargoPeriodico[]>([]);
+  const [aplicacionesPago, setAplicacionesPago] = useState<PagoAplicacionDetalle[]>([]);
 
   const anioActual = useMemo(() => {
     const fechaPago = pago?.fecha_pago || "";
@@ -209,6 +231,7 @@ export default function ReciboPagoPage() {
     setPago(null);
     setPropietario(null);
     setCargos([]);
+    setAplicacionesPago([]);
 
     if (tipo === "pagos") {
       await cargarReciboDesdeTablaPagos();
@@ -216,7 +239,10 @@ export default function ReciboPagoPage() {
     }
 
     if (tipo === "mantenimiento") {
-      await cargarReciboDesdeTablaPagos();
+      // Primero busca en la tabla principal `pagos`.
+      // Si el recibo pertenece al módulo histórico de mantenimiento,
+      // utiliza `pagos_mantenimiento` como respaldo.
+      await cargarReciboDesdeTablaPagos(true);
       return;
     }
 
@@ -263,7 +289,60 @@ export default function ReciboPagoPage() {
     return Number(data.id);
   }
 
-  async function cargarReciboDesdeTablaPagos() {
+  async function cargarAplicacionesPago(idPago: number) {
+    const { data, error } = await supabase
+      .from("pagos_aplicaciones")
+      .select(
+        `
+        id,
+        pago_id,
+        cargo_periodico_id,
+        monto_aplicado,
+        fecha_aplicacion,
+        observacion,
+        cargos_periodicos (
+          id,
+          periodo,
+          anio,
+          mes,
+          concepto,
+          tipo_cargo,
+          monto,
+          monto_pagado,
+          balance,
+          estado
+        )
+      `
+      )
+      .eq("pago_id", Number(idPago))
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.error("Error cargando aplicaciones del pago:", error.message);
+      setAplicacionesPago([]);
+      return [];
+    }
+
+    const aplicaciones = ((data || []) as any[]).map((item) => ({
+      ...item,
+      cargos_periodicos: Array.isArray(item.cargos_periodicos)
+        ? item.cargos_periodicos[0] || null
+        : item.cargos_periodicos || null,
+    })) as PagoAplicacionDetalle[];
+
+    aplicaciones.sort((a, b) => {
+      const periodoA = a.cargos_periodicos?.periodo || "";
+      const periodoB = b.cargos_periodicos?.periodo || "";
+      return periodoA.localeCompare(periodoB);
+    });
+
+    setAplicacionesPago(aplicaciones);
+    return aplicaciones;
+  }
+
+  async function cargarReciboDesdeTablaPagos(
+    usarRespaldoMantenimiento = false
+  ) {
     const { data, error } = await supabase
       .from("pagos")
       .select(
@@ -295,6 +374,11 @@ export default function ReciboPagoPage() {
       .maybeSingle();
 
     if (error || !data) {
+      if (usarRespaldoMantenimiento) {
+        await cargarReciboMantenimiento();
+        return;
+      }
+
       setMensaje(
         "No se pudo cargar el pago: " +
           (error?.message || "Pago no encontrado.")
@@ -307,6 +391,14 @@ export default function ReciboPagoPage() {
     const nombreCondominio = await buscarNombreCondominio(
       pagoTabla.condominio_id
     );
+
+    const aplicaciones = await cargarAplicacionesPago(pagoTabla.id);
+    const periodosAplicados = aplicaciones
+      .map((item) => item.cargos_periodicos?.periodo || "")
+      .filter(Boolean);
+    const mesesAplicadosTexto = periodosAplicados.length
+      ? Array.from(new Set(periodosAplicados)).map(formatearPeriodo).join(", ")
+      : "";
 
     const apartamento = pagoTabla.unidades?.codigo || "";
 
@@ -323,6 +415,7 @@ export default function ReciboPagoPage() {
       correo: null,
       fecha_pago: pagoTabla.fecha_pago,
       mes_pagado:
+        mesesAplicadosTexto ||
         formatearPeriodos((pagoTabla as any).periodo) ||
         extraerMesDesdeDescripcion(pagoTabla.descripcion) ||
         "-",
@@ -380,6 +473,7 @@ export default function ReciboPagoPage() {
       .from("condominios")
       .select("id")
       .ilike("nombre", `%${nombreCondominio}%`)
+      .limit(1)
       .maybeSingle();
 
     const condominioId = condominioData?.id ? Number(condominioData.id) : null;
@@ -402,7 +496,7 @@ export default function ReciboPagoPage() {
       metodo_pago: data.metodo_pago,
       no_referencia: data.no_referencia,
       descripcion: data.descripcion,
-      estado: data.estado,
+      estado: data.estado || "Registrado",
       comprobante_url: data.comprobante_url,
       created_at: data.created_at,
     };
@@ -634,6 +728,16 @@ export default function ReciboPagoPage() {
       ? "Con balance pendiente"
       : "Pendiente";
 
+  const totalAplicadoPago = aplicacionesPago.reduce(
+    (sum, item) => sum + Number(item.monto_aplicado || 0),
+    0
+  );
+
+  const balanceNoAplicadoRecibo = Math.max(
+    Number(pago?.monto_pagado || 0) - totalAplicadoPago,
+    0
+  );
+
   const noRecibo = `${
     tipo === "pagos" ? "PG" : tipo === "mantenimiento" ? "RM" : "RP"
   }-${String(pago?.id || "").padStart(5, "0")}`;
@@ -664,6 +768,7 @@ Recibo No.: ${noRecibo}
 Fecha de pago: ${formatoFecha(pago.fecha_pago)}
 Mes pagado: ${pago.mes_pagado || "-"}
 Monto recibido: RD$ ${dinero(pago.monto_pagado)}
+Monto aplicado: RD$ ${dinero(totalAplicadoPago)}
 Método/Banco: ${pago.metodo_pago || "-"}
 Referencia: ${pago.no_referencia || "-"}
 
@@ -747,7 +852,7 @@ Tel. 829-792-9292`;
 
   return (
     <main className="min-h-screen bg-slate-200 p-4 print:bg-white print:p-0">
-      <style jsx global>{`
+      <style>{`
         @media print {
           @page {
             size: letter;
@@ -917,7 +1022,7 @@ Tel. 829-792-9292`;
             Resumen del pago
           </div>
 
-          <div className="grid grid-cols-3 text-center text-[11px]">
+          <div className="grid grid-cols-4 text-center text-[11px]">
             <div className="border-r p-2 bg-green-50">
               <p className="font-bold text-slate-600">Monto recibido</p>
               <p className="text-[15px] font-black text-green-700">
@@ -926,8 +1031,15 @@ Tel. 829-792-9292`;
             </div>
 
             <div className="border-r p-2 bg-blue-50">
-              <p className="font-bold text-slate-600">Total pagado año</p>
+              <p className="font-bold text-slate-600">Aplicado en recibo</p>
               <p className="text-[15px] font-black text-blue-700">
+                RD$ {dinero(totalAplicadoPago)}
+              </p>
+            </div>
+
+            <div className="border-r p-2 bg-slate-50">
+              <p className="font-bold text-slate-600">Total pagado año</p>
+              <p className="text-[15px] font-black text-slate-700">
                 RD$ {dinero(totalPagado)}
               </p>
             </div>
@@ -942,6 +1054,87 @@ Tel. 829-792-9292`;
                 RD$ {dinero(balancePendiente)}
               </p>
             </div>
+          </div>
+        </div>
+
+        <div className="mt-4 page-break-inside-avoid">
+          <h3 className="font-black uppercase border-b pb-1 mb-2">
+            Detalle aplicado del pago
+          </h3>
+
+          <div className="overflow-auto border rounded-lg">
+            <table className="min-w-full text-sm print-table">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="p-2 border">Período</th>
+                  <th className="p-2 border">Concepto</th>
+                  <th className="p-2 border">Cargo</th>
+                  <th className="p-2 border">Aplicado de este pago</th>
+                  <th className="p-2 border">Balance actual</th>
+                  <th className="p-2 border">Estado</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {aplicacionesPago.map((item) => {
+                  const cargo = item.cargos_periodicos;
+                  const periodo = cargo?.periodo || "-";
+
+                  return (
+                    <tr key={item.id}>
+                      <td className="p-2 border font-bold">
+                        {formatearPeriodo(periodo)}
+                      </td>
+                      <td className="p-2 border">
+                        {cargo?.concepto || item.observacion || "-"}
+                      </td>
+                      <td className="p-2 border text-right">
+                        RD$ {dinero(cargo?.monto)}
+                      </td>
+                      <td className="p-2 border text-right text-green-700 font-black">
+                        RD$ {dinero(item.monto_aplicado)}
+                      </td>
+                      <td
+                        className={`p-2 border text-right font-black ${
+                          Number(cargo?.balance || 0) <= 0
+                            ? "text-green-700"
+                            : "text-red-700"
+                        }`}
+                      >
+                        RD$ {dinero(cargo?.balance)}
+                      </td>
+                      <td className="p-2 border text-center font-bold">
+                        {cargo?.estado || "-"}
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {aplicacionesPago.length === 0 && (
+                  <tr>
+                    <td className="p-3 border text-center" colSpan={6}>
+                      Este pago no tiene aplicaciones registradas en pagos_aplicaciones.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+
+              {aplicacionesPago.length > 0 && (
+                <tfoot className="bg-slate-100 font-black">
+                  <tr>
+                    <td className="p-2 border text-right" colSpan={3}>
+                      TOTAL APLICADO DE ESTE PAGO
+                    </td>
+                    <td className="p-2 border text-right">
+                      RD$ {dinero(totalAplicadoPago)}
+                    </td>
+                    <td className="p-2 border text-right" colSpan={2}>
+                      No aplicado: RD$ {dinero(balanceNoAplicadoRecibo)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
           </div>
         </div>
 

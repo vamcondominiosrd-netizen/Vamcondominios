@@ -1,0 +1,16 @@
+# Agregar en .env.local y también en Vercel > Settings > Environment Variables
+
+# Ya debe existir en el proyecto:
+NEXT_PUBLIC_SUPABASE_URL=https://TU-PROYECTO.supabase.co
+
+# Usar solo del lado servidor. Nunca usar NEXT_PUBLIC_.
+SUPABASE_SECRET_KEY=TU_SUPABASE_SECRET_KEY
+# Alternativa para proyectos con claves legacy:
+# SUPABASE_SERVICE_ROLE_KEY=TU_SERVICE_ROLE_KEY
+
+# Resend
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxx
+COBROS_EMAIL_FROM=VAM Condominios <cobros@vamcondominios.com>
+
+# Secreto opcional para proteger la ruta
+COBROS_PROCESSOR_SECRET=COLOCA_UN_VALOR_LARGO_Y_ALEATORIO

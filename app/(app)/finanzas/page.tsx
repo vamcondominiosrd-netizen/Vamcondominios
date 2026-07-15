@@ -266,14 +266,10 @@ export default function FinanzasPage() {
             icon: Banknote,
           },
         {
-          titulo: "Control Bancario",
-          descripcion:
-            "Generar Estados Financieros.",
           href: "/finanzas/control-bancario",
-          icono: Banknote,
-          color: "text-amber-700",
-          bg: "bg-amber-50",
-        },
+          label: "Control Bancario",
+          icon: Landmark,
+         },
         ]}
       />
 

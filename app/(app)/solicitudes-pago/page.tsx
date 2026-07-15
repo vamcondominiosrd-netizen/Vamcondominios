@@ -160,6 +160,30 @@ function numeroSolicitud(s: SolicitudPagoOperativa) {
     : String(s.solicitud_id);
 }
 
+function esSolicitudNomina(s: SolicitudPagoOperativa) {
+  const texto = normalizar(
+    `${s.concepto || ""} ${s.detalle || ""} ${s.no_factura || ""}`,
+  );
+
+  return texto.includes("nomina") ||
+    normalizar(s.no_factura).startsWith("nom-");
+}
+
+function puedeGenerarGastoSolicitud(s: SolicitudPagoOperativa) {
+  if (s.gasto_generado_id || s.gasto_id) return false;
+
+  if (s.estado_operativo === "Aprobada sin gasto") return true;
+
+  const estadoSolicitud = normalizar(s.estado_solicitud);
+  const estadoOperativo = normalizar(s.estado_operativo);
+
+  return (
+    esSolicitudNomina(s) &&
+    (estadoSolicitud === "pendiente" ||
+      estadoOperativo === "pendiente tesorero")
+  );
+}
+
 function hoyISO() {
   return new Date().toISOString().split("T")[0];
 }
@@ -257,7 +281,7 @@ export default function SolicitudesPagoPage() {
       return;
     }
 
-    if (s.estado_operativo !== "Aprobada sin gasto") {
+    if (!puedeGenerarGastoSolicitud(s)) {
       alert("Esta solicitud todavía no está lista para generar gasto.");
       return;
     }
@@ -271,6 +295,9 @@ export default function SolicitudesPagoPage() {
     );
 
     if (!confirmar) return;
+
+    const nominaPendienteAprobacion =
+      esSolicitudNomina(s) && s.estado_operativo !== "Aprobada sin gasto";
 
     try {
       setProcesandoId(s.solicitud_id);
@@ -298,11 +325,17 @@ export default function SolicitudesPagoPage() {
             metodo_pago: s.metodo_pago,
             cuenta_banco: s.cuenta_banco,
             factura_url: s.soporte_url,
-            estado: "Gasto generado",
-            aprobado_tesorero: true,
-            aprobado_presidente: true,
-            fecha_aprobacion_tesorero: s.fecha_revision_tesorero || null,
-            fecha_aprobacion_presidente: s.fecha_revision_presidente || null,
+            estado: nominaPendienteAprobacion
+              ? "Pendiente aprobación tesorero"
+              : "Gasto generado",
+            aprobado_tesorero: nominaPendienteAprobacion ? false : true,
+            aprobado_presidente: nominaPendienteAprobacion ? false : true,
+            fecha_aprobacion_tesorero: nominaPendienteAprobacion
+              ? null
+              : s.fecha_revision_tesorero || null,
+            fecha_aprobacion_presidente: nominaPendienteAprobacion
+              ? null
+              : s.fecha_revision_presidente || null,
             pagado: false,
           },
         ])
@@ -314,24 +347,46 @@ export default function SolicitudesPagoPage() {
         return;
       }
 
+      const datosActualizacionSolicitud = nominaPendienteAprobacion
+        ? {
+            estado: "Pendiente aprobación tesorero",
+            gasto_generado_id: gastoData.id,
+            gasto_generado_at: new Date().toISOString(),
+          }
+        : {
+            estado: "Gasto generado",
+            gasto_generado_id: gastoData.id,
+            gasto_generado_at: new Date().toISOString(),
+          };
+
       const { error: updateError } = await supabase
         .from("solicitudes_pago")
-        .update({
-          estado: "Gasto generado",
-          gasto_generado_id: gastoData.id,
-          gasto_generado_at: new Date().toISOString(),
-        })
+        .update(datosActualizacionSolicitud)
         .eq("id", s.solicitud_id);
 
       if (updateError) {
+        const { error: rollbackError } = await supabase
+          .from("gastos")
+          .delete()
+          .eq("id", gastoData.id);
+
         alert(
-          "El gasto fue generado, pero ocurrió un error actualizando la solicitud: " +
-            updateError.message,
+          rollbackError
+            ? "Ocurrió un error actualizando la solicitud y no fue posible revertir el gasto creado. Revise el gasto ID " +
+                gastoData.id +
+                ". Detalle: " +
+                updateError.message
+            : "No se pudo actualizar la solicitud. El gasto creado fue revertido para evitar registros incompletos. Detalle: " +
+                updateError.message,
         );
         return;
       }
 
-      alert("Gasto generado correctamente.");
+      alert(
+        nominaPendienteAprobacion
+          ? "Gasto de nómina generado correctamente y enviado al tesorero para aprobación."
+          : "Gasto generado correctamente.",
+      );
       cargarSolicitudes();
     } catch (error: any) {
       alert(error.message || "Error generando gasto.");
@@ -702,7 +757,7 @@ export default function SolicitudesPagoPage() {
                 {solicitudesFiltradas.map((s) => {
                   const estadoOperativo = s.estado_operativo || "Revisar";
                   const puedeGenerarGasto =
-                    estadoOperativo === "Aprobada sin gasto";
+                    puedeGenerarGastoSolicitud(s);
                   const puedePagar = estadoOperativo === "Lista para pagar";
                   const esPagada = estadoOperativo === "Pagada";
                   const requiereRevision =

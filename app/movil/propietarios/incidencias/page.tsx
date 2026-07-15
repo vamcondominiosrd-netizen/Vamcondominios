@@ -1,14 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
-import { ArrowLeft, Upload, CheckCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CalendarDays,
+  Camera,
+  CheckCircle2,
+  ChevronDown,
+  Clock3,
+  ExternalLink,
+  ImageIcon,
+  Loader2,
+  PlusCircle,
+  RefreshCw,
+  Send,
+  Upload,
+  Wrench,
+  X,
+} from "lucide-react";
 
 type PropietarioActual = {
   propietario_id: number;
   condominio_id: number;
   condominio_nombre: string;
+  condominio_logo_url?: string;
   unidad_id: number;
   no_apartamento: string;
   nombre_propietario: string;
@@ -28,88 +46,155 @@ type Incidencia = {
   created_at?: string | null;
 };
 
+const CATEGORIAS = [
+  "Agua",
+  "Electricidad",
+  "Basura",
+  "Seguridad",
+  "Áreas comunes",
+  "Parqueo",
+  "Portón / acceso",
+  "Limpieza",
+  "Otro",
+];
+
+const PRIORIDADES = ["Baja", "Media", "Alta", "Urgente"];
+
+function normalizar(valor?: string | null) {
+  return String(valor || "").trim().toLowerCase();
+}
+
+function formatearFecha(fecha?: string | null) {
+  if (!fecha) return "-";
+  const valor = String(fecha).slice(0, 10);
+  const [anio, mes, dia] = valor.split("-");
+  if (!anio || !mes || !dia) return valor;
+  return `${dia}/${mes}/${anio}`;
+}
+
+function claseEstado(estado?: string | null) {
+  const valor = normalizar(estado);
+  if (["cerrada", "cerrado", "resuelta", "resuelto"].includes(valor)) {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+  if (["en proceso", "proceso", "trabajando"].includes(valor)) {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+  return "border-red-200 bg-red-50 text-red-700";
+}
+
+function clasePrioridad(prioridad?: string | null) {
+  const valor = normalizar(prioridad);
+  if (valor === "urgente" || valor === "alta") return "text-red-700";
+  if (valor === "media") return "text-amber-700";
+  return "text-slate-600";
+}
+
 export default function IncidenciasPropietariosPage() {
   const router = useRouter();
+  const inputFotoRef = useRef<HTMLInputElement | null>(null);
 
-  const [propietario, setPropietario] = useState<PropietarioActual | null>(
-    null
-  );
-
+  const [propietario, setPropietario] = useState<PropietarioActual | null>(null);
   const [incidencias, setIncidencias] = useState<Incidencia[]>([]);
-
   const [titulo, setTitulo] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [categoria, setCategoria] = useState("");
   const [prioridad, setPrioridad] = useState("Media");
   const [foto, setFoto] = useState<File | null>(null);
-
   const [mensaje, setMensaje] = useState("");
   const [exito, setExito] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [loadingLista, setLoadingLista] = useState(false);
+  const [loadingLista, setLoadingLista] = useState(true);
+  const [actualizando, setActualizando] = useState(false);
 
   useEffect(() => {
-    const raw = localStorage.getItem("propietario_actual");
+    void inicializar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    if (!raw) {
-      router.push("/movil/propietarios/login");
-      return;
-    }
-
-    const prop = JSON.parse(raw);
-    setPropietario(prop);
-    cargarIncidencias(prop);
-  }, [router]);
-
-  async function cargarIncidencias(prop: PropietarioActual) {
+  async function inicializar() {
     setLoadingLista(true);
     setMensaje("");
 
+    try {
+      const raw = localStorage.getItem("propietario_actual");
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
+        return;
+      }
+
+      const sesion = JSON.parse(raw) as PropietarioActual;
+      if (!sesion?.propietario_id || !sesion?.condominio_id || !sesion?.unidad_id) {
+        router.replace("/movil/propietarios/login");
+        return;
+      }
+
+      setPropietario(sesion);
+      await cargarIncidencias(sesion);
+    } catch {
+      setMensaje("No se pudo cargar la información del propietario.");
+      setExito(false);
+    } finally {
+      setLoadingLista(false);
+    }
+  }
+
+  async function cargarIncidencias(
+    prop: PropietarioActual,
+    modoActualizacion = false,
+    conservarMensaje = false
+  ) {
+    if (modoActualizacion) setActualizando(true);
+    if (!conservarMensaje) {
+      setMensaje("");
+      setExito(false);
+    }
+
     const { data, error } = await supabase
       .from("incidencias")
-      .select(
-        "id, titulo, categoria, descripcion, prioridad, estado, foto_url, created_at"
-      )
+      .select("id, titulo, categoria, descripcion, prioridad, estado, foto_url, created_at")
       .eq("condominio_id", prop.condominio_id)
       .eq("unidad_id", prop.unidad_id)
       .order("created_at", { ascending: false });
 
-    setLoadingLista(false);
-
     if (error) {
-      setMensaje("Error cargando incidencias: " + error.message);
-      return;
+      setMensaje(`No se pudieron cargar las incidencias: ${error.message}`);
+      setExito(false);
+      setIncidencias([]);
+    } else {
+      setIncidencias((data || []) as Incidencia[]);
     }
 
-    setIncidencias(data || []);
+    if (modoActualizacion) setActualizando(false);
   }
 
   async function subirFoto(prop: PropietarioActual) {
     if (!foto) return "";
 
-    const extension = foto.name.split(".").pop();
+    const extension = foto.name.split(".").pop()?.toLowerCase() || "jpg";
     const nombreArchivo = `incidencias/${prop.condominio_id}/${prop.unidad_id}-${Date.now()}.${extension}`;
 
     const { error } = await supabase.storage
       .from("incidencias")
-      .upload(nombreArchivo, foto, {
-        cacheControl: "3600",
-        upsert: false,
-      });
+      .upload(nombreArchivo, foto, { cacheControl: "3600", upsert: false });
 
-    if (error) {
-      throw new Error("Error subiendo foto: " + error.message);
-    }
+    if (error) throw new Error(`Error subiendo foto: ${error.message}`);
 
-    const { data } = supabase.storage
-      .from("incidencias")
-      .getPublicUrl(nombreArchivo);
-
+    const { data } = supabase.storage.from("incidencias").getPublicUrl(nombreArchivo);
     return data.publicUrl;
   }
 
+  function limpiarFormulario() {
+    setTitulo("");
+    setDescripcion("");
+    setCategoria("");
+    setPrioridad("Media");
+    setFoto(null);
+    if (inputFotoRef.current) inputFotoRef.current.value = "";
+  }
+
   async function enviarIncidencia() {
-    if (!propietario) return;
+    if (!propietario || loading) return;
 
     setMensaje("");
     setExito(false);
@@ -118,12 +203,10 @@ export default function IncidenciasPropietariosPage() {
       setMensaje("Debe indicar el título de la incidencia.");
       return;
     }
-
     if (!categoria) {
       setMensaje("Debe seleccionar la categoría.");
       return;
     }
-
     if (!descripcion.trim()) {
       setMensaje("Debe describir la situación.");
       return;
@@ -153,244 +236,223 @@ export default function IncidenciasPropietariosPage() {
         },
       ]);
 
-      if (error) {
-        setMensaje("Error registrando incidencia: " + error.message);
-        setLoading(false);
-        return;
-      }
+      if (error) throw error;
 
+      limpiarFormulario();
       setExito(true);
       setMensaje("Incidencia enviada correctamente.");
-
-      setTitulo("");
-      setDescripcion("");
-      setCategoria("");
-      setPrioridad("Media");
-      setFoto(null);
-
-      const inputFile = document.getElementById(
-        "fotoIncidencia"
-      ) as HTMLInputElement | null;
-
-      if (inputFile) inputFile.value = "";
-
-      await cargarIncidencias(propietario);
-    } catch (err: any) {
-      setMensaje(err.message || "Error registrando incidencia.");
+      await cargarIncidencias(propietario, false, true);
+    } catch (error: any) {
+      setExito(false);
+      setMensaje(error?.message || "Error registrando incidencia.");
     } finally {
       setLoading(false);
     }
   }
 
-  if (!propietario) {
-    return <div className="p-6 text-center text-slate-500">Cargando...</div>;
+  const incidenciasPendientes = useMemo(
+    () =>
+      incidencias.filter((item) => {
+        const estado = normalizar(item.estado);
+        return !["cerrada", "cerrado", "resuelta", "resuelto"].includes(estado);
+      }).length,
+    [incidencias]
+  );
+
+  const incidenciasCerradas = incidencias.length - incidenciasPendientes;
+
+  if (loadingLista && !propietario) {
+    return (
+      <main className="min-h-dvh bg-slate-100 px-4 py-6">
+        <div className="mx-auto flex min-h-[70vh] max-w-lg items-center justify-center">
+          <div className="flex items-center gap-3 rounded-2xl bg-white px-5 py-4 text-sm font-semibold text-slate-600 shadow-sm">
+            <Loader2 size={20} className="animate-spin text-blue-700" />
+            Cargando incidencias...
+          </div>
+        </div>
+      </main>
+    );
   }
 
-  return (
-    <div className="p-4 space-y-4">
-      <header className="bg-slate-950 text-white rounded-3xl p-5 shadow">
-        <button
-          onClick={() => router.push("/movil/propietarios/dashboard")}
-          className="flex items-center gap-2 text-sm text-slate-300 mb-4"
-        >
-          <ArrowLeft size={18} />
-          Volver
-        </button>
+  if (!propietario) return null;
 
-        <p className="text-sm text-slate-300">Reportar incidencia</p>
-        <h1 className="text-xl font-bold">{propietario.no_apartamento}</h1>
-        <p className="text-xs text-slate-300">
-          {propietario.condominio_nombre}
-        </p>
+  return (
+    <main className="min-h-dvh bg-slate-100 pb-8">
+      <header className="bg-gradient-to-br from-slate-950 via-blue-950 to-blue-800 px-4 pb-7 pt-4 text-white">
+        <div className="mx-auto max-w-lg">
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" onClick={() => router.push("/movil/propietarios/dashboard")} className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10" aria-label="Volver">
+              <ArrowLeft size={19} />
+            </button>
+
+            <div className="min-w-0 flex-1 text-center">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-blue-200">Atención al propietario</p>
+              <h1 className="truncate text-base font-black">Incidencias</h1>
+            </div>
+
+            <button type="button" onClick={() => cargarIncidencias(propietario, true)} disabled={actualizando} className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60" aria-label="Actualizar">
+              <RefreshCw size={18} className={actualizando ? "animate-spin" : ""} />
+            </button>
+          </div>
+
+          <div className="mt-5 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/10 p-3">
+            {propietario.condominio_logo_url ? (
+              <img src={propietario.condominio_logo_url} alt={propietario.condominio_nombre} className="h-11 w-11 rounded-xl bg-white object-contain p-1.5" />
+            ) : (
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-xs font-black text-blue-900">VAM</div>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-extrabold">{propietario.condominio_nombre}</p>
+              <p className="mt-0.5 text-[11px] text-blue-100">Unidad {propietario.no_apartamento}</p>
+            </div>
+          </div>
+        </div>
       </header>
 
-      {mensaje && (
-        <div
-          className={`rounded-2xl p-3 text-sm ${
-            exito
-              ? "bg-green-50 border border-green-200 text-green-700"
-              : "bg-red-50 border border-red-200 text-red-700"
-          }`}
-        >
-          {exito && <CheckCircle className="inline mr-1" size={16} />}
-          {mensaje}
-        </div>
-      )}
+      <div className="mx-auto max-w-lg space-y-4 px-4 pt-4">
+        <section className="grid grid-cols-2 gap-3">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-amber-700"><Clock3 size={18} /></span>
+            <p className="mt-3 text-[11px] font-bold uppercase text-amber-700">Pendientes</p>
+            <p className="mt-1 text-xl font-black text-amber-800">{incidenciasPendientes}</p>
+          </div>
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-emerald-700"><CheckCircle2 size={18} /></span>
+            <p className="mt-3 text-[11px] font-bold uppercase text-emerald-700">Cerradas</p>
+            <p className="mt-1 text-xl font-black text-emerald-800">{incidenciasCerradas}</p>
+          </div>
+        </section>
 
-      <section className="bg-white rounded-3xl border shadow-sm p-5 space-y-4">
-        <div>
-          <label className="block text-sm font-bold text-slate-700 mb-1">
-            Título
-          </label>
-
-          <input
-            type="text"
-            value={titulo}
-            onChange={(e) => setTitulo(e.target.value)}
-            placeholder="Ej. Fuga de agua en escalera"
-            className="w-full border rounded-2xl px-4 py-3"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-bold text-slate-700 mb-1">
-            Categoría
-          </label>
-
-          <select
-            value={categoria}
-            onChange={(e) => setCategoria(e.target.value)}
-            className="w-full border rounded-2xl px-4 py-3 bg-white"
-          >
-            <option value="">Seleccione categoría</option>
-            <option value="Agua">Agua</option>
-            <option value="Electricidad">Electricidad</option>
-            <option value="Basura">Basura</option>
-            <option value="Seguridad">Seguridad</option>
-            <option value="Áreas comunes">Áreas comunes</option>
-            <option value="Parqueo">Parqueo</option>
-            <option value="Portón / acceso">Portón / acceso</option>
-            <option value="Limpieza">Limpieza</option>
-            <option value="Otro">Otro</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-bold text-slate-700 mb-1">
-            Prioridad
-          </label>
-
-          <select
-            value={prioridad}
-            onChange={(e) => setPrioridad(e.target.value)}
-            className="w-full border rounded-2xl px-4 py-3 bg-white"
-          >
-            <option value="Baja">Prioridad baja</option>
-            <option value="Media">Prioridad media</option>
-            <option value="Alta">Prioridad alta</option>
-            <option value="Urgente">Urgente</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-bold text-slate-700 mb-1">
-            Descripción
-          </label>
-
-          <textarea
-            value={descripcion}
-            onChange={(e) => setDescripcion(e.target.value)}
-            placeholder="Describa la situación"
-            rows={4}
-            className="w-full border rounded-2xl px-4 py-3"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-bold text-slate-700 mb-1">
-            Foto / evidencia
-          </label>
-
-          <label className="border-2 border-dashed rounded-3xl p-5 flex flex-col items-center justify-center text-center cursor-pointer bg-slate-50">
-            <Upload className="text-blue-700 mb-2" size={28} />
-
-            <span className="text-sm font-bold text-slate-700">
-              Subir foto
-            </span>
-
-            <span className="text-xs text-slate-500 mt-1">
-              Imagen opcional de la incidencia
-            </span>
-
-            <input
-              id="fotoIncidencia"
-              type="file"
-              accept=".jpg,.jpeg,.png,.webp"
-              onChange={(e) => setFoto(e.target.files?.[0] || null)}
-              className="hidden"
-            />
-          </label>
-
-          {foto && (
-            <p className="text-xs text-slate-600 mt-2">
-              Archivo seleccionado: <b>{foto.name}</b>
-            </p>
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={enviarIncidencia}
-          disabled={loading}
-          className="w-full bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white py-4 rounded-2xl font-bold text-lg"
-        >
-          {loading ? "Enviando..." : "Enviar incidencia"}
-        </button>
-      </section>
-
-      <section className="bg-white rounded-3xl border shadow-sm p-5">
-        <h2 className="font-bold text-slate-900 mb-3">Mis incidencias</h2>
-
-        {loadingLista ? (
-          <p className="text-sm text-slate-500">Cargando historial...</p>
-        ) : incidencias.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            No tiene incidencias registradas.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {incidencias.map((item) => (
-              <div key={item.id} className="border rounded-2xl p-3">
-                <div className="flex justify-between gap-3">
-                  <div>
-                    <p className="font-bold text-slate-800">
-                      {item.titulo || "Incidencia"}
-                    </p>
-
-                    <p className="text-xs text-slate-500">
-                      {item.categoria || "Sin categoría"} ·{" "}
-                      {item.prioridad || "Media"}
-                    </p>
-                  </div>
-
-                  <span
-                    className={`text-xs font-bold h-fit rounded-xl px-2 py-1 ${
-                      item.estado === "Cerrada"
-                        ? "bg-green-100 text-green-700"
-                        : item.estado === "En proceso"
-                        ? "bg-yellow-100 text-yellow-700"
-                        : "bg-red-100 text-red-700"
-                    }`}
-                  >
-                    {item.estado || "Pendiente"}
-                  </span>
-                </div>
-
-                <p className="text-sm text-slate-600 mt-2">
-                  {item.descripcion}
-                </p>
-
-                {item.foto_url && (
-                  <a
-                    href={item.foto_url}
-                    target="_blank"
-                    className="mt-3 inline-flex items-center gap-1 text-sm font-bold text-blue-700"
-                  >
-                    Ver foto
-                  </a>
-                )}
-
-                {item.created_at && (
-                  <p className="text-xs text-slate-400 mt-2">
-                    Fecha:{" "}
-                    {new Date(item.created_at).toLocaleDateString("es-DO")}
-                  </p>
-                )}
-              </div>
-            ))}
+        {mensaje && (
+          <div className={`rounded-2xl border px-4 py-3 text-xs leading-5 ${exito ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"}`}>
+            <div className="flex items-start gap-2">
+              {exito ? <CheckCircle2 size={17} className="mt-0.5 shrink-0" /> : <AlertTriangle size={17} className="mt-0.5 shrink-0" />}
+              <span>{mensaje}</span>
+            </div>
           </div>
         )}
-      </section>
+
+        <section className="rounded-[1.4rem] border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-4 flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700"><PlusCircle size={20} /></span>
+            <div>
+              <h2 className="text-sm font-black text-slate-900">Reportar incidencia</h2>
+              <p className="text-[10px] text-slate-500">Complete los datos de la situación</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <Campo etiqueta="Título">
+              <input type="text" value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ej. Fuga de agua en escalera" className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+            </Campo>
+
+            <Campo etiqueta="Categoría">
+              <div className="relative">
+                <select value={categoria} onChange={(e) => setCategoria(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 pr-9 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                  <option value="">Seleccione categoría</option>
+                  {CATEGORIAS.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+                <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              </div>
+            </Campo>
+
+            <Campo etiqueta="Prioridad">
+              <div className="grid grid-cols-4 gap-2">
+                {PRIORIDADES.map((item) => (
+                  <button key={item} type="button" onClick={() => setPrioridad(item)} className={`h-10 rounded-xl border text-[11px] font-extrabold transition ${prioridad === item ? item === "Urgente" || item === "Alta" ? "border-red-600 bg-red-600 text-white" : item === "Media" ? "border-amber-500 bg-amber-500 text-white" : "border-blue-700 bg-blue-700 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </Campo>
+
+            <Campo etiqueta="Descripción">
+              <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Describa la situación" rows={4} className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+            </Campo>
+
+            <Campo etiqueta="Foto o evidencia">
+              <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center">
+                <Upload className="text-blue-700" size={25} />
+                <span className="mt-2 text-xs font-extrabold text-slate-700">Seleccionar imagen</span>
+                <span className="mt-1 text-[10px] text-slate-500">JPG, PNG o WEBP</span>
+                <input ref={inputFotoRef} type="file" accept=".jpg,.jpeg,.png,.webp" onChange={(e) => setFoto(e.target.files?.[0] || null)} className="hidden" />
+              </label>
+
+              {foto && (
+                <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Camera size={15} className="shrink-0 text-blue-700" />
+                    <p className="truncate text-[11px] font-bold text-blue-800">{foto.name}</p>
+                  </div>
+                  <button type="button" onClick={() => { setFoto(null); if (inputFotoRef.current) inputFotoRef.current.value = ""; }} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-slate-500" aria-label="Quitar foto">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+            </Campo>
+
+            <button type="button" onClick={enviarIncidencia} disabled={loading} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-blue-800 text-sm font-extrabold text-white transition hover:bg-blue-900 disabled:bg-slate-400">
+              {loading ? <><Loader2 size={17} className="animate-spin" />Enviando...</> : <><Send size={17} />Enviar incidencia</>}
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-3 flex items-center justify-between px-1">
+            <div>
+              <h2 className="text-sm font-black text-slate-900">Mis incidencias</h2>
+              <p className="text-[10px] text-slate-500">Historial de reportes de la unidad</p>
+            </div>
+            <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[10px] font-extrabold text-slate-700">{incidencias.length}</span>
+          </div>
+
+          {loadingLista ? (
+            <div className="flex items-center justify-center gap-2 rounded-[1.4rem] border border-slate-200 bg-white px-4 py-8 text-xs text-slate-500 shadow-sm"><Loader2 size={17} className="animate-spin text-blue-700" />Cargando historial...</div>
+          ) : incidencias.length === 0 ? (
+            <div className="rounded-[1.4rem] border border-slate-200 bg-white px-5 py-8 text-center shadow-sm">
+              <Wrench className="mx-auto text-blue-700" size={31} />
+              <p className="mt-3 text-sm font-black text-slate-900">No tiene incidencias</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Los reportes enviados aparecerán en esta sección.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {incidencias.map((item) => (
+                <article key={item.id} className="rounded-[1.4rem] border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-blue-700">{item.categoria || "Sin categoría"}</p>
+                      <h3 className="mt-1 text-sm font-black leading-5 text-slate-900">{item.titulo || "Incidencia"}</h3>
+                    </div>
+                    <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-extrabold ${claseEstado(item.estado)}`}>{item.estado || "Pendiente"}</span>
+                  </div>
+
+                  <p className="mt-3 whitespace-pre-line text-xs leading-5 text-slate-600">{item.descripcion || "Sin descripción"}</p>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3 text-[10px]">
+                    <span className={`font-extrabold ${clasePrioridad(item.prioridad)}`}>Prioridad: {item.prioridad || "Media"}</span>
+                    <span className="flex items-center gap-1 text-slate-400"><CalendarDays size={12} />{formatearFecha(item.created_at)}</span>
+                  </div>
+
+                  {item.foto_url && (
+                    <a href={item.foto_url} target="_blank" rel="noopener noreferrer" className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 text-xs font-extrabold text-blue-800">
+                      <ImageIcon size={15} />Ver evidencia<ExternalLink size={13} />
+                    </a>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function Campo({ etiqueta, children }: { etiqueta: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-extrabold text-slate-700">{etiqueta}</label>
+      {children}
     </div>
   );
 }

@@ -7,7 +7,9 @@ import {
   CreditCard,
   FileText,
   Filter,
+  PlusCircle,
   RefreshCw,
+  Save,
   Search,
   WalletCards,
 } from "lucide-react";
@@ -105,8 +107,15 @@ export default function CreditosPropietariosPage() {
   const [apartamentoSeleccionado, setApartamentoSeleccionado] = useState("");
   const [busqueda, setBusqueda] = useState("");
 
+  const [nuevoCreditoUnidadId, setNuevoCreditoUnidadId] = useState("");
+  const [nuevoCreditoMonto, setNuevoCreditoMonto] = useState("");
+  const [nuevoCreditoConcepto, setNuevoCreditoConcepto] = useState(
+    "Crédito inicial registrado por apertura del condominio",
+  );
+
   const [loading, setLoading] = useState(false);
   const [aplicando, setAplicando] = useState(false);
+  const [guardandoCredito, setGuardandoCredito] = useState(false);
   const [mensaje, setMensaje] = useState("");
 
   useEffect(() => {
@@ -275,6 +284,18 @@ export default function CreditosPropietariosPage() {
       .sort((a, b) => a.apartamento.localeCompare(b.apartamento));
   }, [filas]);
 
+  const unidadesParaCredito = useMemo(() => {
+    return unidades.map((unidad) => {
+      const propietario = obtenerPropietario(unidad.codigo);
+
+      return {
+        id: unidad.id,
+        apartamento: unidad.codigo,
+        propietario: propietario?.nombre_propietario || "Sin propietario",
+      };
+    });
+  }, [unidades, propietarios]);
+
   const totalOriginal = filasFiltradas.reduce(
     (sum, f) => sum + Number(f.monto_original || 0),
     0,
@@ -296,6 +317,76 @@ export default function CreditosPropietariosPage() {
       .filter((f) => Number(f.monto_disponible || 0) > 0)
       .map((f) => f.apartamento),
   ).size;
+
+  async function guardarCreditoManual(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!condominioId) {
+      setMensaje("No se encontró el condominio activo.");
+      return;
+    }
+
+    if (!nuevoCreditoUnidadId) {
+      setMensaje("Debe seleccionar la unidad a la que se le adicionará el crédito.");
+      return;
+    }
+
+    const montoNumerico = Number(nuevoCreditoMonto || 0);
+
+    if (!montoNumerico || montoNumerico <= 0) {
+      setMensaje("El monto del crédito debe ser mayor que cero.");
+      return;
+    }
+
+    const conceptoLimpio = nuevoCreditoConcepto.trim();
+
+    if (!conceptoLimpio) {
+      setMensaje("Debe indicar el concepto del crédito.");
+      return;
+    }
+
+    const unidad = unidades.find(
+      (item) => String(item.id) === String(nuevoCreditoUnidadId),
+    );
+
+    const confirmar = window.confirm(
+      `Se adicionará un crédito disponible de RD$ ${dinero(montoNumerico)} a la unidad ${
+        unidad?.codigo || nuevoCreditoUnidadId
+      }.\n\n¿Desea continuar?`,
+    );
+
+    if (!confirmar) return;
+
+    setGuardandoCredito(true);
+    setMensaje("");
+
+    const { error } = await supabase.from("creditos_propietarios").insert({
+      condominio_id: Number(condominioId),
+      unidad_id: Number(nuevoCreditoUnidadId),
+      pago_id: null,
+      monto_original: montoNumerico,
+      monto_disponible: montoNumerico,
+      concepto: conceptoLimpio,
+      estado: "DISPONIBLE",
+    });
+
+    if (error) {
+      setGuardandoCredito(false);
+      setMensaje("Error adicionando crédito: " + error.message);
+      return;
+    }
+
+    setNuevoCreditoUnidadId("");
+    setNuevoCreditoMonto("");
+    setNuevoCreditoConcepto(
+      "Crédito inicial registrado por apertura del condominio",
+    );
+
+    await cargarDatos(condominioId);
+
+    setGuardandoCredito(false);
+    setMensaje("Crédito adicionado correctamente.");
+  }
 
   async function aplicarCreditos() {
     if (!condominioId) {
@@ -425,6 +516,88 @@ export default function CreditosPropietariosPage() {
           tone="emerald"
         />
       </div>
+
+      <SectionCard
+        title="Adicionar crédito manual"
+        subtitle="Registre saldos iniciales a favor durante el proceso de apertura del lote."
+        action={
+          <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">
+            <PlusCircle className="h-4 w-4" />
+            Crédito inicial
+          </div>
+        }
+      >
+        <form
+          onSubmit={guardarCreditoManual}
+          className="grid grid-cols-1 gap-4 lg:grid-cols-12"
+        >
+          <div className="lg:col-span-4">
+            <label className="mb-1 block text-sm font-semibold">
+              Unidad / Apartamento
+            </label>
+
+            <select
+              value={nuevoCreditoUnidadId}
+              onChange={(e) => setNuevoCreditoUnidadId(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+              disabled={guardandoCredito || loading}
+            >
+              <option value="">Seleccione una unidad</option>
+
+              {unidadesParaCredito.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.apartamento} - {item.propietario}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="lg:col-span-2">
+            <label className="mb-1 block text-sm font-semibold">
+              Monto crédito
+            </label>
+
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={nuevoCreditoMonto}
+              onChange={(e) => setNuevoCreditoMonto(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="0.00"
+              disabled={guardandoCredito || loading}
+            />
+          </div>
+
+          <div className="lg:col-span-4">
+            <label className="mb-1 block text-sm font-semibold">Concepto</label>
+
+            <input
+              value={nuevoCreditoConcepto}
+              onChange={(e) => setNuevoCreditoConcepto(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              placeholder="Ej.: Saldo a favor inicial"
+              disabled={guardandoCredito || loading}
+            />
+          </div>
+
+          <div className="flex items-end lg:col-span-2">
+            <button
+              type="submit"
+              disabled={guardandoCredito || loading || !condominioId}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+            >
+              <Save className="h-4 w-4" />
+              {guardandoCredito ? "Guardando..." : "Guardar crédito"}
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
+          <strong>Importante:</strong> este crédito queda disponible para la unidad seleccionada.
+          Luego puede aplicarse contra cargos pendientes usando el botón <strong>Aplicar créditos</strong>.
+        </div>
+      </SectionCard>
 
       <SectionCard
         title="Filtros de consulta"
@@ -628,8 +801,9 @@ export default function CreditosPropietariosPage() {
 
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
         <p>
-          <strong>Nota:</strong> este módulo consulta la tabla{" "}
-          <strong>creditos_propietarios</strong>. El monto disponible representa
+          <strong>Nota:</strong> este módulo consulta y registra en la tabla{" "}
+          <strong>creditos_propietarios</strong>. Los créditos manuales se usan
+          para cargar saldos iniciales a favor durante la apertura del lote. El monto disponible representa
           el saldo pendiente de aplicar. Al usar{" "}
           <strong>Aplicar créditos</strong>, el sistema ejecuta la función{" "}
           <strong>aplicar_creditos_a_cargos</strong> para rebajar cargos

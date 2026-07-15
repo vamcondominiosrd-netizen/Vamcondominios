@@ -1,0 +1,1042 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import {
+  BarChart3,
+  Coins,
+  FileSpreadsheet,
+  Plus,
+  ReceiptText,
+  Save,
+  WalletCards,
+} from "lucide-react";
+
+import { supabase } from "@/app/lib/supabaseClient";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import ModuleActions from "@/components/vam/enterprise/ModuleActions";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import DataTable from "@/components/vam/enterprise/DataTable";
+import EmptyState from "@/components/vam/enterprise/EmptyState";
+
+type CajaChica = {
+  id: number;
+  condominio: string;
+  fecha: string;
+  concepto: string;
+  detalle_gasto: string;
+  monto: number;
+  responsable: string;
+  comprobante: string;
+  factura_url: string;
+  estado: string;
+  created_at: string;
+};
+
+type CajaChicaFondo = {
+  id: number;
+  condominio_id: number | null;
+  numero_fondo: number | null;
+  condominio: string;
+  fecha: string;
+  tipo: string;
+  monto: number;
+  descripcion: string | null;
+  responsable: string | null;
+  created_at: string | null;
+  cuenta_bancaria_id: number | null;
+  movimiento_banco_id: number | null;
+  solicitud_pago_id: number | null;
+  metodo_pago: string | null;
+  numero_documento: string | null;
+  referencia_banco: string | null;
+  estado: string | null;
+  cheque_url: string | null;
+};
+
+type CuentaBancaria = {
+  id: number;
+  condominio_id: number;
+  nombre_banco: string;
+  numero_cuenta: string;
+  tipo_cuenta: string | null;
+  moneda: string | null;
+  activa: boolean | null;
+  balance_actual: number | null;
+};
+
+function dinero(valor: number | null | undefined) {
+  return Number(valor || 0).toLocaleString("es-DO", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function fechaCorta(valor?: string | null) {
+  if (!valor) return "-";
+  return String(valor).split("T")[0];
+}
+
+export default function CajaChicaPage() {
+  const [gastos, setGastos] = useState<CajaChica[]>([]);
+  const [fondos, setFondos] = useState<CajaChicaFondo[]>([]);
+  const [cuentas, setCuentas] = useState<CuentaBancaria[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [guardandoFondo, setGuardandoFondo] = useState(false);
+
+  const [condominio, setCondominio] = useState("");
+  const [condominioId, setCondominioId] = useState("");
+
+  const [fecha, setFecha] = useState("");
+  const [concepto, setConcepto] = useState("");
+  const [detalleGasto, setDetalleGasto] = useState("");
+  const [monto, setMonto] = useState("");
+  const [responsable, setResponsable] = useState("");
+  const [comprobante, setComprobante] = useState("");
+  const [facturaArchivo, setFacturaArchivo] = useState<File | null>(null);
+
+  const [tipoFondo, setTipoFondo] = useState<"fondo_inicial" | "reposicion">(
+    "fondo_inicial",
+  );
+  const [fechaFondo, setFechaFondo] = useState("");
+  const [montoFondo, setMontoFondo] = useState("");
+  const [responsableFondo, setResponsableFondo] = useState("");
+  const [descripcionFondo, setDescripcionFondo] = useState("");
+  const [cuentaBancariaFondoId, setCuentaBancariaFondoId] = useState("");
+  const [metodoPagoFondo, setMetodoPagoFondo] = useState("Cheque");
+  const [numeroDocumentoFondo, setNumeroDocumentoFondo] = useState("");
+  const [referenciaBancoFondo, setReferenciaBancoFondo] = useState("");
+  const [chequeArchivoFondo, setChequeArchivoFondo] = useState<File | null>(null);
+
+  useEffect(() => {
+    const idGuardado = localStorage.getItem("condominio_id") || "";
+    const nombreGuardado = localStorage.getItem("condominio_nombre") || "";
+
+    if (!idGuardado) {
+      alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
+      return;
+    }
+
+    const hoy = new Date().toISOString().split("T")[0];
+
+    setCondominioId(idGuardado);
+    setCondominio(nombreGuardado || `Condominio ID ${idGuardado}`);
+    setFecha(hoy);
+    setFechaFondo(hoy);
+    setDescripcionFondo("Fondo inicial de caja chica");
+
+    cargarGastos(nombreGuardado || `Condominio ID ${idGuardado}`);
+    cargarFondos(idGuardado, nombreGuardado || `Condominio ID ${idGuardado}`);
+    cargarCuentasBancarias(idGuardado);
+  }, []);
+
+  async function cargarCuentasBancarias(idCondominio: string) {
+    if (!idCondominio) {
+      setCuentas([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("cuentas_bancarias")
+      .select(
+        "id, condominio_id, nombre_banco, numero_cuenta, tipo_cuenta, moneda, activa, balance_actual",
+      )
+      .eq("condominio_id", Number(idCondominio))
+      .eq("activa", true)
+      .order("id", { ascending: true });
+
+    if (error) {
+      alert("Error cargando cuentas bancarias: " + error.message);
+      setCuentas([]);
+      return;
+    }
+
+    const cuentasActivas = (data || []) as CuentaBancaria[];
+    setCuentas(cuentasActivas);
+
+    if (cuentasActivas.length === 1) {
+      setCuentaBancariaFondoId(String(cuentasActivas[0].id));
+    }
+  }
+
+  async function cargarGastos(condominioActivo: string) {
+    if (!condominioActivo) return;
+
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("caja_chica")
+      .select(
+        "id, condominio, fecha, concepto, detalle_gasto, monto, responsable, comprobante, factura_url, estado, created_at"
+      )
+      .eq("condominio", condominioActivo)
+      .order("fecha", { ascending: false })
+      .order("id", { ascending: false });
+
+    setLoading(false);
+
+    if (error) {
+      alert("Error cargando caja chica: " + error.message);
+      return;
+    }
+
+    setGastos(data || []);
+  }
+
+  async function cargarFondos(idCondominio: string, nombreCondominio?: string) {
+    if (!idCondominio && !nombreCondominio) return;
+
+    let fondosData: CajaChicaFondo[] = [];
+
+    if (idCondominio) {
+      const { data, error } = await supabase
+        .from("caja_chica_fondos")
+        .select(
+          "id, condominio_id, numero_fondo, condominio, fecha, tipo, monto, descripcion, responsable, created_at, cuenta_bancaria_id, movimiento_banco_id, solicitud_pago_id, metodo_pago, numero_documento, referencia_banco, estado, cheque_url"
+        )
+        .eq("condominio_id", Number(idCondominio))
+        .order("fecha", { ascending: false })
+        .order("id", { ascending: false });
+
+      if (error) {
+        alert("Error cargando fondos de caja chica: " + error.message);
+        setFondos([]);
+        return;
+      }
+
+      fondosData = (data || []) as CajaChicaFondo[];
+    }
+
+    if (fondosData.length === 0 && nombreCondominio) {
+      const { data, error } = await supabase
+        .from("caja_chica_fondos")
+        .select(
+          "id, condominio_id, numero_fondo, condominio, fecha, tipo, monto, descripcion, responsable, created_at, cuenta_bancaria_id, movimiento_banco_id, solicitud_pago_id, metodo_pago, numero_documento, referencia_banco, estado, cheque_url"
+        )
+        .ilike("condominio", `%${nombreCondominio}%`)
+        .order("fecha", { ascending: false })
+        .order("id", { ascending: false });
+
+      if (error) {
+        alert("Error cargando fondos de caja chica: " + error.message);
+        setFondos([]);
+        return;
+      }
+
+      fondosData = (data || []) as CajaChicaFondo[];
+    }
+
+    setFondos(fondosData);
+  }
+
+  async function refrescar() {
+    if (!condominioId) return;
+    await Promise.all([
+      cargarGastos(condominio),
+      cargarFondos(condominioId, condominio),
+      cargarCuentasBancarias(condominioId),
+    ]);
+  }
+
+  async function subirChequeFondo(archivo: File) {
+    const extension = archivo.name.split(".").pop() || "pdf";
+    const nombreArchivo = `${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(2)}.${extension}`;
+
+    const rutaArchivo = `${condominioId}/cheques-caja-chica/${nombreArchivo}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("soportes-solicitudes-pago")
+      .upload(rutaArchivo, archivo);
+
+    if (uploadError) {
+      throw new Error(
+        "Error subiendo el cheque o comprobante bancario: " +
+          uploadError.message,
+      );
+    }
+
+    const { data } = supabase.storage
+      .from("soportes-solicitudes-pago")
+      .getPublicUrl(rutaArchivo);
+
+    return data.publicUrl;
+  }
+
+  async function guardarFondo(e: React.FormEvent) {
+    e.preventDefault();
+
+    const montoNumerico = Number(montoFondo || 0);
+    const fondoInicialPendiente = fondos.find(
+      (f) =>
+        String(f.tipo || "").toLowerCase() === "fondo_inicial" &&
+        !f.movimiento_banco_id &&
+        String(f.estado || "").toLowerCase() !== "anulado",
+    );
+
+    if (
+      !condominioId ||
+      !condominio ||
+      !fechaFondo ||
+      montoNumerico <= 0 ||
+      !cuentaBancariaFondoId ||
+      !numeroDocumentoFondo.trim()
+    ) {
+      alert(
+        "Debe completar fecha, monto, cuenta bancaria y número de cheque o documento.",
+      );
+      return;
+    }
+
+    if (metodoPagoFondo === "Cheque" && !chequeArchivoFondo) {
+      alert("Debe adjuntar el archivo del cheque emitido.");
+      return;
+    }
+
+    if (
+      tipoFondo === "fondo_inicial" &&
+      fondoInicialPendiente &&
+      Math.abs(Number(fondoInicialPendiente.monto || 0) - montoNumerico) > 0.01
+    ) {
+      alert(
+        `El monto debe coincidir con el fondo inicial existente.\n\nFondo registrado: RD$ ${dinero(
+          fondoInicialPendiente.monto,
+        )}\nMonto indicado: RD$ ${dinero(montoNumerico)}`,
+      );
+      return;
+    }
+
+    const cuentaSeleccionada = cuentas.find(
+      (cuenta) => cuenta.id === Number(cuentaBancariaFondoId),
+    );
+
+    const operacion =
+      tipoFondo === "reposicion" ? "Reposición" : "Fondo inicial";
+
+    const confirmar = confirm(
+      `¿Desea registrar esta operación?\n\n` +
+        `${operacion}: RD$ ${dinero(montoNumerico)}\n` +
+        `Cuenta: ${cuentaSeleccionada?.nombre_banco || "Cuenta bancaria"} ${
+          cuentaSeleccionada?.numero_cuenta || ""
+        }\n` +
+        `Documento: ${numeroDocumentoFondo}\n\n` +
+        `Efecto: Banco -RD$ ${dinero(montoNumerico)} | Caja chica +RD$ ${dinero(
+          montoNumerico,
+        )} | Gasto operativo RD$ 0.00`,
+    );
+
+    if (!confirmar) return;
+
+    try {
+      setGuardandoFondo(true);
+
+      let chequeUrl: string | null = null;
+
+      if (chequeArchivoFondo) {
+        chequeUrl = await subirChequeFondo(chequeArchivoFondo);
+      }
+
+      const { data, error } = await supabase.rpc(
+        "registrar_fondo_caja_chica_bancario",
+        {
+          p_condominio_id: Number(condominioId),
+          p_condominio: condominio,
+          p_cuenta_bancaria_id: Number(cuentaBancariaFondoId),
+          p_fecha: fechaFondo,
+          p_tipo: tipoFondo,
+          p_monto: montoNumerico,
+          p_descripcion:
+            descripcionFondo ||
+            (tipoFondo === "reposicion"
+              ? "Reposición de caja chica"
+              : "Fondo inicial de caja chica"),
+          p_responsable: responsableFondo || null,
+          p_metodo_pago: metodoPagoFondo,
+          p_numero_documento: numeroDocumentoFondo.trim(),
+          p_referencia_banco:
+            referenciaBancoFondo.trim() || numeroDocumentoFondo.trim(),
+          p_cheque_url: chequeUrl,
+          p_solicitud_pago_id: null,
+          p_fondo_existente_id:
+            tipoFondo === "fondo_inicial" && fondoInicialPendiente
+              ? fondoInicialPendiente.id
+              : null,
+        },
+      );
+
+      if (error) {
+        alert("Error registrando fondo y egreso bancario: " + error.message);
+        return;
+      }
+
+      alert(
+        data?.mensaje ||
+          "Fondo de caja chica y egreso bancario registrados correctamente.",
+      );
+
+      const hoy = new Date().toISOString().split("T")[0];
+
+      setFechaFondo(hoy);
+      setMontoFondo("");
+      setResponsableFondo("");
+      setDescripcionFondo(
+        tipoFondo === "reposicion"
+          ? "Reposición de caja chica"
+          : "Fondo inicial de caja chica",
+      );
+      setNumeroDocumentoFondo("");
+      setReferenciaBancoFondo("");
+      setChequeArchivoFondo(null);
+
+      const inputCheque = document.getElementById(
+        "chequeArchivoFondo",
+      ) as HTMLInputElement | null;
+
+      if (inputCheque) inputCheque.value = "";
+
+      await refrescar();
+    } catch (err: any) {
+      alert(err.message || "Error registrando fondo y egreso bancario.");
+    } finally {
+      setGuardandoFondo(false);
+    }
+  }
+
+  async function subirFactura() {
+    if (!facturaArchivo) return "";
+
+    const extension = facturaArchivo.name.split(".").pop();
+    const nombreArchivo = `${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(2)}.${extension}`;
+
+    const carpetaCondominio = condominioId || "general";
+    const rutaArchivo = `${carpetaCondominio}/${nombreArchivo}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("facturas-caja-chica")
+      .upload(rutaArchivo, facturaArchivo);
+
+    if (uploadError) {
+      throw new Error(uploadError.message);
+    }
+
+    const { data } = supabase.storage
+      .from("facturas-caja-chica")
+      .getPublicUrl(rutaArchivo);
+
+    return data.publicUrl;
+  }
+
+  async function guardarGasto(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!condominio || !fecha || !concepto || !monto) {
+      alert("Debe completar condominio, fecha, concepto y monto.");
+      return;
+    }
+
+    const montoNumerico = Number(monto || 0);
+
+    if (montoNumerico > disponibleCajaChica) {
+      alert(
+        `No se puede registrar este gasto porque supera el disponible de caja chica.\n\nDisponible: RD$ ${dinero(
+          disponibleCajaChica
+        )}\nMonto gasto: RD$ ${dinero(montoNumerico)}\nDiferencia: RD$ ${dinero(
+          montoNumerico - disponibleCajaChica
+        )}`
+      );
+      return;
+    }
+
+    try {
+      setGuardando(true);
+
+      let facturaUrl = "";
+
+      if (facturaArchivo) {
+        facturaUrl = await subirFactura();
+      }
+
+      const { error } = await supabase.from("caja_chica").insert([
+        {
+          condominio,
+          fecha,
+          concepto,
+          detalle_gasto: detalleGasto,
+          monto: montoNumerico,
+          responsable,
+          comprobante,
+          factura_url: facturaUrl,
+          estado: "registrado",
+          condominio_id: Number(condominioId),
+        },
+      ]);
+
+      setGuardando(false);
+
+      if (error) {
+        alert("Error guardando gasto: " + error.message);
+        return;
+      }
+
+      alert("Gasto de caja chica registrado correctamente.");
+
+      const hoy = new Date().toISOString().split("T")[0];
+
+      setFecha(hoy);
+      setConcepto("");
+      setDetalleGasto("");
+      setMonto("");
+      setResponsable("");
+      setComprobante("");
+      setFacturaArchivo(null);
+
+      const inputFile = document.getElementById(
+        "facturaArchivo"
+      ) as HTMLInputElement | null;
+
+      if (inputFile) inputFile.value = "";
+
+      cargarGastos(condominio);
+    } catch (err: any) {
+      setGuardando(false);
+      alert("Error subiendo factura: " + err.message);
+    }
+  }
+
+  const fondoInicialPendienteBanco = useMemo(
+    () =>
+      fondos.find(
+        (f) =>
+          String(f.tipo || "").toLowerCase() === "fondo_inicial" &&
+          !f.movimiento_banco_id &&
+          String(f.estado || "").toLowerCase() !== "anulado",
+      ) || null,
+    [fondos],
+  );
+
+  useEffect(() => {
+    if (tipoFondo === "fondo_inicial" && fondoInicialPendienteBanco) {
+      setFechaFondo(fondoInicialPendienteBanco.fecha || fechaFondo);
+      setMontoFondo(String(fondoInicialPendienteBanco.monto || ""));
+      setResponsableFondo(fondoInicialPendienteBanco.responsable || "");
+      setDescripcionFondo(
+        fondoInicialPendienteBanco.descripcion || "Fondo inicial de caja chica",
+      );
+    }
+  }, [tipoFondo, fondoInicialPendienteBanco?.id]);
+
+  const totalGastos = gastos.reduce((sum, g) => sum + Number(g.monto || 0), 0);
+  const totalFondos = fondos.reduce(
+    (sum, f) =>
+      String(f.estado || "").toLowerCase() === "anulado"
+        ? sum
+        : sum + Number(f.monto || 0),
+    0,
+  );
+  const disponibleCajaChica = totalFondos - totalGastos;
+
+  const ultimosGastos = useMemo(() => gastos.slice(0, 6), [gastos]);
+  const ultimoFondo = fondos[0];
+
+  return (
+    <PageContainer>
+      <ModuleMenu
+        title="Caja Chica"
+        subtitle="Movimientos, fondos, balance y reportes."
+        tone="green"
+        items={[
+          { href: "/finanzas/caja-chica", label: "Dashboard", icon: BarChart3 },
+          { href: "/caja-chica", label: "Movimientos", icon: Coins },
+          { href: "/caja-chica/balance", label: "Balance", icon: BarChart3 },
+          { href: "/caja-chica/reporte", label: "Reportes", icon: FileSpreadsheet },
+        ]}
+      />
+
+      <ModuleToolbar
+        title="Movimiento de Caja Chica"
+        subtitle={`Registro rápido de gastos menores. Condominio: ${
+          condominio || "No seleccionado"
+        }.`}
+        icon={Coins}
+        actions={
+          <ModuleActions
+            onRefresh={refrescar}
+            extra={
+              <Link
+                href="/caja-chica/reporte"
+                className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Reporte
+              </Link>
+            }
+          />
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <section className="xl:col-span-2">
+          <SectionCard
+            title="Registrar gasto"
+            subtitle="Formulario principal para uso diario."
+            action={
+              <div
+                className={`rounded-xl px-4 py-2 text-sm font-black ${
+                  disponibleCajaChica >= 0
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-red-50 text-red-700"
+                }`}
+              >
+                Disponible: RD$ {dinero(disponibleCajaChica)}
+              </div>
+            }
+          >
+            <form
+              onSubmit={guardarGasto}
+              className="grid grid-cols-1 gap-4 md:grid-cols-2"
+            >
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Fecha *</label>
+                <input
+                  type="date"
+                  value={fecha}
+                  onChange={(e) => setFecha(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Monto RD$ *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={monto}
+                  onChange={(e) => setMonto(e.target.value)}
+                  className={`w-full rounded-xl border px-4 py-3 ${
+                    Number(monto || 0) > disponibleCajaChica
+                      ? "border-red-300 bg-red-50"
+                      : ""
+                  }`}
+                  placeholder="0.00"
+                />
+
+                {Number(monto || 0) > disponibleCajaChica && (
+                  <div className="mt-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    <p className="font-black">Monto supera el disponible</p>
+                    <p className="mt-1">
+                      Disponible: RD$ {dinero(disponibleCajaChica)} · Monto:
+                      RD$ {dinero(Number(monto || 0))} · Diferencia: RD${" "}
+                      {dinero(Number(monto || 0) - disponibleCajaChica)}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-semibold">Concepto *</label>
+                <input
+                  type="text"
+                  value={concepto}
+                  onChange={(e) => setConcepto(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Ej. Compra de bombillos, limpieza, materiales..."
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  {metodoPagoFondo === "Cheque"
+                    ? "Archivo del cheque emitido *"
+                    : "Comprobante bancario"}
+                </label>
+                <input
+                  id="chequeArchivoFondo"
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) =>
+                    setChequeArchivoFondo(e.target.files?.[0] || null)
+                  }
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Se guardará junto al fondo para consulta de tesorero, presidente y directiva.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Responsable</label>
+                <input
+                  type="text"
+                  value={responsable}
+                  onChange={(e) => setResponsable(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Persona que realizó el gasto"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Comprobante / Factura
+                </label>
+                <input
+                  type="text"
+                  value={comprobante}
+                  onChange={(e) => setComprobante(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Número o referencia"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-semibold">
+                  Soporte del gasto
+                </label>
+                <input
+                  id="facturaArchivo"
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) => setFacturaArchivo(e.target.files?.[0] || null)}
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-semibold">
+                  Detalle
+                </label>
+                <textarea
+                  value={detalleGasto}
+                  onChange={(e) => setDetalleGasto(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  rows={3}
+                  placeholder="Detalle breve del gasto realizado"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <button
+                  type="submit"
+                  disabled={guardando}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {guardando ? "Guardando..." : "Guardar gasto"}
+                </button>
+              </div>
+            </form>
+          </SectionCard>
+        </section>
+
+        <section className="space-y-5">
+          <SectionCard title="Resumen" subtitle="Estado actual de la caja.">
+            <div className="space-y-3">
+              <InfoLine label="Fondos" value={`RD$ ${dinero(totalFondos)}`} />
+              <InfoLine label="Gastado" value={`RD$ ${dinero(totalGastos)}`} />
+              <InfoLine
+                label="Disponible"
+                value={`RD$ ${dinero(disponibleCajaChica)}`}
+                highlight
+                danger={disponibleCajaChica < 0}
+              />
+              <InfoLine label="Último fondo" value={ultimoFondo ? fechaCorta(ultimoFondo.fecha) : "-"} />
+              {ultimoFondo?.cheque_url && (
+                <a
+                  href={ultimoFondo.cheque_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block rounded-xl bg-slate-900 px-4 py-3 text-center text-sm font-bold text-white hover:bg-slate-800"
+                >
+                  Ver cheque / comprobante
+                </a>
+              )}
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Fondo de Caja"
+            subtitle="Registra la entrada a caja chica y el egreso correspondiente en Control Bancario."
+          >
+            {fondoInicialPendienteBanco && (
+              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <p className="font-black">Fondo inicial pendiente de enlazar al banco</p>
+                <p className="mt-1">
+                  Fondo No. {String(fondoInicialPendienteBanco.numero_fondo || 1).padStart(5, "0")} · RD$ {dinero(fondoInicialPendienteBanco.monto)} · {fechaCorta(fondoInicialPendienteBanco.fecha)}
+                </p>
+                <p className="mt-1 text-xs">
+                  Al guardar se utilizará este fondo existente; no se creará otro fondo ni un gasto operativo.
+                </p>
+                {fondoInicialPendienteBanco.cheque_url && (
+                  <a
+                    href={fondoInicialPendienteBanco.cheque_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 inline-flex font-bold text-blue-700 underline"
+                  >
+                    Ver cheque adjunto
+                  </a>
+                )}
+              </div>
+            )}
+
+            <form onSubmit={guardarFondo} className="space-y-3">
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Tipo de operación *</label>
+                <select
+                  value={tipoFondo}
+                  onChange={(e) => {
+                    const nuevoTipo = e.target.value as "fondo_inicial" | "reposicion";
+                    setTipoFondo(nuevoTipo);
+                    if (nuevoTipo === "reposicion") {
+                      setMontoFondo("");
+                      setDescripcionFondo("Reposición de caja chica");
+                    } else if (!fondoInicialPendienteBanco) {
+                      setMontoFondo("");
+                      setDescripcionFondo("Fondo inicial de caja chica");
+                    }
+                  }}
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                >
+                  <option value="fondo_inicial">Fondo inicial</option>
+                  <option value="reposicion">Reposición</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Fecha del desembolso *</label>
+                <input
+                  type="date"
+                  value={fechaFondo}
+                  onChange={(e) => setFechaFondo(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Monto RD$ *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={montoFondo}
+                  onChange={(e) => setMontoFondo(e.target.value)}
+                  readOnly={tipoFondo === "fondo_inicial" && Boolean(fondoInicialPendienteBanco)}
+                  className="w-full rounded-xl border px-4 py-3 read-only:bg-slate-100"
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Cuenta bancaria *</label>
+                <select
+                  value={cuentaBancariaFondoId}
+                  onChange={(e) => setCuentaBancariaFondoId(e.target.value)}
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                >
+                  <option value="">Seleccione cuenta</option>
+                  {cuentas.map((cuenta) => (
+                    <option key={cuenta.id} value={cuenta.id}>
+                      {cuenta.nombre_banco} · {cuenta.numero_cuenta} · RD$ {dinero(cuenta.balance_actual)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Método de pago *</label>
+                <select
+                  value={metodoPagoFondo}
+                  onChange={(e) => setMetodoPagoFondo(e.target.value)}
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                >
+                  <option value="Cheque">Cheque</option>
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Otro">Otro</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Número de cheque / documento *</label>
+                <input
+                  type="text"
+                  value={numeroDocumentoFondo}
+                  onChange={(e) => {
+                    setNumeroDocumentoFondo(e.target.value);
+                    if (!referenciaBancoFondo) {
+                      setReferenciaBancoFondo(e.target.value);
+                    }
+                  }}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Ej. 318"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Referencia bancaria</label>
+                <input
+                  type="text"
+                  value={referenciaBancoFondo}
+                  onChange={(e) => setReferenciaBancoFondo(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Usará el número de documento si queda vacío"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Responsable</label>
+                <input
+                  type="text"
+                  value={responsableFondo}
+                  onChange={(e) => setResponsableFondo(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Persona que recibe o administra el fondo"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Descripción</label>
+                <textarea
+                  value={descripcionFondo}
+                  onChange={(e) => setDescripcionFondo(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3"
+                  rows={2}
+                  placeholder="Fondo inicial o reposición de caja chica"
+                />
+              </div>
+
+              <div className="rounded-2xl border bg-slate-50 p-4 text-xs text-slate-600">
+                <p className="font-black text-slate-800">Efecto de esta operación</p>
+                <p className="mt-1">Banco disminuye · Caja chica aumenta · No se crea gasto operativo.</p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={guardandoFondo}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+                {guardandoFondo
+                  ? "Registrando..."
+                  : fondoInicialPendienteBanco && tipoFondo === "fondo_inicial"
+                    ? "Registrar desembolso bancario"
+                    : "Registrar fondo y egreso bancario"}
+              </button>
+            </form>
+          </SectionCard>
+        </section>
+      </div>
+
+      <SectionCard
+        title="Últimos gastos"
+        subtitle="Vista rápida. La consulta completa está en reportes."
+        action={
+          <Link
+            href="/caja-chica/reporte"
+            className="text-sm font-bold text-emerald-700 hover:underline"
+          >
+            Ver reporte
+          </Link>
+        }
+      >
+        {loading ? (
+          <p className="text-sm text-slate-500">Cargando registros...</p>
+        ) : ultimosGastos.length === 0 ? (
+          <EmptyState
+            title="Sin gastos"
+            description="No hay gastos registrados para este condominio."
+          />
+        ) : (
+          <DataTable>
+            <thead className="bg-slate-100 text-slate-600">
+              <tr>
+                <th className="px-4 py-3 text-left">Fecha</th>
+                <th className="px-4 py-3 text-left">Concepto</th>
+                <th className="px-4 py-3 text-left">Responsable</th>
+                <th className="px-4 py-3 text-right">Monto</th>
+                <th className="px-4 py-3 text-center">Factura</th>
+                <th className="px-4 py-3 text-center">Reporte</th>
+              </tr>
+            </thead>
+
+            <tbody className="divide-y divide-slate-200">
+              {ultimosGastos.map((g) => (
+                <tr key={g.id} className="bg-white hover:bg-slate-50">
+                  <td className="px-4 py-3">{fechaCorta(g.fecha)}</td>
+                  <td className="px-4 py-3">
+                    <p className="font-semibold">{g.concepto}</p>
+                    {g.detalle_gasto && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        {g.detalle_gasto}
+                      </p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">{g.responsable || "-"}</td>
+                  <td className="px-4 py-3 text-right font-black text-red-700">
+                    RD$ {dinero(g.monto)}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {g.factura_url ? (
+                      <a
+                        href={g.factura_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block rounded-lg bg-slate-900 px-3 py-1 text-xs font-bold text-white"
+                      >
+                        Ver
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-400">Sin factura</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <Link
+                      href={`/caja-chica/gastos/reporte/${g.id}`}
+                      className="inline-block rounded-lg bg-purple-700 px-3 py-1 text-xs font-bold text-white hover:bg-purple-800"
+                    >
+                      Reporte
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
+        )}
+      </SectionCard>
+    </PageContainer>
+  );
+}
+
+function InfoLine({
+  label,
+  value,
+  highlight = false,
+  danger = false,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border bg-slate-50 px-4 py-3">
+      <span className="text-sm font-semibold text-slate-600">{label}</span>
+      <span
+        className={`text-sm font-black ${
+          danger
+            ? "text-red-700"
+            : highlight
+            ? "text-emerald-700"
+            : "text-slate-900"
+        }`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}

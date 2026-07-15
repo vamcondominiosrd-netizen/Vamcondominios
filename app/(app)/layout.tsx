@@ -22,6 +22,7 @@ import {
   Menu,
   X,
   LayoutDashboard,
+  Banknote,
   UserCog,
   CalendarDays,
   FileText,
@@ -77,8 +78,9 @@ const submenuFinanciero: MenuItem[] = [
   { href: "/banco", label: "Banco", icon: Building2 },
   { href: "/solicitudes-pago", label: "Solicitudes", icon: FileText },
   { href: "/finanzas/configuraciones/presupuesto", label: "Presupuesto", icon: BarChart3 },
-  { href: "/finanzas/control-bancario", label: "Control Bancario", icon: BarChart3 },
+  { href: "/finanzas/control-bancario", label: "Control Bancario", icon: Banknote },
   { href: "/finanzas/morosidad", label: "Morosidad", icon: AlertTriangle },
+  { href: "/finanzas/cobros", label: "Cobros Inteligentes", icon: CircleDollarSign },
 ];
 
 const submenuInventario: MenuItem[] = [
@@ -106,6 +108,7 @@ const submenuRecursosHumanos: MenuItem[] = [
   { href: "/recursos-humanos/prestaciones", label: "Prestaciones", icon: FileText },
   { href: "/recursos-humanos/asistencia", label: "Asistencia", icon: Clock },
   { href: "/recursos-humanos/nomina/reportes", label: "Reportes", icon: BarChart3 },
+  { href: "/recursos-humanos/cargos", label: "Cargos", icon: Boxes },
 ];
 
 const submenuConfiguracion: MenuItem[] = [

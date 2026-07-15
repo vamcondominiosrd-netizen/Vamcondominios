@@ -1,8 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  BarChart3,
+  BriefcaseBusiness,
+  CheckCircle2,
+  Clock3,
+  FileText,
+  HandCoins,
+  Loader2,
+  Pencil,
+  RefreshCw,
+  Save,
+  Trash2,
+  Users,
+  WalletCards,
+  XCircle,
+} from "lucide-react";
+
 import { supabase } from "@/app/lib/supabaseClient";
-import NominaMenu from "../NominaMenu";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import ModuleActions from "@/components/vam/enterprise/ModuleActions";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import DataTable from "@/components/vam/enterprise/DataTable";
+import EmptyState from "@/components/vam/enterprise/EmptyState";
 
 type TipoNomina = {
   id: number;
@@ -25,9 +49,30 @@ type TipoNomina = {
 const frecuencias = ["Mensual", "Quincenal", "Semanal", "Especial", "Anual"];
 const estados = ["Activo", "Inactivo"];
 
+function estadoClass(estado?: string | null) {
+  if (estado === "Activo") {
+    return "border-emerald-100 bg-emerald-50 text-emerald-700";
+  }
+
+  if (estado === "Inactivo") {
+    return "border-red-100 bg-red-50 text-red-700";
+  }
+
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
+
+function booleanoClass(valor: boolean) {
+  return valor
+    ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+    : "border-slate-200 bg-slate-50 text-slate-500";
+}
+
 export default function TiposNominaPage() {
+  const [mounted, setMounted] = useState(false);
+
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
+  const [mensaje, setMensaje] = useState("");
 
   const [tipos, setTipos] = useState<TipoNomina[]>([]);
   const [loading, setLoading] = useState(false);
@@ -48,35 +93,60 @@ export default function TiposNominaPage() {
   const [estado, setEstado] = useState("Activo");
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
-    const nombreLocal = localStorage.getItem("condominio_nombre") || "";
+    const nombreLocal =
+      localStorage.getItem("condominio_nombre") ||
+      localStorage.getItem("condominio") ||
+      "";
 
     setCondominioId(id);
     setCondominioNombre(nombreLocal);
 
-    if (id) {
-      cargarTipos(id);
+    if (!id || !Number(id)) {
+      setMensaje("No se encontró el condominio activo.");
+      return;
     }
+
+    cargarTipos(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function cargarTipos(id: string) {
+    const condominioIdNumero = Number(id);
+
+    if (!condominioIdNumero) return;
+
     setLoading(true);
+    setMensaje("");
 
     const { data, error } = await supabase
       .from("rh_tipos_nomina")
       .select("*")
-      .eq("condominio_id", Number(id))
+      .eq("condominio_id", condominioIdNumero)
       .order("orden", { ascending: true })
       .order("nombre", { ascending: true });
 
     setLoading(false);
 
     if (error) {
-      alert("Error cargando tipos de nómina: " + error.message);
+      setMensaje("Error cargando tipos de nómina: " + error.message);
       return;
     }
 
-    setTipos((data as TipoNomina[]) || []);
+    setTipos(
+      ((data as TipoNomina[]) || []).filter(
+        (item) => Number(item.condominio_id) === condominioIdNumero,
+      ),
+    );
+  }
+
+  async function refrescar() {
+    if (!condominioId || !Number(condominioId)) return;
+    await cargarTipos(condominioId);
   }
 
   function limpiarFormulario() {
@@ -116,28 +186,30 @@ export default function TiposNominaPage() {
   async function guardarTipo(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!condominioId || !condominioNombre) {
-      alert("No se encontró el condominio activo.");
+    const condominioIdNumero = Number(condominioId);
+
+    if (!condominioIdNumero || !condominioNombre) {
+      setMensaje("No se encontró el condominio activo.");
       return;
     }
 
     if (!codigo.trim()) {
-      alert("Debe indicar el código del tipo de nómina.");
+      setMensaje("Debe indicar el código del tipo de nómina.");
       return;
     }
 
     if (!nombre.trim()) {
-      alert("Debe indicar el nombre del tipo de nómina.");
+      setMensaje("Debe indicar el nombre del tipo de nómina.");
       return;
     }
 
     if (!diasPeriodo || Number(diasPeriodo) <= 0) {
-      alert("Debe indicar los días del período.");
+      setMensaje("Debe indicar los días del período.");
       return;
     }
 
     const registro = {
-      condominio_id: Number(condominioId),
+      condominio_id: condominioIdNumero,
       condominio: condominioNombre,
       codigo: codigo.trim().toUpperCase(),
       nombre: nombre.trim(),
@@ -154,13 +226,18 @@ export default function TiposNominaPage() {
     };
 
     setGuardando(true);
+    setMensaje("");
 
     try {
       if (esPredeterminada) {
-        await supabase
+        const { error: errorPredeterminada } = await supabase
           .from("rh_tipos_nomina")
           .update({ es_predeterminada: false })
-          .eq("condominio_id", Number(condominioId));
+          .eq("condominio_id", condominioIdNumero);
+
+        if (errorPredeterminada) {
+          throw new Error(errorPredeterminada.message);
+        }
       }
 
       if (editandoId) {
@@ -168,29 +245,27 @@ export default function TiposNominaPage() {
           .from("rh_tipos_nomina")
           .update(registro)
           .eq("id", editandoId)
-          .eq("condominio_id", Number(condominioId));
+          .eq("condominio_id", condominioIdNumero);
 
         if (error) throw new Error(error.message);
 
-        setGuardando(false);
-        alert("Tipo de nómina modificado correctamente.");
+        setMensaje("Tipo de nómina modificado correctamente.");
         limpiarFormulario();
-        cargarTipos(condominioId);
+        await cargarTipos(condominioId);
         return;
       }
 
       const { data: existente, error: errorExiste } = await supabase
         .from("rh_tipos_nomina")
         .select("id")
-        .eq("condominio_id", Number(condominioId))
+        .eq("condominio_id", condominioIdNumero)
         .eq("codigo", codigo.trim().toUpperCase())
         .maybeSingle();
 
       if (errorExiste) throw new Error(errorExiste.message);
 
       if (existente) {
-        setGuardando(false);
-        alert("Ya existe un tipo de nómina con ese código.");
+        setMensaje("Ya existe un tipo de nómina con ese código.");
         return;
       }
 
@@ -200,19 +275,19 @@ export default function TiposNominaPage() {
 
       if (error) throw new Error(error.message);
 
-      setGuardando(false);
-      alert("Tipo de nómina registrado correctamente.");
+      setMensaje("Tipo de nómina registrado correctamente.");
       limpiarFormulario();
-      cargarTipos(condominioId);
+      await cargarTipos(condominioId);
     } catch (error: any) {
+      setMensaje("Error guardando tipo de nómina: " + error.message);
+    } finally {
       setGuardando(false);
-      alert("Error guardando tipo de nómina: " + error.message);
     }
   }
 
   async function cambiarEstado(tipo: TipoNomina, nuevoEstado: string) {
     const confirmar = confirm(
-      `¿Desea cambiar "${tipo.nombre}" a ${nuevoEstado}?`
+      `¿Desea cambiar "${tipo.nombre}" a ${nuevoEstado}?`,
     );
 
     if (!confirmar) return;
@@ -224,17 +299,17 @@ export default function TiposNominaPage() {
       .eq("condominio_id", Number(condominioId));
 
     if (error) {
-      alert("Error actualizando estado: " + error.message);
+      setMensaje("Error actualizando estado: " + error.message);
       return;
     }
 
-    alert("Estado actualizado correctamente.");
-    cargarTipos(condominioId);
+    setMensaje("Estado actualizado correctamente.");
+    await cargarTipos(condominioId);
   }
 
   async function eliminarTipo(tipo: TipoNomina) {
     const confirmar = confirm(
-      `¿Seguro que desea eliminar el tipo de nómina "${tipo.nombre}"?`
+      `¿Seguro que desea eliminar el tipo de nómina "${tipo.nombre}"?`,
     );
 
     if (!confirmar) return;
@@ -246,81 +321,209 @@ export default function TiposNominaPage() {
       .eq("condominio_id", Number(condominioId));
 
     if (error) {
-      alert("Error eliminando tipo de nómina: " + error.message);
+      setMensaje("Error eliminando tipo de nómina: " + error.message);
       return;
     }
 
-    alert("Tipo de nómina eliminado correctamente.");
-    cargarTipos(condominioId);
+    setMensaje("Tipo de nómina eliminado correctamente.");
+    await cargarTipos(condominioId);
   }
 
-  function siNo(valor: boolean) {
-    return valor ? "Sí" : "No";
+  const tiposSeguros = useMemo(() => {
+    const condominioIdNumero = Number(condominioId);
+    if (!condominioIdNumero) return [];
+
+    return tipos.filter(
+      (item) => Number(item.condominio_id) === condominioIdNumero,
+    );
+  }, [tipos, condominioId]);
+
+  const activos = tiposSeguros.filter((item) => item.estado === "Activo").length;
+  const inactivos = tiposSeguros.filter(
+    (item) => item.estado === "Inactivo",
+  ).length;
+  const predeterminados = tiposSeguros.filter(
+    (item) => item.es_predeterminada,
+  ).length;
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6">
+        <div className="rounded-2xl border bg-white p-6 text-sm font-bold text-slate-600">
+          Cargando módulo de tipos de nómina...
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6">
-      <NominaMenu />
+    <PageContainer>
+      <ModuleMenu
+        title="Recursos Humanos"
+        subtitle="Gestión de empleados, nómina, vacaciones, permisos, prestaciones y reportes."
+        tone="blue"
+        items={[
+          {
+            href: "/recursos-humanos",
+            label: "Inicio RH",
+            icon: BriefcaseBusiness,
+          },
+          {
+            href: "/recursos-humanos/personal",
+            label: "Empleados",
+            icon: Users,
+          },
+          {
+            href: "/recursos-humanos/nomina",
+            label: "Nómina",
+            icon: WalletCards,
+          },
+          {
+            href: "/recursos-humanos/vacaciones",
+            label: "Vacaciones",
+            icon: Clock3,
+          },
+          {
+            href: "/recursos-humanos/prestaciones",
+            label: "Prestaciones",
+            icon: HandCoins,
+          },
+          {
+            href: "/recursos-humanos/nomina/reportes/nomina",
+            label: "Reportes",
+            icon: BarChart3,
+          },
+        ]}
+      />
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-4xl font-black text-slate-900">
-          Tipos de Nómina
-        </h1>
+      <ModuleToolbar
+        title="Tipos de Nómina"
+        subtitle={`Catálogo para nómina mensual, quincenal, vacaciones, regalía, liquidación y pagos especiales. Condominio: ${
+          condominioNombre || "No identificado"
+        }.`}
+        icon={WalletCards}
+        actions={<ModuleActions onRefresh={refrescar} />}
+      />
 
-        <p className="text-slate-500 mt-2">
-          Catálogo para definir nómina mensual, quincenal, vacaciones, regalía,
-          liquidación y otros pagos especiales.
-        </p>
-      </div>
+      {mensaje && (
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-800">
+          {mensaje}
+        </div>
+      )}
 
-      <div className="bg-white rounded-2xl p-5 shadow-sm border">
-        <p className="text-sm text-slate-500">Condominio activo</p>
-        <h2 className="text-lg font-bold text-slate-900">
-          {condominioNombre || "No identificado"}
-        </h2>
-      </div>
+      <SectionCard
+        title="Resumen de tipos de nómina"
+        subtitle="Indicadores generales del condominio activo."
+        action={
+          loading ? (
+            <div className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              Actualizando
+            </div>
+          ) : (
+            <span className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-black text-slate-600">
+              {tiposSeguros.length} tipo(s)
+            </span>
+          )
+        }
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <InfoCompacta
+            label="Tipos registrados"
+            value={`${tiposSeguros.length}`}
+            detalle="Total del condominio"
+            icon={FileText}
+            color="text-blue-700"
+            bg="bg-blue-50"
+          />
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h2 className="text-xl font-black mb-4">
-          {editandoId ? "Modificar tipo de nómina" : "Registrar tipo de nómina"}
-        </h2>
+          <InfoCompacta
+            label="Activos"
+            value={`${activos}`}
+            detalle="Disponibles"
+            icon={CheckCircle2}
+            color="text-emerald-700"
+            bg="bg-emerald-50"
+          />
 
+          <InfoCompacta
+            label="Inactivos"
+            value={`${inactivos}`}
+            detalle="No disponibles"
+            icon={XCircle}
+            color="text-red-700"
+            bg="bg-red-50"
+          />
+
+          <InfoCompacta
+            label="Predeterminada"
+            value={`${predeterminados}`}
+            detalle="Tipo principal"
+            icon={WalletCards}
+            color="text-purple-700"
+            bg="bg-purple-50"
+          />
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title={editandoId ? "Modificar tipo de nómina" : "Registrar tipo de nómina"}
+        subtitle="Defina la frecuencia, días del período y descuentos aplicables."
+        action={
+          editandoId ? (
+            <button
+              type="button"
+              onClick={limpiarFormulario}
+              className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
+            >
+              Cancelar edición
+            </button>
+          ) : (
+            <span className="rounded-xl bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">
+              Nuevo registro
+            </span>
+          )
+        }
+      >
         <form
           onSubmit={guardarTipo}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
+          className="grid grid-cols-1 gap-4 md:grid-cols-2"
         >
           <div>
-            <label className="block text-sm font-semibold mb-1">
+            <label className="mb-1 block text-sm font-bold text-slate-700">
               Código *
             </label>
+
             <input
               value={codigo}
               onChange={(e) => setCodigo(e.target.value.toUpperCase())}
-              className="border rounded-xl px-4 py-3 w-full"
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
               placeholder="MEN, QUI, VAC, REG, LIQ"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">
+            <label className="mb-1 block text-sm font-bold text-slate-700">
               Nombre *
             </label>
+
             <input
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
               placeholder="Nómina Mensual"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">
+            <label className="mb-1 block text-sm font-bold text-slate-700">
               Frecuencia de pago
             </label>
+
             <select
               value={frecuenciaPago}
               onChange={(e) => setFrecuenciaPago(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
             >
               {frecuencias.map((item) => (
                 <option key={item} value={item}>
@@ -331,35 +534,44 @@ export default function TiposNominaPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">
+            <label className="mb-1 block text-sm font-bold text-slate-700">
               Días del período
             </label>
+
             <input
               type="number"
+              min="1"
               value={diasPeriodo}
               onChange={(e) => setDiasPeriodo(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
               placeholder="30"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">Orden</label>
+            <label className="mb-1 block text-sm font-bold text-slate-700">
+              Orden
+            </label>
+
             <input
               type="number"
+              min="1"
               value={orden}
               onChange={(e) => setOrden(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
               placeholder="1"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">Estado</label>
+            <label className="mb-1 block text-sm font-bold text-slate-700">
+              Estado
+            </label>
+
             <select
               value={estado}
               onChange={(e) => setEstado(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
             >
               {estados.map((item) => (
                 <option key={item} value={item}>
@@ -370,228 +582,298 @@ export default function TiposNominaPage() {
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">
+            <label className="mb-1 block text-sm font-bold text-slate-700">
               Descripción
             </label>
+
             <textarea
               value={descripcion}
               onChange={(e) => setDescripcion(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
               rows={3}
               placeholder="Descripción del tipo de nómina"
             />
           </div>
 
-          <div className="md:col-span-2 bg-slate-50 border rounded-2xl p-5">
-            <h3 className="font-black mb-3">Aplicación de descuentos</h3>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 md:col-span-2">
+            <h3 className="mb-4 font-black text-slate-900">
+              Aplicación de descuentos
+            </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <label className="flex items-center gap-2 font-semibold">
-                <input
-                  type="checkbox"
-                  checked={requiereAFP}
-                  onChange={(e) => setRequiereAFP(e.target.checked)}
-                />
-                Requiere AFP
-              </label>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+              <OpcionCheck
+                label="Requiere AFP"
+                checked={requiereAFP}
+                onChange={setRequiereAFP}
+              />
 
-              <label className="flex items-center gap-2 font-semibold">
-                <input
-                  type="checkbox"
-                  checked={requiereSFS}
-                  onChange={(e) => setRequiereSFS(e.target.checked)}
-                />
-                Requiere SFS
-              </label>
+              <OpcionCheck
+                label="Requiere SFS"
+                checked={requiereSFS}
+                onChange={setRequiereSFS}
+              />
 
-              <label className="flex items-center gap-2 font-semibold">
-                <input
-                  type="checkbox"
-                  checked={requiereISR}
-                  onChange={(e) => setRequiereISR(e.target.checked)}
-                />
-                Requiere ISR
-              </label>
+              <OpcionCheck
+                label="Requiere ISR"
+                checked={requiereISR}
+                onChange={setRequiereISR}
+              />
 
-              <label className="flex items-center gap-2 font-semibold">
-                <input
-                  type="checkbox"
-                  checked={requiereTSS}
-                  onChange={(e) => setRequiereTSS(e.target.checked)}
-                />
-                Requiere TSS
-              </label>
+              <OpcionCheck
+                label="Requiere TSS"
+                checked={requiereTSS}
+                onChange={setRequiereTSS}
+              />
 
-              <label className="flex items-center gap-2 font-semibold">
-                <input
-                  type="checkbox"
-                  checked={esPredeterminada}
-                  onChange={(e) => setEsPredeterminada(e.target.checked)}
-                />
-                Predeterminada
-              </label>
+              <OpcionCheck
+                label="Predeterminada"
+                checked={esPredeterminada}
+                onChange={setEsPredeterminada}
+              />
             </div>
           </div>
 
-          <div className="md:col-span-2 flex flex-col md:flex-row gap-3">
+          <div className="flex flex-col gap-3 md:col-span-2 md:flex-row">
             <button
               type="submit"
               disabled={guardando}
-              className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white px-5 py-3 rounded-xl font-bold"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-bold text-white hover:bg-blue-800 disabled:bg-slate-400"
             >
-              {guardando
-                ? "Guardando..."
-                : editandoId
-                ? "Guardar cambios"
-                : "Guardar tipo"}
+              {guardando ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4" />
+                  {editandoId ? "Guardar cambios" : "Guardar tipo"}
+                </>
+              )}
             </button>
 
             {editandoId && (
               <button
                 type="button"
                 onClick={limpiarFormulario}
-                className="bg-slate-600 hover:bg-slate-700 text-white px-5 py-3 rounded-xl font-bold"
+                className="rounded-xl bg-slate-700 px-5 py-3 text-sm font-bold text-white hover:bg-slate-800"
               >
                 Cancelar edición
               </button>
             )}
           </div>
         </form>
-      </div>
+      </SectionCard>
 
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h2 className="text-xl font-black mb-4">
-          Listado de tipos de nómina
-        </h2>
-
+      <SectionCard
+        title="Listado de tipos de nómina"
+        subtitle="Tipos configurados para el condominio activo."
+        action={
+          <span className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-black text-slate-600">
+            {tiposSeguros.length} tipo(s)
+          </span>
+        }
+      >
         {loading ? (
-          <div>Cargando tipos de nómina...</div>
+          <div className="rounded-2xl border bg-slate-50 p-6 text-sm font-bold text-slate-600">
+            Cargando tipos de nómina...
+          </div>
+        ) : tiposSeguros.length === 0 ? (
+          <EmptyState
+            title="Sin tipos de nómina"
+            description="No hay tipos de nómina registrados para este condominio."
+          />
         ) : (
-          <div className="overflow-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-100">
-                <tr>
-                  <th className="p-3 border text-left">Código</th>
-                  <th className="p-3 border text-left">Nombre</th>
-                  <th className="p-3 border text-left">Frecuencia</th>
-                  <th className="p-3 border text-center">Días</th>
-                  <th className="p-3 border text-center">AFP</th>
-                  <th className="p-3 border text-center">SFS</th>
-                  <th className="p-3 border text-center">ISR</th>
-                  <th className="p-3 border text-center">TSS</th>
-                  <th className="p-3 border text-center">Pred.</th>
-                  <th className="p-3 border text-center">Estado</th>
-                  <th className="p-3 border text-center">Acciones</th>
-                </tr>
-              </thead>
+          <DataTable>
+            <thead className="bg-slate-100 text-slate-600">
+              <tr>
+                <th className="px-4 py-3 text-left">Código</th>
+                <th className="px-4 py-3 text-left">Nombre</th>
+                <th className="px-4 py-3 text-left">Frecuencia</th>
+                <th className="px-4 py-3 text-center">Días</th>
+                <th className="px-4 py-3 text-center">AFP</th>
+                <th className="px-4 py-3 text-center">SFS</th>
+                <th className="px-4 py-3 text-center">ISR</th>
+                <th className="px-4 py-3 text-center">TSS</th>
+                <th className="px-4 py-3 text-center">Pred.</th>
+                <th className="px-4 py-3 text-center">Estado</th>
+                <th className="px-4 py-3 text-center">Acciones</th>
+              </tr>
+            </thead>
 
-              <tbody>
-                {tipos.map((tipo) => (
-                  <tr key={tipo.id} className="hover:bg-slate-50">
-                    <td className="p-3 border font-black">{tipo.codigo}</td>
+            <tbody className="divide-y divide-slate-200">
+              {tiposSeguros.map((tipo) => (
+                <tr key={tipo.id} className="bg-white hover:bg-slate-50">
+                  <td className="px-4 py-3 font-black text-slate-900">
+                    {tipo.codigo}
+                  </td>
 
-                    <td className="p-3 border">
-                      <p className="font-bold">{tipo.nombre}</p>
-                      <p className="text-xs text-slate-500">
-                        {tipo.descripcion || "-"}
-                      </p>
-                    </td>
+                  <td className="px-4 py-3">
+                    <p className="font-black text-slate-900">{tipo.nombre}</p>
+                    <p className="text-xs text-slate-500">
+                      {tipo.descripcion || "-"}
+                    </p>
+                  </td>
 
-                    <td className="p-3 border">{tipo.frecuencia_pago}</td>
+                  <td className="px-4 py-3 text-slate-700">
+                    {tipo.frecuencia_pago}
+                  </td>
 
-                    <td className="p-3 border text-center font-bold">
-                      {tipo.dias_periodo}
-                    </td>
+                  <td className="px-4 py-3 text-center font-black">
+                    {tipo.dias_periodo}
+                  </td>
 
-                    <td className="p-3 border text-center">
-                      {siNo(tipo.requiere_afp)}
-                    </td>
-
-                    <td className="p-3 border text-center">
-                      {siNo(tipo.requiere_sfs)}
-                    </td>
-
-                    <td className="p-3 border text-center">
-                      {siNo(tipo.requiere_isr)}
-                    </td>
-
-                    <td className="p-3 border text-center">
-                      {siNo(tipo.requiere_tss)}
-                    </td>
-
-                    <td className="p-3 border text-center">
-                      {tipo.es_predeterminada ? (
-                        <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold">
-                          Sí
-                        </span>
-                      ) : (
-                        "No"
-                      )}
-                    </td>
-
-                    <td className="p-3 border text-center">
+                  {[
+                    tipo.requiere_afp,
+                    tipo.requiere_sfs,
+                    tipo.requiere_isr,
+                    tipo.requiere_tss,
+                  ].map((valor, index) => (
+                    <td key={index} className="px-4 py-3 text-center">
                       <span
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${
-                          tipo.estado === "Activo"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-red-100 text-red-700"
-                        }`}
+                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-black ${booleanoClass(
+                          valor,
+                        )}`}
                       >
-                        {tipo.estado}
+                        {valor ? "Sí" : "No"}
                       </span>
                     </td>
+                  ))}
 
-                    <td className="p-3 border">
-                      <div className="flex flex-wrap justify-center gap-2">
-                        <button
-                          onClick={() => editarTipo(tipo)}
-                          className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
-                        >
-                          Editar
-                        </button>
-
-                        {tipo.estado === "Activo" ? (
-                          <button
-                            onClick={() => cambiarEstado(tipo, "Inactivo")}
-                            className="bg-yellow-700 hover:bg-yellow-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
-                          >
-                            Inactivar
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => cambiarEstado(tipo, "Activo")}
-                            className="bg-green-700 hover:bg-green-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
-                          >
-                            Activar
-                          </button>
-                        )}
-
-                        <button
-                          onClick={() => eliminarTipo(tipo)}
-                          className="bg-red-700 hover:bg-red-800 text-white px-3 py-2 rounded-lg text-xs font-bold"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-
-                {tipos.length === 0 && (
-                  <tr>
-                    <td
-                      className="p-6 border text-center text-slate-500"
-                      colSpan={11}
+                  <td className="px-4 py-3 text-center">
+                    <span
+                      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-black ${
+                        tipo.es_predeterminada
+                          ? "border-blue-100 bg-blue-50 text-blue-700"
+                          : "border-slate-200 bg-slate-50 text-slate-500"
+                      }`}
                     >
-                      No hay tipos de nómina registrados.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                      {tipo.es_predeterminada ? "Sí" : "No"}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-3 text-center">
+                    <span
+                      className={`inline-flex rounded-full border px-3 py-1 text-xs font-black ${estadoClass(
+                        tipo.estado,
+                      )}`}
+                    >
+                      {tipo.estado}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => editarTipo(tipo)}
+                        className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                      >
+                        <Pencil className="h-4 w-4" />
+                        Editar
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          cambiarEstado(
+                            tipo,
+                            tipo.estado === "Activo" ? "Inactivo" : "Activo",
+                          )
+                        }
+                        className={`rounded-xl px-3 py-2 text-xs font-bold text-white ${
+                          tipo.estado === "Activo"
+                            ? "bg-yellow-700 hover:bg-yellow-800"
+                            : "bg-emerald-700 hover:bg-emerald-800"
+                        }`}
+                      >
+                        {tipo.estado === "Activo" ? "Inactivar" : "Activar"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => eliminarTipo(tipo)}
+                        className="inline-flex items-center gap-2 rounded-xl bg-red-700 px-3 py-2 text-xs font-bold text-white hover:bg-red-800"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
+        )}
+      </SectionCard>
+    </PageContainer>
+  );
+}
+
+function InfoCompacta({
+  label,
+  value,
+  detalle,
+  icon: Icono,
+  color = "text-slate-700",
+  bg = "bg-slate-100",
+}: {
+  label: string;
+  value: string;
+  detalle?: string;
+  icon?: any;
+  color?: string;
+  bg?: string;
+}) {
+  return (
+    <div className="rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        {Icono && (
+          <div
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${bg}`}
+          >
+            <Icono className={`h-5 w-5 ${color}`} />
           </div>
         )}
+
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+            {label}
+          </p>
+
+          <h3 className="mt-1 text-lg font-black text-slate-900">{value}</h3>
+
+          {detalle && <p className="mt-1 text-xs text-slate-500">{detalle}</p>}
+        </div>
       </div>
     </div>
+  );
+}
+
+function OpcionCheck({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (valor: boolean) => void;
+}) {
+  return (
+    <label
+      className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm font-bold transition ${
+        checked
+          ? "border-blue-200 bg-blue-50 text-blue-800"
+          : "border-slate-200 bg-white text-slate-600"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-4 w-4 rounded border-slate-300"
+      />
+      {label}
+    </label>
   );
 }

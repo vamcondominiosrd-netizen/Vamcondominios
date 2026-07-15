@@ -95,6 +95,9 @@ type Nomina = {
   tipo_nomina_id: number | null;
   tipo_nomina: string;
   periodo: string;
+  quincena: number | null;
+  fecha_inicio_periodo: string | null;
+  fecha_fin_periodo: string | null;
   fecha_pago: string;
   salario_base: number;
   dias_trabajados: number;
@@ -152,8 +155,12 @@ export default function NominaPage() {
   const [tipoNominaId, setTipoNominaId] = useState("");
   const [tipoNomina, setTipoNomina] = useState("");
   const [periodo, setPeriodo] = useState(new Date().toISOString().slice(0, 7));
+  const [quincena, setQuincena] = useState("1");
+  const [quincenasRegistradas, setQuincenasRegistradas] = useState<number[]>([]);
+  const [verificandoQuincenas, setVerificandoQuincenas] = useState(false);
   const [fechaPago, setFechaPago] = useState("");
 
+  const [salarioMensualReferencia, setSalarioMensualReferencia] = useState("");
   const [salarioBase, setSalarioBase] = useState("");
   const [diasTrabajados, setDiasTrabajados] = useState("30");
 
@@ -194,6 +201,36 @@ export default function NominaPage() {
       cargarNominas(id, filtroPeriodo);
     }
   }, []);
+
+  useEffect(() => {
+    if (!condominioId || !empleadoId || !tipoNominaId || !periodo) {
+      setQuincenasRegistradas([]);
+      return;
+    }
+
+    const tipoSeleccionado = tiposNomina.find(
+      (item) => String(item.id) === tipoNominaId
+    );
+
+    if (!esTipoQuincenal(tipoSeleccionado || null)) {
+      setQuincenasRegistradas([]);
+      return;
+    }
+
+    void cargarQuincenasRegistradas(
+      empleadoId,
+      tipoNominaId,
+      periodo,
+      editandoId
+    );
+  }, [
+    condominioId,
+    empleadoId,
+    tipoNominaId,
+    periodo,
+    editandoId,
+    tiposNomina,
+  ]);
 
   async function cargarConfiguracionNomina(id: string) {
     const { data, error } = await supabase
@@ -362,6 +399,246 @@ export default function NominaPage() {
     return Number(valor || 0);
   }
 
+  function normalizarTexto(valor?: string | null) {
+    return String(valor || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  function esTipoQuincenal(tipo?: TipoNomina | null) {
+    if (!tipo) return false;
+
+    return (
+      normalizarTexto(tipo.frecuencia_pago) === "quincenal" ||
+      normalizarTexto(tipo.nombre).includes("quincenal") ||
+      normalizarTexto(tipo.codigo).includes("quin")
+    );
+  }
+
+  function obtenerTipoNominaPorId(id: string) {
+    return tiposNomina.find((item) => String(item.id) === id) || null;
+  }
+
+  function obtenerUltimoDiaMes(periodoSeleccionado: string) {
+    const [anio, mes] = periodoSeleccionado.split("-").map(Number);
+
+    if (!anio || !mes) return 30;
+
+    return new Date(anio, mes, 0).getDate();
+  }
+
+  function obtenerFechasPeriodo(
+    periodoSeleccionado: string,
+    quincenaSeleccionada: string,
+    tipoSeleccionado?: TipoNomina | null
+  ) {
+    if (!periodoSeleccionado || !esTipoQuincenal(tipoSeleccionado)) {
+      return {
+        fechaInicio: null as string | null,
+        fechaFin: null as string | null,
+        fechaPagoSugerida: "",
+      };
+    }
+
+    const ultimoDia = obtenerUltimoDiaMes(periodoSeleccionado);
+    const segundaFechaPago = Math.min(30, ultimoDia);
+
+    if (quincenaSeleccionada === "2") {
+      return {
+        fechaInicio: `${periodoSeleccionado}-16`,
+        fechaFin: `${periodoSeleccionado}-${String(ultimoDia).padStart(2, "0")}`,
+        fechaPagoSugerida: `${periodoSeleccionado}-${String(
+          segundaFechaPago
+        ).padStart(2, "0")}`,
+      };
+    }
+
+    return {
+      fechaInicio: `${periodoSeleccionado}-01`,
+      fechaFin: `${periodoSeleccionado}-15`,
+      fechaPagoSugerida: `${periodoSeleccionado}-15`,
+    };
+  }
+
+  function sincronizarSalarioYPeriodo(
+    empleadoSeleccionadoId: string,
+    tipoSeleccionadoId: string,
+    periodoSeleccionado = periodo,
+    quincenaSeleccionada = quincena
+  ) {
+    const empleado = empleados.find(
+      (item) => String(item.id) === empleadoSeleccionadoId
+    );
+    const tipoSeleccionado = obtenerTipoNominaPorId(tipoSeleccionadoId);
+
+    if (!empleado) {
+      setSalarioMensualReferencia("");
+      setSalarioBase("");
+      return;
+    }
+
+    const salarioMensual = Number(empleado.salario || 0);
+    const quincenal = esTipoQuincenal(tipoSeleccionado);
+    const salarioPeriodo = quincenal ? salarioMensual / 2 : salarioMensual;
+
+    setSalarioMensualReferencia(salarioMensual.toFixed(2));
+    setSalarioBase(salarioPeriodo.toFixed(2));
+    setDiasTrabajados(quincenal ? "15" : "30");
+
+    if (quincenal) {
+      const fechas = obtenerFechasPeriodo(
+        periodoSeleccionado,
+        quincenaSeleccionada,
+        tipoSeleccionado
+      );
+      setFechaPago(fechas.fechaPagoSugerida);
+    }
+  }
+
+  function seleccionarTipoNomina(id: string) {
+    setTipoNominaId(id);
+
+    const tipoSeleccionado = obtenerTipoNominaPorId(id);
+    setTipoNomina(tipoSeleccionado?.nombre || "");
+
+    const quincenaActual = quincena || "1";
+    if (esTipoQuincenal(tipoSeleccionado) && !quincena) {
+      setQuincena("1");
+    }
+
+    sincronizarSalarioYPeriodo(
+      empleadoId,
+      id,
+      periodo,
+      quincenaActual
+    );
+
+    if (!esTipoQuincenal(tipoSeleccionado)) {
+      setFechaPago("");
+    }
+  }
+
+  function cambiarPeriodo(valor: string) {
+    setPeriodo(valor);
+
+    const tipoSeleccionado = obtenerTipoNominaSeleccionado();
+    if (esTipoQuincenal(tipoSeleccionado)) {
+      const fechas = obtenerFechasPeriodo(valor, quincena, tipoSeleccionado);
+      setFechaPago(fechas.fechaPagoSugerida);
+    }
+  }
+
+  function cambiarQuincena(valor: string) {
+    const numeroQuincena = Number(valor);
+
+    if (!editandoId && quincenasRegistradas.includes(numeroQuincena)) {
+      alert(
+        `La ${numeroQuincena === 1 ? "primera" : "segunda"} quincena ya está registrada para este empleado y período.`
+      );
+      return;
+    }
+
+    setQuincena(valor);
+
+    const tipoSeleccionado = obtenerTipoNominaSeleccionado();
+    const fechas = obtenerFechasPeriodo(periodo, valor, tipoSeleccionado);
+    setFechaPago(fechas.fechaPagoSugerida);
+  }
+
+  async function cargarQuincenasRegistradas(
+    empleadoSeleccionadoId: string,
+    tipoSeleccionadoId: string,
+    periodoSeleccionado: string,
+    nominaExcluirId: number | null = null
+  ) {
+    if (
+      !condominioId ||
+      !empleadoSeleccionadoId ||
+      !tipoSeleccionadoId ||
+      !periodoSeleccionado
+    ) {
+      setQuincenasRegistradas([]);
+      return;
+    }
+
+    const tipoSeleccionado = obtenerTipoNominaPorId(tipoSeleccionadoId);
+
+    if (!esTipoQuincenal(tipoSeleccionado)) {
+      setQuincenasRegistradas([]);
+      return;
+    }
+
+    try {
+      setVerificandoQuincenas(true);
+
+      let consulta = supabase
+        .from("rh_nomina")
+        .select("id, quincena, fecha_pago")
+        .eq("condominio_id", Number(condominioId))
+        .eq("empleado_id", Number(empleadoSeleccionadoId))
+        .eq("tipo_nomina_id", Number(tipoSeleccionadoId))
+        .eq("periodo", periodoSeleccionado)
+        .neq("estado", "Anulada");
+
+      if (nominaExcluirId) {
+        consulta = consulta.neq("id", nominaExcluirId);
+      }
+
+      const { data, error } = await consulta;
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const registradas = Array.from(
+        new Set(
+          (data || [])
+            .map((item: any) => {
+              const valorGuardado = Number(item.quincena || 0);
+              if (valorGuardado === 1 || valorGuardado === 2) {
+                return valorGuardado;
+              }
+
+              if (item.fecha_pago) {
+                const dia = Number(String(item.fecha_pago).split("-")[2] || 0);
+                return dia > 15 ? 2 : 1;
+              }
+
+              return null;
+            })
+            .filter((valor): valor is number => valor === 1 || valor === 2)
+        )
+      ).sort((a, b) => a - b);
+
+      setQuincenasRegistradas(registradas);
+
+      if (!nominaExcluirId && registradas.includes(Number(quincena))) {
+        const siguienteDisponible = [1, 2].find(
+          (numeroQuincena) => !registradas.includes(numeroQuincena)
+        );
+
+        if (siguienteDisponible) {
+          const siguienteValor = String(siguienteDisponible);
+          setQuincena(siguienteValor);
+
+          const fechas = obtenerFechasPeriodo(
+            periodoSeleccionado,
+            siguienteValor,
+            tipoSeleccionado
+          );
+          setFechaPago(fechas.fechaPagoSugerida);
+        }
+      }
+    } catch (error: any) {
+      alert("Error verificando quincenas registradas: " + error.message);
+      setQuincenasRegistradas([]);
+    } finally {
+      setVerificandoQuincenas(false);
+    }
+  }
+
   function calcularSalarioBruto() {
     return (
       numero(salarioBase) +
@@ -372,7 +649,7 @@ export default function NominaPage() {
   }
 
   function obtenerTipoNominaSeleccionado() {
-    return tiposNomina.find((item) => String(item.id) === tipoNominaId) || null;
+    return obtenerTipoNominaPorId(tipoNominaId);
   }
 
   function calcularAFP() {
@@ -408,7 +685,15 @@ export default function NominaPage() {
 
     if (tipoSeleccionado && !tipoSeleccionado.requiere_isr) return 0;
 
-    const salarioBrutoMensual = calcularSalarioBruto();
+    const quincenal = esTipoQuincenal(tipoSeleccionado);
+    const ingresosVariables =
+      numero(montoHorasExtras) +
+      numero(bonificacion) +
+      numero(pagoVacaciones);
+
+    const salarioBrutoMensual = quincenal
+      ? numero(salarioMensualReferencia) + ingresosVariables
+      : calcularSalarioBruto();
     const salarioAnual = salarioBrutoMensual * 12;
 
     const exentoHasta = Number(configNomina.isr_exento_hasta || 0);
@@ -439,7 +724,9 @@ export default function NominaPage() {
         tramo3MontoFijo + (salarioAnual - tramo2Hasta) * tramo3Porcentaje;
     }
 
-    return isrAnual / 12;
+    const isrMensual = isrAnual / 12;
+
+    return quincenal ? isrMensual / 2 : isrMensual;
   }
 
   function calcularOtrosDescuentos() {
@@ -456,7 +743,10 @@ export default function NominaPage() {
 
     if (divisor <= 0) return 0;
 
-    return (numero(salarioBase) / divisor) * dias;
+    const salarioMensual =
+      numero(salarioMensualReferencia) || numero(salarioBase);
+
+    return (salarioMensual / divisor) * dias;
   }
 
   function calcularTotales() {
@@ -492,10 +782,9 @@ export default function NominaPage() {
     setPagoVacaciones("0");
     setVacacionesAprobadas([]);
 
-    const empleado = empleados.find((emp) => String(emp.id) === id);
+    sincronizarSalarioYPeriodo(id, tipoNominaId, periodo, quincena);
 
-    if (empleado) {
-      setSalarioBase(String(empleado.salario || 0));
+    if (id) {
       await cargarVacacionesAprobadas(id);
     }
   }
@@ -574,8 +863,11 @@ export default function NominaPage() {
     setTipoNominaId(predeterminada ? String(predeterminada.id) : "");
     setTipoNomina(predeterminada ? predeterminada.nombre : "");
     setPeriodo(new Date().toISOString().slice(0, 7));
+    setQuincena("1");
+    setQuincenasRegistradas([]);
     setFechaPago("");
 
+    setSalarioMensualReferencia("");
     setSalarioBase("");
     setDiasTrabajados("30");
 
@@ -605,8 +897,20 @@ export default function NominaPage() {
     setTipoNominaId(n.tipo_nomina_id ? String(n.tipo_nomina_id) : "");
     setTipoNomina(n.tipo_nomina || "");
     setPeriodo(n.periodo || "");
+    setQuincena(String(n.quincena || 1));
     setFechaPago(n.fecha_pago || "");
 
+    const empleado = empleados.find((item) => item.id === n.empleado_id);
+    const tipoEditado = tiposNomina.find(
+      (item) => item.id === n.tipo_nomina_id
+    );
+    const salarioMensual = empleado
+      ? Number(empleado.salario || 0)
+      : esTipoQuincenal(tipoEditado)
+      ? Number(n.salario_base || 0) * 2
+      : Number(n.salario_base || 0);
+
+    setSalarioMensualReferencia(String(salarioMensual));
     setSalarioBase(String(n.salario_base || 0));
     setDiasTrabajados(String(n.dias_trabajados || 30));
 
@@ -677,21 +981,18 @@ export default function NominaPage() {
   }
 
   async function obtenerProximoNumeroSolicitud() {
-    const { data, error } = await supabase
-      .from("solicitudes_pago")
-      .select("numero_solicitud")
-      .eq("condominio_id", Number(condominioId))
-      .order("numero_solicitud", { ascending: false })
-      .limit(1);
+    const { data, error } = await supabase.rpc(
+      "obtener_proximo_numero_solicitud",
+      {
+        p_condominio_id: Number(condominioId),
+      }
+    );
 
     if (error) {
       throw new Error(error.message);
     }
 
-    const ultimo =
-      data && data.length > 0 ? Number(data[0].numero_solicitud || 0) : 0;
-
-    return ultimo + 1;
+    return Number(data || 1);
   }
 
   async function generarSolicitudPagoNomina(nominaId: number) {
@@ -715,11 +1016,14 @@ export default function NominaPage() {
     }
 
     const fechaSolicitud = new Date().toISOString().slice(0, 10);
-    const numeroSolicitud = await obtenerProximoNumeroSolicitud();
+
+    const etiquetaQuincena = nominaActual.quincena
+      ? ` - ${nominaActual.quincena === 1 ? "1ra" : "2da"} quincena`
+      : "";
 
     const concepto = `Nómina ${nominaActual.tipo_nomina || "Regular"} - ${
       nominaActual.periodo || ""
-    }`;
+    }${etiquetaQuincena}`;
 
     const detalle = [
       "Solicitud generada automáticamente desde Recursos Humanos / Nómina.",
@@ -729,42 +1033,74 @@ export default function NominaPage() {
       `Departamento: ${nominaActual.departamento || "-"}`,
       `Tipo nómina: ${nominaActual.tipo_nomina || "Regular"}`,
       `Período: ${nominaActual.periodo || "-"}`,
+      nominaActual.quincena
+        ? `Quincena: ${nominaActual.quincena === 1 ? "Primera" : "Segunda"}`
+        : "Quincena: No aplica",
       `Total ingresos: RD$${moneda(Number(nominaActual.total_ingresos || 0))}`,
       `Total descuentos: RD$${moneda(Number(nominaActual.total_descuentos || 0))}`,
       `Neto a pagar: RD$${moneda(Number(nominaActual.neto_pagar || 0))}`,
       "Al aprobarse por tesorero y presidente, Finanzas debe registrar el pago y generar el gasto correspondiente.",
     ].join("\n");
 
-    const { data: solicitudCreada, error: errorSolicitud } = await supabase
-      .from("solicitudes_pago")
-      .insert([
-        {
-          condominio_id: Number(condominioId),
-          condominio: condominioNombre,
-          fecha_solicitud: fechaSolicitud,
-          concepto,
-          detalle,
-          monto: Number(nominaActual.neto_pagar || 0),
-          itbis: 0,
-          total: Number(nominaActual.neto_pagar || 0),
-          no_factura: `NOM-${nominaActual.periodo || ""}-${String(
-            nominaActual.id
-          ).padStart(6, "0")}`,
-          ncf: null,
-          metodo_pago: "Pendiente",
-          cuenta_banco: null,
-          soporte_url: null,
-          prioridad: "Normal",
-          estado: "Pendiente aprobación tesorero",
-          created_by: usuarioNombre,
-          numero_solicitud: numeroSolicitud,
-        },
-      ])
-      .select("id")
-      .single();
+    let solicitudCreada: { id: number } | null = null;
+    let ultimoErrorSolicitud = "";
 
-    if (errorSolicitud) {
-      throw new Error(errorSolicitud.message);
+    for (let intento = 1; intento <= 3; intento += 1) {
+      const numeroSolicitud = await obtenerProximoNumeroSolicitud();
+
+      const { data, error } = await supabase
+        .from("solicitudes_pago")
+        .insert([
+          {
+            condominio_id: Number(condominioId),
+            condominio: condominioNombre,
+            fecha_solicitud: fechaSolicitud,
+            concepto,
+            detalle,
+            monto: Number(nominaActual.neto_pagar || 0),
+            itbis: 0,
+            total: Number(nominaActual.neto_pagar || 0),
+            no_factura: `NOM-${nominaActual.periodo || ""}${
+              nominaActual.quincena ? `-Q${nominaActual.quincena}` : ""
+            }-${String(nominaActual.id).padStart(6, "0")}`,
+            ncf: null,
+            metodo_pago: "Pendiente",
+            cuenta_banco: null,
+            soporte_url: null,
+            prioridad: "Normal",
+            estado: "Pendiente aprobación tesorero",
+            created_by: usuarioNombre,
+            numero_solicitud: numeroSolicitud,
+            origen_modulo: "NOMINA",
+            origen_id: Number(nominaActual.id),
+          },
+        ])
+        .select("id")
+        .single();
+
+      if (!error && data) {
+        solicitudCreada = { id: Number(data.id) };
+        break;
+      }
+
+      ultimoErrorSolicitud = error?.message || "Error creando solicitud.";
+
+      const esConsecutivoDuplicado =
+        error?.code === "23505" &&
+        ultimoErrorSolicitud.includes(
+          "solicitudes_pago_condominio_numero_unique"
+        );
+
+      if (!esConsecutivoDuplicado) {
+        throw new Error(ultimoErrorSolicitud);
+      }
+    }
+
+    if (!solicitudCreada) {
+      throw new Error(
+        ultimoErrorSolicitud ||
+          "No fue posible generar un número único para la solicitud de pago."
+      );
     }
 
     const { error: errorActualizarNomina } = await supabase
@@ -811,6 +1147,20 @@ export default function NominaPage() {
       return;
     }
 
+    const tipoSeleccionado = obtenerTipoNominaSeleccionado();
+
+    if (!tipoSeleccionado) {
+      alert("Tipo de nómina no encontrado.");
+      return;
+    }
+
+    const nominaQuincenal = esTipoQuincenal(tipoSeleccionado);
+
+    if (nominaQuincenal && !["1", "2"].includes(quincena)) {
+      alert("Debe seleccionar la primera o segunda quincena.");
+      return;
+    }
+
     if (estado === "Pagada") {
       alert(
         "La nómina no debe marcarse como Pagada desde este módulo. Primero debe aprobarse para generar la Solicitud de Pago y luego pagarse desde Finanzas."
@@ -837,15 +1187,13 @@ export default function NominaPage() {
       return;
     }
 
-    const tipoSeleccionado = obtenerTipoNominaSeleccionado();
-
-    if (!tipoSeleccionado) {
-      alert("Tipo de nómina no encontrado.");
-      return;
-    }
-
     const tipoNominaNombre = tipoSeleccionado.nombre;
     const totales = calcularTotales();
+    const fechasPeriodo = obtenerFechasPeriodo(
+      periodo,
+      quincena,
+      tipoSeleccionado
+    );
 
     const registro = {
       condominio_id: Number(condominioId),
@@ -861,7 +1209,11 @@ export default function NominaPage() {
       tipo_nomina: tipoNomina || tipoNominaNombre,
 
       periodo,
-      fecha_pago: fechaPago || null,
+      quincena: nominaQuincenal ? Number(quincena) : null,
+      fecha_inicio_periodo: fechasPeriodo.fechaInicio,
+      fecha_fin_periodo: fechasPeriodo.fechaFin,
+      fecha_pago:
+        fechaPago || fechasPeriodo.fechaPagoSugerida || null,
 
       salario_base: numero(salarioBase),
       dias_trabajados: Number(diasTrabajados || 0),
@@ -924,21 +1276,78 @@ export default function NominaPage() {
         return;
       }
 
-      const { data: existente, error: errorExiste } = await supabase
+      const { data: existentes, error: errorExiste } = await supabase
         .from("rh_nomina")
-        .select("id")
+        .select("id, quincena, fecha_pago")
         .eq("condominio_id", Number(condominioId))
         .eq("empleado_id", Number(empleadoId))
         .eq("tipo_nomina_id", Number(tipoNominaId))
         .eq("periodo", periodo)
-        .neq("estado", "Anulada")
-        .maybeSingle();
+        .neq("estado", "Anulada");
 
       if (errorExiste) {
         throw new Error(errorExiste.message);
       }
 
-      if (existente) {
+      if (nominaQuincenal) {
+        const registradas = Array.from(
+          new Set(
+            (existentes || [])
+              .map((item: any) => {
+                const valorGuardado = Number(item.quincena || 0);
+                if (valorGuardado === 1 || valorGuardado === 2) {
+                  return valorGuardado;
+                }
+
+                if (item.fecha_pago) {
+                  const dia = Number(
+                    String(item.fecha_pago).split("-")[2] || 0
+                  );
+                  return dia > 15 ? 2 : 1;
+                }
+
+                return null;
+              })
+              .filter((valor): valor is number => valor === 1 || valor === 2)
+          )
+        ).sort((a, b) => a - b);
+
+        setQuincenasRegistradas(registradas);
+
+        if (registradas.includes(Number(quincena))) {
+          const siguienteDisponible = [1, 2].find(
+            (numeroQuincena) => !registradas.includes(numeroQuincena)
+          );
+
+          setGuardando(false);
+
+          if (siguienteDisponible) {
+            const siguienteValor = String(siguienteDisponible);
+            setQuincena(siguienteValor);
+
+            const nuevasFechas = obtenerFechasPeriodo(
+              periodo,
+              siguienteValor,
+              tipoSeleccionado
+            );
+            setFechaPago(nuevasFechas.fechaPagoSugerida);
+
+            alert(
+              `La ${
+                Number(quincena) === 1 ? "primera" : "segunda"
+              } quincena ya está registrada. Se seleccionó automáticamente la ${
+                siguienteDisponible === 1 ? "primera" : "segunda"
+              } quincena disponible. Revise los datos y presione Guardar nómina nuevamente.`
+            );
+          } else {
+            alert(
+              "Ya están registradas la primera y la segunda quincena para este empleado y período."
+            );
+          }
+
+          return;
+        }
+      } else if (existentes && existentes.length > 0) {
         setGuardando(false);
         alert("Ya existe una nómina para este empleado, tipo de nómina y período.");
         return;
@@ -1267,16 +1676,7 @@ export default function NominaPage() {
 
             <select
               value={tipoNominaId}
-              onChange={(e) => {
-                const id = e.target.value;
-                setTipoNominaId(id);
-
-                const tipoSeleccionado = tiposNomina.find(
-                  (item) => String(item.id) === id
-                );
-
-                setTipoNomina(tipoSeleccionado?.nombre || "");
-              }}
+              onChange={(e) => seleccionarTipoNomina(e.target.value)}
               className="border rounded-xl px-4 py-3 w-full bg-white"
             >
               <option value="">Seleccione tipo de nómina</option>
@@ -1301,10 +1701,61 @@ export default function NominaPage() {
             <input
               type="month"
               value={periodo}
-              onChange={(e) => setPeriodo(e.target.value)}
+              onChange={(e) => cambiarPeriodo(e.target.value)}
               className="border rounded-xl px-4 py-3 w-full"
             />
           </div>
+
+          {esTipoQuincenal(obtenerTipoNominaSeleccionado()) && (
+            <div>
+              <label className="block text-sm font-semibold mb-1">
+                Quincena *
+              </label>
+
+              <select
+                value={quincena}
+                onChange={(e) => cambiarQuincena(e.target.value)}
+                disabled={verificandoQuincenas}
+                className="border rounded-xl px-4 py-3 w-full bg-white disabled:bg-slate-100"
+              >
+                <option
+                  value="1"
+                  disabled={!editandoId && quincenasRegistradas.includes(1)}
+                >
+                  Primera quincena · pago día 15
+                  {quincenasRegistradas.includes(1) ? " · registrada" : ""}
+                </option>
+                <option
+                  value="2"
+                  disabled={!editandoId && quincenasRegistradas.includes(2)}
+                >
+                  Segunda quincena · pago día 30
+                  {quincenasRegistradas.includes(2) ? " · registrada" : ""}
+                </option>
+              </select>
+
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                <div
+                  className={`rounded-lg border px-3 py-2 font-bold ${
+                    quincenasRegistradas.includes(1)
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-slate-50 text-slate-600"
+                  }`}
+                >
+                  1ra: {quincenasRegistradas.includes(1) ? "Registrada" : "Disponible"}
+                </div>
+                <div
+                  className={`rounded-lg border px-3 py-2 font-bold ${
+                    quincenasRegistradas.includes(2)
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-slate-50 text-slate-600"
+                  }`}
+                >
+                  2da: {quincenasRegistradas.includes(2) ? "Registrada" : "Disponible"}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-semibold mb-1">
@@ -1315,8 +1766,20 @@ export default function NominaPage() {
               type="date"
               value={fechaPago}
               onChange={(e) => setFechaPago(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
+              readOnly={esTipoQuincenal(obtenerTipoNominaSeleccionado())}
+              className={`border rounded-xl px-4 py-3 w-full ${
+                esTipoQuincenal(obtenerTipoNominaSeleccionado())
+                  ? "bg-slate-100 font-bold"
+                  : ""
+              }`}
             />
+
+            {esTipoQuincenal(obtenerTipoNominaSeleccionado()) && (
+              <p className="text-xs text-slate-500 mt-1">
+                Se establece automáticamente al día 15 o 30. En febrero, la
+                segunda quincena usa el último día del mes.
+              </p>
+            )}
           </div>
 
           <div>
@@ -1328,7 +1791,12 @@ export default function NominaPage() {
               type="number"
               value={diasTrabajados}
               onChange={(e) => setDiasTrabajados(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
+              readOnly={esTipoQuincenal(obtenerTipoNominaSeleccionado())}
+              className={`border rounded-xl px-4 py-3 w-full ${
+                esTipoQuincenal(obtenerTipoNominaSeleccionado())
+                  ? "bg-slate-100 font-bold"
+                  : ""
+              }`}
             />
           </div>
 
@@ -1338,7 +1806,7 @@ export default function NominaPage() {
 
           <div>
             <label className="block text-sm font-semibold mb-1">
-              Salario base RD$ *
+              Salario del período RD$ *
             </label>
 
             <input
@@ -1346,9 +1814,25 @@ export default function NominaPage() {
               step="0.01"
               value={salarioBase}
               onChange={(e) => setSalarioBase(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full"
+              readOnly={esTipoQuincenal(obtenerTipoNominaSeleccionado())}
+              className={`border rounded-xl px-4 py-3 w-full ${
+                esTipoQuincenal(obtenerTipoNominaSeleccionado())
+                  ? "bg-slate-100 font-bold text-blue-700"
+                  : ""
+              }`}
               placeholder="0.00"
             />
+
+            {empleadoId && salarioMensualReferencia && (
+              <p className="text-xs text-slate-500 mt-1">
+                Salario mensual en RH: RD${moneda(
+                  numero(salarioMensualReferencia)
+                )}
+                {esTipoQuincenal(obtenerTipoNominaSeleccionado())
+                  ? " · Esta quincena usa el 50 %."
+                  : ""}
+              </p>
+            )}
           </div>
 
           <div>
@@ -1456,7 +1940,7 @@ export default function NominaPage() {
             />
 
             <p className="text-xs text-slate-500 mt-1">
-              Cálculo: salario base / divisor configurado × días aprobados.
+              Cálculo: salario mensual de RH / divisor configurado × días aprobados.
             </p>
           </div>
 
@@ -1649,7 +2133,7 @@ export default function NominaPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-4">
               <div>
-                <p className="text-sm text-slate-500">Salario base</p>
+                <p className="text-sm text-slate-500">Salario período</p>
                 <p className="text-lg font-black text-green-700">
                   RD${moneda(numero(salarioBase))}
                 </p>
@@ -1744,11 +2228,25 @@ export default function NominaPage() {
           <div className="md:col-span-2 flex flex-col md:flex-row gap-3">
             <button
               type="submit"
-              disabled={guardando}
+              disabled={
+                guardando ||
+                verificandoQuincenas ||
+                (!editandoId &&
+                  esTipoQuincenal(obtenerTipoNominaSeleccionado()) &&
+                  quincenasRegistradas.includes(1) &&
+                  quincenasRegistradas.includes(2))
+              }
               className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white px-5 py-3 rounded-xl font-bold"
             >
               {guardando
                 ? "Guardando..."
+                : verificandoQuincenas
+                ? "Verificando quincenas..."
+                : !editandoId &&
+                  esTipoQuincenal(obtenerTipoNominaSeleccionado()) &&
+                  quincenasRegistradas.includes(1) &&
+                  quincenasRegistradas.includes(2)
+                ? "Quincenas completas"
                 : editandoId
                 ? "Guardar cambios"
                 : "Guardar nómina"}
@@ -1864,9 +2362,19 @@ export default function NominaPage() {
 
                     <td className="p-3 border">
                       <p className="font-bold">{n.periodo}</p>
+                      {n.quincena && (
+                        <p className="text-xs font-bold text-cyan-700">
+                          {n.quincena === 1 ? "Primera" : "Segunda"} quincena
+                        </p>
+                      )}
                       <p className="text-xs text-slate-500">
                         Días: {n.dias_trabajados || 0}
                       </p>
+                      {n.fecha_inicio_periodo && n.fecha_fin_periodo && (
+                        <p className="text-xs text-slate-400">
+                          {n.fecha_inicio_periodo} al {n.fecha_fin_periodo}
+                        </p>
+                      )}
                     </td>
 
                     <td className="p-3 border text-right font-bold text-green-700">

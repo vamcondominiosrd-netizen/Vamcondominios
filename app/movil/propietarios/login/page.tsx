@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
 
@@ -14,6 +14,19 @@ type Unidad = {
   id: number;
   codigo: string;
 };
+
+type PropietarioApartamento = {
+  id: number;
+  nombre_propietario: string | null;
+  cedula: string | null;
+  telefono: string | null;
+  correo: string | null;
+  no_apartamento: string | null;
+};
+
+function limpiarCedula(valor: string) {
+  return String(valor || "").replace(/\D/g, "");
+}
 
 export default function LoginPropietariosPage() {
   const router = useRouter();
@@ -30,16 +43,23 @@ export default function LoginPropietariosPage() {
 
   const [mensaje, setMensaje] = useState("");
   const [loading, setLoading] = useState(false);
+  const [cargandoCondominios, setCargandoCondominios] = useState(true);
+  const [cargandoUnidades, setCargandoUnidades] = useState(false);
 
   useEffect(() => {
-    cargarCondominios();
+    void cargarCondominios();
   }, []);
 
   async function cargarCondominios() {
+    setCargandoCondominios(true);
+    setMensaje("");
+
     const { data, error } = await supabase
       .from("condominios")
       .select("id, nombre, logo_url")
       .order("nombre");
+
+    setCargandoCondominios(false);
 
     if (error) {
       setMensaje(error.message);
@@ -52,17 +72,19 @@ export default function LoginPropietariosPage() {
   async function seleccionarCondominio(id: string) {
     setCondominioId(id);
     setUnidadId("");
+    setUnidades([]);
     setMensaje("");
 
-    const seleccionado = condominios.find((c) => String(c.id) === id);
+    const seleccionado = condominios.find(
+      (condominio) => String(condominio.id) === id
+    );
 
     setCondominioNombre(seleccionado?.nombre || "");
     setCondominioLogoUrl(seleccionado?.logo_url || "");
 
-    if (!id) {
-      setUnidades([]);
-      return;
-    }
+    if (!id) return;
+
+    setCargandoUnidades(true);
 
     const { data, error } = await supabase
       .from("unidades")
@@ -70,6 +92,8 @@ export default function LoginPropietariosPage() {
       .eq("condominio_id", Number(id))
       .eq("activa", true)
       .order("codigo");
+
+    setCargandoUnidades(false);
 
     if (error) {
       setMensaje(error.message);
@@ -86,8 +110,10 @@ export default function LoginPropietariosPage() {
     localStorage.removeItem("condominio_logo_url");
   }
 
-  async function entrar() {
-    if (!condominioId || !unidadId || !cedula) {
+  async function entrar(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+
+    if (!condominioId || !unidadId || !cedula.trim()) {
       setMensaje("Debe completar condominio, apartamento y cédula.");
       return;
     }
@@ -96,9 +122,9 @@ export default function LoginPropietariosPage() {
     setMensaje("");
 
     const unidadCodigo =
-      unidades.find((u) => String(u.id) === unidadId)?.codigo || "";
+      unidades.find((unidad) => String(unidad.id) === unidadId)?.codigo || "";
 
-    const cedulaLimpia = cedula.replace(/\D/g, "");
+    const cedulaLimpia = limpiarCedula(cedula);
 
     const { data, error } = await supabase
       .from("propietarios_apartamentos")
@@ -120,10 +146,9 @@ export default function LoginPropietariosPage() {
       return;
     }
 
-    const propietario = (data || []).find((p: any) => {
-      const cedulaDB = String(p.cedula || "").replace(/\D/g, "");
-      return cedulaDB === cedulaLimpia;
-    });
+    const propietario = ((data || []) as PropietarioApartamento[]).find(
+      (registro) => limpiarCedula(registro.cedula || "") === cedulaLimpia
+    );
 
     if (!propietario) {
       setMensaje("La cédula no coincide con el apartamento seleccionado.");
@@ -132,116 +157,177 @@ export default function LoginPropietariosPage() {
 
     limpiarSesion();
 
+    const sesionPropietario = {
+      propietario_id: propietario.id,
+      condominio_id: Number(condominioId),
+      condominio_nombre: condominioNombre,
+      condominio_logo_url: condominioLogoUrl,
+      unidad_id: Number(unidadId),
+      no_apartamento: unidadCodigo,
+      nombre_propietario: propietario.nombre_propietario,
+      cedula: propietario.cedula,
+      telefono: propietario.telefono,
+      correo: propietario.correo,
+    };
+
     localStorage.setItem(
       "propietario_actual",
-      JSON.stringify({
-        propietario_id: propietario.id,
-        condominio_id: Number(condominioId),
-        condominio_nombre: condominioNombre,
-        condominio_logo_url: condominioLogoUrl,
-        unidad_id: Number(unidadId),
-        no_apartamento: unidadCodigo,
-        nombre_propietario: propietario.nombre_propietario,
-        cedula: propietario.cedula,
-        telefono: propietario.telefono,
-        correo: propietario.correo,
-      })
+      JSON.stringify(sesionPropietario)
     );
+    localStorage.setItem("condominio_id", String(condominioId));
+    localStorage.setItem("condominio_nombre", condominioNombre);
+    localStorage.setItem("condominio_logo_url", condominioLogoUrl);
 
     router.push("/movil/propietarios/dashboard");
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-6 flex items-center">
-      <div className="w-full max-w-md mx-auto space-y-5">
-        <div className="bg-slate-950 text-white rounded-3xl p-6 shadow-xl text-center">
-          {condominioLogoUrl ? (
-            <img
-              src={condominioLogoUrl}
-              alt="Logo"
-              className="w-20 h-20 object-contain mx-auto mb-3 rounded-full bg-white p-2"
-            />
-          ) : (
-            <div className="w-20 h-20 mx-auto mb-3 rounded-full bg-blue-700 flex items-center justify-center text-2xl font-bold">
-              VAM
+    <main className="min-h-dvh bg-gradient-to-b from-slate-950 via-blue-950 to-slate-950 px-3 py-3 sm:px-4 sm:py-5">
+      <div className="mx-auto flex min-h-[calc(100dvh-24px)] w-full max-w-sm items-center justify-center">
+        <section className="w-full overflow-hidden rounded-[1.6rem] bg-white shadow-2xl shadow-black/30">
+          <div className="bg-gradient-to-r from-blue-800 to-blue-950 px-5 py-4 text-white">
+            <div className="flex items-center gap-3">
+              {condominioLogoUrl ? (
+                <img
+                  src={condominioLogoUrl}
+                  alt={condominioNombre || "Logo del condominio"}
+                  className="h-12 w-12 rounded-xl bg-white object-contain p-1.5"
+                />
+              ) : (
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white text-base font-black text-blue-900">
+                  VAM
+                </div>
+              )}
+
+              <div className="min-w-0">
+                <p className="truncate text-base font-extrabold">
+                  VAM Propietarios
+                </p>
+                <p className="text-xs text-blue-100">
+                  Acceso móvil al condominio
+                </p>
+              </div>
             </div>
-          )}
-
-          <h1 className="text-2xl font-bold">VAM Propietarios</h1>
-          <p className="text-slate-300 text-sm mt-1">
-            Acceso móvil para consultar cuenta, pagos e incidencias.
-          </p>
-        </div>
-
-        <div className="bg-white rounded-3xl border shadow-sm p-5 space-y-4">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Condominio
-            </label>
-            <select
-              value={condominioId}
-              onChange={(e) => seleccionarCondominio(e.target.value)}
-              className="w-full border rounded-2xl px-4 py-3 bg-white"
-            >
-              <option value="">Seleccione condominio</option>
-              {condominios.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Apartamento / Unidad
-            </label>
-            <select
-              value={unidadId}
-              onChange={(e) => setUnidadId(e.target.value)}
-              className="w-full border rounded-2xl px-4 py-3 bg-white"
-            >
-              <option value="">Seleccione unidad</option>
-              {unidades.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.codigo}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
-              Cédula del propietario
-            </label>
-            <input
-              type="text"
-              value={cedula}
-              onChange={(e) => setCedula(e.target.value)}
-              placeholder="Digite su cédula"
-              className="w-full border rounded-2xl px-4 py-3"
-            />
-          </div>
-
-          {mensaje && (
-            <div className="bg-blue-50 border border-blue-200 text-blue-700 rounded-2xl p-3 text-sm">
-              {mensaje}
+          <div className="px-4 py-4 sm:px-5">
+            <div className="mb-4">
+              <h1 className="text-xl font-black tracking-tight text-slate-900">
+                Iniciar sesión
+              </h1>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Seleccione su condominio, unidad y escriba su cédula.
+              </p>
             </div>
-          )}
 
-          <button
-            type="button"
-            onClick={entrar}
-            disabled={loading}
-            className="w-full bg-blue-700 hover:bg-blue-800 disabled:opacity-50 text-white rounded-2xl py-4 font-bold text-base"
-          >
-            {loading ? "Validando..." : "Entrar"}
-          </button>
-        </div>
+            <form onSubmit={entrar} className="space-y-3">
+              <div>
+                <label
+                  htmlFor="condominio"
+                  className="mb-1 block text-xs font-bold text-slate-700"
+                >
+                  Condominio
+                </label>
+                <select
+                  id="condominio"
+                  value={condominioId}
+                  onChange={(event) =>
+                    void seleccionarCondominio(event.target.value)
+                  }
+                  disabled={cargandoCondominios || loading}
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                >
+                  <option value="">
+                    {cargandoCondominios
+                      ? "Cargando..."
+                      : "Seleccione condominio"}
+                  </option>
 
-        <p className="text-center text-xs text-slate-400">
-          VAM Administración de Condominios
-        </p>
+                  {condominios.map((condominio) => (
+                    <option key={condominio.id} value={condominio.id}>
+                      {condominio.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="unidad"
+                  className="mb-1 block text-xs font-bold text-slate-700"
+                >
+                  Apartamento / Unidad
+                </label>
+                <select
+                  id="unidad"
+                  value={unidadId}
+                  onChange={(event) => setUnidadId(event.target.value)}
+                  disabled={!condominioId || cargandoUnidades || loading}
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                >
+                  <option value="">
+                    {cargandoUnidades
+                      ? "Cargando..."
+                      : !condominioId
+                        ? "Seleccione primero el condominio"
+                        : "Seleccione unidad"}
+                  </option>
+
+                  {unidades.map((unidad) => (
+                    <option key={unidad.id} value={unidad.id}>
+                      {unidad.codigo}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="cedula"
+                  className="mb-1 block text-xs font-bold text-slate-700"
+                >
+                  Cédula del propietario
+                </label>
+                <input
+                  id="cedula"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={cedula}
+                  onChange={(event) => setCedula(event.target.value)}
+                  placeholder="Digite su cédula"
+                  disabled={loading}
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                />
+              </div>
+
+              {mensaje && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs leading-5 text-red-700"
+                >
+                  {mensaje}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-1 flex h-11 w-full items-center justify-center rounded-xl bg-blue-800 px-4 text-sm font-extrabold text-white transition hover:bg-blue-900 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading ? "Validando..." : "Entrar"}
+              </button>
+            </form>
+
+            <div className="mt-4 rounded-xl bg-slate-50 px-3 py-2.5 text-center text-[11px] leading-4 text-slate-500">
+              Consulta estado de cuenta, pagos, recibos e incidencias.
+            </div>
+
+            <p className="mt-3 text-center text-[10px] text-slate-400">
+              VAM Administración de Condominios
+            </p>
+          </div>
+        </section>
       </div>
     </main>
   );

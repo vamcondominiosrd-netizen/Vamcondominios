@@ -17,6 +17,7 @@ import {
   UserCheck,
   Users,
   WalletCards,
+  Boxes,
 } from "lucide-react";
 
 import { supabase } from "@/app/lib/supabaseClient";
@@ -512,6 +513,11 @@ export default function DashboardRHPage() {
             label: "Prestaciones",
             icon: HandCoins,
           },
+          {
+            href: "/recursos-humanos/cargos",
+            label: "Cargos",
+            icon: Boxes,
+           },
           {
             href: "/recursos-humanos/nomina/reportes/nomina",
             label: "Reportes",

@@ -2,7 +2,30 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Banknote,
+  BarChart3,
+  Calculator,
+  CheckCircle2,
+  FileSpreadsheet,
+  Landmark,
+  LockKeyhole,
+  Plus,
+  RefreshCw,
+  Scale,
+  TrendingDown,
+  TrendingUp,
+  WalletCards,
+} from "lucide-react";
+
 import { supabase } from "@/app/lib/supabaseClient";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import ModuleActions from "@/components/vam/enterprise/ModuleActions";
+import StatCard from "@/components/vam/enterprise/StatCard";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import EmptyState from "@/components/vam/enterprise/EmptyState";
 
 type Cuenta = {
   id: number;
@@ -531,180 +554,214 @@ export default function ControlBancarioPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-slate-900 text-2xl text-white shadow-sm">
-              🏦
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700">
-                Finanzas
-              </p>
-              <h1 className="mt-1 text-2xl font-bold text-slate-900 md:text-3xl">
-                Control Bancario
-              </h1>
-              <p className="mt-1 max-w-3xl text-sm text-slate-500">
-                Libro bancario mensual del condominio. Solo movimientos reales
-                del banco: ingresos, cheques, transferencias, cargos, impuestos,
-                intereses y ajustes bancarios.
-              </p>
-              <p className="mt-1 text-sm font-medium text-slate-700">
-                Condominio activo: {condominioNombre}
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:min-w-[520px]">
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Cuenta bancaria
-              </label>
-              <select
-                value={cuentaId}
-                onChange={(e) => setCuentaId(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              >
-                {cuentas.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre_banco} - {c.numero_cuenta}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Período
-              </label>
-              <input
-                type="month"
-                value={periodo}
-                onChange={(e) => setPeriodo(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {cuentas.length === 0 ? (
-        <div className="rounded-2xl border bg-white p-6 text-slate-600 shadow-sm">
-          No hay cuentas bancarias activas registradas para este condominio.
-        </div>
-      ) : (
-        <>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">
-                  {cuentaSeleccionada?.nombre_banco || "Cuenta bancaria"}
-                </h2>
-                <p className="text-sm text-slate-500">
-                  Cuenta: {cuentaSeleccionada?.numero_cuenta || "-"} ·{" "}
-                  {nombrePeriodo(periodo)}
-                </p>
-              </div>
-
+    <PageContainer>
+      <ModuleToolbar
+        title="Control Bancario"
+        subtitle={`Libro bancario mensual y conciliación. Condominio: ${
+          condominioNombre || "No identificado"
+        }.`}
+        icon={Landmark}
+        actions={
+          <ModuleActions
+            onRefresh={cargarControlBancario}
+            extra={
               <div className="flex flex-wrap gap-2">
-                <span
-                  className={`rounded-full px-4 py-2 text-sm font-semibold ${colorEstado(cierre?.estado)}`}
-                >
-                  {cierre?.estado || "ABIERTO"}
-                </span>
                 <button
+                  type="button"
                   onClick={recalcularMes}
-                  disabled={loading}
-                  className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+                  disabled={loading || !cuentaId}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-50"
                 >
-                  {loading ? "Recalculando..." : "Recalcular"}
+                  <RefreshCw
+                    className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+                  />
+                  Recalcular mes
                 </button>
+
                 <button
+                  type="button"
                   onClick={cerrarMes}
                   disabled={!cierre || cierre.estado === "CERRADO"}
-                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800 disabled:opacity-50"
                 >
+                  <LockKeyhole className="h-4 w-4" />
                   Cerrar mes
                 </button>
               </div>
-            </div>
+            }
+          />
+        }
+      />
+
+      <SectionCard
+        title="Cuenta y período"
+        subtitle="Seleccione la cuenta bancaria y el mes que desea consultar."
+        action={
+          <span
+            className={`inline-flex rounded-full px-4 py-2 text-sm font-black ${colorEstado(
+              cierre?.estado
+            )}`}
+          >
+            {cierre?.estado || "ABIERTO"}
+          </span>
+        }
+      >
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
+          <div>
+            <label className="mb-1 block text-sm font-semibold text-slate-700">
+              Cuenta bancaria
+            </label>
+            <select
+              value={cuentaId}
+              onChange={(e) => setCuentaId(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+            >
+              {cuentas.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre_banco} - {c.numero_cuenta}
+                </option>
+              ))}
+            </select>
           </div>
 
+          <div>
+            <label className="mb-1 block text-sm font-semibold text-slate-700">
+              Período
+            </label>
+            <input
+              type="month"
+              value={periodo}
+              onChange={(e) => setPeriodo(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+            />
+          </div>
+        </div>
+
+        {cuentaSeleccionada && (
+          <div className="mt-4 rounded-xl border bg-slate-50 px-4 py-3">
+            <p className="font-black text-slate-900">
+              {cuentaSeleccionada.nombre_banco}
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              Cuenta {cuentaSeleccionada.numero_cuenta} ·{" "}
+              {cuentaSeleccionada.tipo_cuenta || "Tipo no indicado"} ·{" "}
+              {nombrePeriodo(periodo)}
+            </p>
+          </div>
+        )}
+      </SectionCard>
+
+      {cuentas.length === 0 ? (
+        <EmptyState
+          title="Sin cuentas bancarias"
+          description="No existen cuentas bancarias activas para este condominio."
+        />
+      ) : (
+        <>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <Kpi
-              titulo="Saldo inicial"
-              valor={dinero(cierre?.balance_inicial)}
+            <StatCard
+              title="Saldo inicial"
+              value={dinero(cierre?.balance_inicial)}
+              subtitle="Inicio del período"
+              icon={WalletCards}
+              tone="slate"
             />
-            <Kpi
-              titulo="Ingresos banco"
-              valor={dinero(totales.ingresos)}
-              color="text-green-700"
+            <StatCard
+              title="Ingresos banco"
+              value={dinero(totales.ingresos)}
+              subtitle="Movimientos de entrada"
+              icon={TrendingUp}
+              tone="green"
             />
-            <Kpi
-              titulo="Egresos banco"
-              valor={dinero(totales.egresos)}
-              color="text-red-700"
+            <StatCard
+              title="Egresos banco"
+              value={dinero(totales.egresos)}
+              subtitle="Movimientos de salida"
+              icon={TrendingDown}
+              tone="red"
             />
-            <Kpi
-              titulo="Saldo al cierre"
-              valor={dinero(totales.balanceFinal)}
-              color="text-blue-700"
+            <StatCard
+              title="Saldo al cierre"
+              value={dinero(totales.balanceFinal)}
+              subtitle="Saldo calculado por VAM"
+              icon={Calculator}
+              tone="blue"
             />
-            <Kpi
-              titulo="Cargos / impuestos"
-              valor={dinero(totales.cargosBanco)}
-              color="text-orange-700"
+            <StatCard
+              title="Cargos e impuestos"
+              value={dinero(totales.cargosBanco)}
+              subtitle="Costos bancarios"
+              icon={Banknote}
+              tone="amber"
             />
-            <Kpi
-              titulo="Intereses"
-              valor={dinero(totales.intereses)}
-              color="text-emerald-700"
+            <StatCard
+              title="Intereses"
+              value={dinero(totales.intereses)}
+              subtitle="Ingresos financieros"
+              icon={TrendingUp}
+              tone="green"
             />
-            <Kpi
-              titulo="Saldo banco"
-              valor={dinero(cierre?.saldo_banco)}
-              color="text-slate-900"
+            <StatCard
+              title="Saldo según banco"
+              value={dinero(cierre?.saldo_banco)}
+              subtitle="Estado de cuenta"
+              icon={Landmark}
+              tone="slate"
             />
-            <Kpi
-              titulo="Diferencia"
-              valor={dinero(totales.diferencia)}
-              color={
+            <StatCard
+              title="Diferencia"
+              value={dinero(totales.diferencia)}
+              subtitle={
                 Number(totales.diferencia || 0) === 0
-                  ? "text-green-700"
-                  : "text-red-700"
+                  ? "Cuenta conciliada"
+                  : "Requiere revisión"
+              }
+              icon={
+                Number(totales.diferencia || 0) === 0
+                  ? CheckCircle2
+                  : Scale
+              }
+              tone={
+                Number(totales.diferencia || 0) === 0 ? "green" : "red"
               }
             />
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-wrap gap-2 border-b p-3">
+          <SectionCard
+            title="Gestión del período"
+            subtitle="Resumen, movimientos, conciliación e histórico mensual."
+          >
+            <div className="mb-5 flex flex-wrap gap-2 border-b pb-4">
               {[
-                ["resumen", "Resumen"],
-                ["movimientos", "Movimientos"],
-                ["conciliacion", "Conciliación"],
-                ["historico", "Histórico"],
-              ].map(([key, label]) => (
+                ["resumen", "Resumen", BarChart3],
+                ["movimientos", "Movimientos", FileSpreadsheet],
+                ["conciliacion", "Conciliación", Scale],
+                ["historico", "Histórico", Banknote],
+              ].map(([key, label, Icon]: any) => (
                 <button
                   key={key}
+                  type="button"
                   onClick={() => setTab(key as typeof tab)}
-                  className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+                  className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold ${
                     tab === key
-                      ? "bg-blue-600 text-white shadow-sm"
+                      ? "bg-blue-700 text-white shadow-sm"
                       : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                   }`}
                 >
+                  <Icon className="h-4 w-4" />
                   {label}
                 </button>
               ))}
             </div>
 
-            <div className="p-5">
-              {tab === "resumen" && (
-                <div className="grid grid-cols-1 gap-6 xl:grid-cols-4">
-                  <div className="xl:col-span-2">
-                    <h2 className="text-xl font-bold">Resumen del período</h2>
-                    <div className="mt-4 overflow-hidden rounded-2xl border">
+            {tab === "resumen" && (
+              <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+                <section className="xl:col-span-2">
+                  <SectionCard
+                    title="Resumen del período"
+                    subtitle="Cálculo basado exclusivamente en movimientos reales del banco."
+                  >
+                    <div className="overflow-hidden rounded-xl border">
                       <ResumenLinea
                         label="Saldo inicial"
                         valor={dinero(cierre?.balance_inicial)}
@@ -712,7 +769,7 @@ export default function ControlBancarioPage() {
                       <ResumenLinea
                         label="+ Ingresos reales en banco"
                         valor={dinero(totales.ingresos)}
-                        color="text-green-700"
+                        color="text-emerald-700"
                       />
                       <ResumenLinea
                         label="- Egresos reales en banco"
@@ -726,40 +783,44 @@ export default function ControlBancarioPage() {
                         bold
                       />
                     </div>
-                    <p className="mt-3 text-sm text-slate-500">
-                      Este cálculo solo incluye movimientos reales del banco:
-                      pagos de propietarios, cheques, transferencias, reposición
-                      de caja chica, nómina pagada, cargos, impuestos, intereses
-                      y ajustes bancarios.
-                    </p>
-                  </div>
 
-                  <div className="rounded-2xl border p-5">
-                    <h2 className="text-xl font-bold">Saldo inicial</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      Balance con que inicia la cuenta en este período. No se
-                      cuenta como ingreso.
+                    <p className="mt-4 text-sm leading-relaxed text-slate-500">
+                      Este cálculo incluye pagos de propietarios, cheques,
+                      transferencias, reposiciones de caja chica, nómina,
+                      cargos, impuestos, intereses y ajustes bancarios.
                     </p>
-                    <label className="mt-4 block text-sm font-medium text-slate-600">
-                      Monto inicial del período
+                  </SectionCard>
+                </section>
+
+                <section>
+                  <SectionCard
+                    title="Saldo inicial"
+                    subtitle="Balance de apertura del período; no se registra como ingreso."
+                  >
+                    <label className="mb-1 block text-sm font-semibold">
+                      Monto inicial
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={saldoInicial}
                       onChange={(e) => setSaldoInicial(e.target.value)}
-                      className="mt-1 w-full rounded-xl border px-4 py-3"
+                      className="w-full rounded-xl border px-4 py-3"
                       disabled={cierre?.estado === "CERRADO"}
                     />
+
                     <button
+                      type="button"
                       onClick={guardarSaldoInicial}
                       disabled={cierre?.estado === "CERRADO"}
-                      className="mt-4 w-full rounded-xl bg-slate-800 px-4 py-3 font-semibold text-white hover:bg-slate-900 disabled:opacity-50"
+                      className="mt-4 w-full rounded-xl bg-slate-900 px-4 py-3 font-bold text-white hover:bg-slate-800 disabled:opacity-50"
                     >
                       Guardar saldo inicial
                     </button>
-                  </div>
+                  </SectionCard>
+                </section>
 
+                <section className="xl:col-span-3">
                   <FormularioMovimiento
                     cierreCerrado={cierre?.estado === "CERRADO"}
                     fechaMovimiento={fechaMovimiento}
@@ -781,127 +842,125 @@ export default function ControlBancarioPage() {
                     guardando={guardando}
                     registrarMovimiento={registrarMovimiento}
                   />
-                </div>
-              )}
+                </section>
+              </div>
+            )}
 
-              {tab === "movimientos" && (
-                <MovimientosTable
-                  movimientos={movimientos}
-                  balanceInicial={Number(cierre?.balance_inicial || 0)}
-                  cambiarEstadoMovimiento={cambiarEstadoMovimiento}
-                />
-              )}
+            {tab === "movimientos" && (
+              <MovimientosTable
+                movimientos={movimientos}
+                balanceInicial={Number(cierre?.balance_inicial || 0)}
+                cambiarEstadoMovimiento={cambiarEstadoMovimiento}
+              />
+            )}
 
-              {tab === "conciliacion" && (
-                <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                  <div className="rounded-2xl border p-5">
-                    <h2 className="text-xl font-bold">Conciliación bancaria</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      Coloque el saldo final que aparece en el estado de cuenta
-                      del banco al cierre del mes.
-                    </p>
+            {tab === "conciliacion" && (
+              <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+                <SectionCard
+                  title="Conciliación bancaria"
+                  subtitle="Compare el saldo de VAM con el estado de cuenta del banco."
+                >
+                  <label className="mb-1 block text-sm font-semibold">
+                    Saldo según banco
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={saldoBanco}
+                    onChange={(e) => setSaldoBanco(e.target.value)}
+                    className="w-full rounded-xl border px-4 py-3"
+                  />
 
-                    <label className="mt-5 block text-sm font-medium text-slate-600">
-                      Saldo según banco
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={saldoBanco}
-                      onChange={(e) => setSaldoBanco(e.target.value)}
-                      className="mt-1 w-full rounded-xl border px-4 py-3"
+                  <div className="mt-4 space-y-3">
+                    <InfoLine
+                      label="Saldo VAM"
+                      value={dinero(totales.balanceFinal)}
                     />
-
-                    <div className="mt-4 space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span>Saldo VAM</span>
-                        <strong>{dinero(totales.balanceFinal)}</strong>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Diferencia</span>
-                        <strong
-                          className={
-                            Number(totales.diferencia || 0) === 0
-                              ? "text-green-700"
-                              : "text-red-700"
-                          }
-                        >
-                          {dinero(totales.diferencia)}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={guardarSaldoBanco}
-                      className="mt-5 w-full rounded-xl bg-green-600 px-4 py-3 font-semibold text-white hover:bg-green-700"
-                    >
-                      Guardar saldo banco
-                    </button>
+                    <InfoLine
+                      label="Diferencia"
+                      value={dinero(totales.diferencia)}
+                      danger={Number(totales.diferencia || 0) !== 0}
+                      success={Number(totales.diferencia || 0) === 0}
+                    />
                   </div>
 
-                  <div className="rounded-2xl border p-5">
-                    <h2 className="text-xl font-bold">Estado de movimientos</h2>
-                    <div className="mt-4 grid grid-cols-2 gap-4">
-                      <KpiSimple
-                        label="Conciliados"
-                        value={
-                          movimientos.filter(
-                            (m) =>
-                              m.estado_banco === "CONCILIADO" || m.conciliado,
-                          ).length
-                        }
-                      />
-                      <KpiSimple
-                        label="Pendientes"
-                        value={
-                          movimientos.filter(
-                            (m) =>
-                              m.estado_banco !== "CONCILIADO" && !m.conciliado,
-                          ).length
-                        }
-                      />
-                    </div>
-                    <p className="mt-4 text-sm text-slate-500">
-                      La conciliación debe comparar únicamente los movimientos
-                      que aparecen en el banco, no operaciones internas.
-                    </p>
-                  </div>
-                </div>
-              )}
+                  <button
+                    type="button"
+                    onClick={guardarSaldoBanco}
+                    className="mt-5 w-full rounded-xl bg-emerald-700 px-4 py-3 font-bold text-white hover:bg-emerald-800"
+                  >
+                    Guardar saldo banco
+                  </button>
+                </SectionCard>
 
-              {tab === "historico" && (
-                <Historico cierres={cierres} setPeriodo={setPeriodo} />
-              )}
-            </div>
-          </div>
+                <SectionCard
+                  title="Estado de movimientos"
+                  subtitle="Seguimiento de conciliación de los registros del mes."
+                >
+                  <div className="grid grid-cols-2 gap-4">
+                    <KpiSimple
+                      label="Conciliados"
+                      value={
+                        movimientos.filter(
+                          (m) =>
+                            m.estado_banco === "CONCILIADO" || m.conciliado
+                        ).length
+                      }
+                    />
+                    <KpiSimple
+                      label="Pendientes"
+                      value={
+                        movimientos.filter(
+                          (m) =>
+                            m.estado_banco !== "CONCILIADO" && !m.conciliado
+                        ).length
+                      }
+                    />
+                  </div>
+
+                  <p className="mt-4 text-sm leading-relaxed text-slate-500">
+                    La conciliación compara únicamente movimientos presentes en
+                    el banco; no incluye operaciones internas.
+                  </p>
+                </SectionCard>
+              </div>
+            )}
+
+            {tab === "historico" && (
+              <Historico cierres={cierres} setPeriodo={setPeriodo} />
+            )}
+          </SectionCard>
         </>
       )}
-    </div>
+    </PageContainer>
   );
 }
 
-function Kpi({
-  titulo,
-  valor,
-  color = "text-slate-900",
+function InfoLine({
+  label,
+  value,
+  danger = false,
+  success = false,
 }: {
-  titulo: string;
-  valor: string;
-  color?: string;
+  label: string;
+  value: string;
+  danger?: boolean;
+  success?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {titulo}
-          </p>
-          <h3 className={`mt-2 text-xl font-bold ${color}`}>{valor}</h3>
-        </div>
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-50 to-slate-100 text-lg">
-          💳
-        </div>
-      </div>
+    <div className="flex items-center justify-between rounded-xl border bg-slate-50 px-4 py-3">
+      <span className="text-sm font-semibold text-slate-600">{label}</span>
+      <span
+        className={`text-sm font-black ${
+          danger
+            ? "text-red-700"
+            : success
+              ? "text-emerald-700"
+              : "text-slate-900"
+        }`}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -940,8 +999,8 @@ function ResumenLinea({
 
 function FormularioMovimiento(props: any) {
   return (
-    <div className="rounded-2xl border p-5">
-      <h2 className="text-xl font-bold">Registrar movimiento bancario</h2>
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-black text-slate-900">Registrar movimiento bancario</h2>
       <p className="mt-1 text-sm text-slate-500">
         Solo movimientos que aparecen o aparecerán en el estado del banco.
       </p>
@@ -1014,7 +1073,7 @@ function FormularioMovimiento(props: any) {
 
         <button
           disabled={props.guardando || props.cierreCerrado}
-          className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+          className="w-full rounded-xl bg-blue-700 px-4 py-3 font-bold text-white hover:bg-blue-800 disabled:opacity-50"
         >
           {props.cierreCerrado
             ? "Período cerrado"
@@ -1047,9 +1106,9 @@ function MovimientosTable({
         </span>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border">
+      <div className="overflow-x-auto rounded-xl border">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50">
+          <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
             <tr>
               <th className="px-4 py-3 text-left">Fecha</th>
               <th className="px-4 py-3 text-left">Origen</th>
@@ -1130,9 +1189,9 @@ function Historico({
   return (
     <div>
       <h2 className="mb-4 text-xl font-bold">Histórico de cierres mensuales</h2>
-      <div className="overflow-x-auto rounded-2xl border">
+      <div className="overflow-x-auto rounded-xl border">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50">
+          <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
             <tr>
               <th className="px-4 py-3 text-left">Período</th>
               <th className="px-4 py-3 text-right">Inicial</th>

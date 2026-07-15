@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { supabase } from "../lib/supabaseClient";
+import { supabase } from "@/app/lib/supabaseClient";
 
 type CondominioAsignado = {
   id: number;
@@ -11,157 +11,223 @@ type CondominioAsignado = {
   logo_url: string | null;
 };
 
+type DatosSesion = {
+  uid: string;
+  empresaActualId: number;
+  empresaNombreActual: string;
+  usuarioNombreActual: string;
+  rolGlobalActual: string;
+  condominio: CondominioAsignado;
+  permisos: string[];
+};
+
+const CLAVES_SESION = [
+  "user_id",
+  "empresa_id",
+  "empresa_nombre",
+  "condominio_id",
+  "condominio_nombre",
+  "condominio_logo_url",
+  "usuario_rol",
+  "usuario_nombre",
+  "permisos_usuario",
+];
+
 export default function LoginPage() {
   const router = useRouter();
 
   const [usuario, setUsuario] = useState("");
   const [clave, setClave] = useState("");
+  const [mostrarClave, setMostrarClave] = useState(false);
   const [mensaje, setMensaje] = useState("");
+  const [tipoMensaje, setTipoMensaje] = useState<"error" | "info">("info");
   const [loading, setLoading] = useState(false);
-  const [verClave, setVerClave] = useState(false);
 
   const [userId, setUserId] = useState("");
   const [empresaId, setEmpresaId] = useState<number | null>(null);
   const [empresaNombre, setEmpresaNombre] = useState("");
+  const [empresaLogoUrl, setEmpresaLogoUrl] = useState("");
   const [usuarioNombre, setUsuarioNombre] = useState("");
   const [rolGlobal, setRolGlobal] = useState("");
 
   const [condominios, setCondominios] = useState<CondominioAsignado[]>([]);
   const [condominioId, setCondominioId] = useState("");
 
-  async function iniciarSesion(e: React.FormEvent) {
+  const seleccionandoCondominio = condominios.length > 0;
+
+  function mostrarError(texto: string) {
+    setTipoMensaje("error");
+    setMensaje(texto);
+  }
+
+  function mostrarInfo(texto: string) {
+    setTipoMensaje("info");
+    setMensaje(texto);
+  }
+
+  function limpiarSesionLocal() {
+    CLAVES_SESION.forEach((claveSesion) => {
+      localStorage.removeItem(claveSesion);
+    });
+  }
+
+  async function iniciarSesion(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    if (!usuario || !clave) {
-      setMensaje("Debe indicar usuario y clave.");
+    const correoLimpio = usuario.trim();
+
+    if (!correoLimpio || !clave) {
+      mostrarError("Debe indicar usuario y clave.");
       return;
     }
 
     setLoading(true);
     setMensaje("");
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: usuario,
-      password: clave,
-    });
-
-    if (error || !data.user) {
-      setLoading(false);
-      setMensaje("Usuario o clave incorrecta.");
-      return;
-    }
-
-    const uid = data.user.id;
-    setUserId(uid);
-
-    const { data: empresaData, error: empresaError } = await supabase
-      .from("usuarios_empresas")
-      .select(`
-        id,
-        user_id,
-        empresa_id,
-        nombre_usuario,
-        correo,
-        rol_global,
-        activo,
-        empresas (
-          id,
-          nombre,
-          logo_url
-        )
-      `)
-      .eq("user_id", uid)
-      .eq("activo", true)
-      .maybeSingle();
-
-    if (empresaError || !empresaData) {
-      await supabase.auth.signOut();
-      setLoading(false);
-      setMensaje("Este usuario no tiene empresa asignada en VAM Enterprise.");
-      return;
-    }
-
-    const empresa = Array.isArray(empresaData.empresas)
-      ? empresaData.empresas[0]
-      : empresaData.empresas;
-
-    const empresaActualId = Number(empresaData.empresa_id);
-
-    setEmpresaId(empresaActualId);
-    setEmpresaNombre(empresa?.nombre || "");
-    setUsuarioNombre(empresaData.nombre_usuario || "");
-    setRolGlobal(empresaData.rol_global || "");
-
-    const { data: condominiosData, error: condominiosError } = await supabase
-      .from("usuarios_condominios")
-      .select(`
-        condominio_id,
-        rol_condominio,
-        condominios (
-          id,
-          nombre,
-          logo_url,
-          sucursal_id
-        )
-      `)
-      .eq("user_id", uid)
-      .eq("empresa_id", empresaActualId)
-      .eq("activo", true);
-
-    if (condominiosError) {
-      await supabase.auth.signOut();
-      setLoading(false);
-      setMensaje("Error cargando condominios asignados.");
-      return;
-    }
-
-    const lista: CondominioAsignado[] = (condominiosData || [])
-      .map((item: any) => {
-        const c = Array.isArray(item.condominios)
-          ? item.condominios[0]
-          : item.condominios;
-
-        return {
-          id: Number(c?.id),
-          nombre: c?.nombre || "",
-          logo_url: c?.logo_url || null,
-        };
-      })
-      .filter((c) => c.id && c.nombre);
-
-    if (lista.length === 0) {
-      await supabase.auth.signOut();
-      setLoading(false);
-      setMensaje("Este usuario no tiene condominios asignados.");
-      return;
-    }
-
-    const permisos = await cargarPermisosUsuario(uid, empresaActualId);
-
-    if (lista.length === 1) {
-      guardarSesion({
-        uid,
-        empresaActualId,
-        empresaNombreActual: empresa?.nombre || "",
-        usuarioNombreActual: empresaData.nombre_usuario || "",
-        rolGlobalActual: empresaData.rol_global || "",
-        condominio: lista[0],
-        permisos,
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: correoLimpio,
+        password: clave,
       });
 
+      if (error || !data.user) {
+        mostrarError("Usuario o clave incorrecta.");
+        return;
+      }
+
+      limpiarSesionLocal();
+
+      const uid = data.user.id;
+      setUserId(uid);
+
+      const { data: empresaData, error: empresaError } = await supabase
+        .from("usuarios_empresas")
+        .select(`
+          id,
+          user_id,
+          empresa_id,
+          nombre_usuario,
+          correo,
+          rol_global,
+          activo,
+          empresas (
+            id,
+            nombre,
+            logo_url
+          )
+        `)
+        .eq("user_id", uid)
+        .eq("activo", true)
+        .maybeSingle();
+
+      if (empresaError || !empresaData) {
+        await supabase.auth.signOut();
+        mostrarError(
+          "Este usuario no tiene empresa asignada en VAM Enterprise."
+        );
+        return;
+      }
+
+      const empresaRelacion: any = Array.isArray(
+        (empresaData as any).empresas
+      )
+        ? (empresaData as any).empresas[0]
+        : (empresaData as any).empresas;
+
+      const empresaActualId = Number((empresaData as any).empresa_id);
+      const empresaNombreActual = empresaRelacion?.nombre || "";
+      const empresaLogoActual = empresaRelacion?.logo_url || "";
+      const usuarioNombreActual =
+        (empresaData as any).nombre_usuario || correoLimpio;
+      const rolGlobalActual = (empresaData as any).rol_global || "";
+
+      setEmpresaId(empresaActualId);
+      setEmpresaNombre(empresaNombreActual);
+      setEmpresaLogoUrl(empresaLogoActual);
+      setUsuarioNombre(usuarioNombreActual);
+      setRolGlobal(rolGlobalActual);
+
+      const { data: condominiosData, error: condominiosError } =
+        await supabase
+          .from("usuarios_condominios")
+          .select(`
+            condominio_id,
+            rol_condominio,
+            condominios (
+              id,
+              nombre,
+              logo_url,
+              sucursal_id
+            )
+          `)
+          .eq("user_id", uid)
+          .eq("empresa_id", empresaActualId)
+          .eq("activo", true);
+
+      if (condominiosError) {
+        await supabase.auth.signOut();
+        mostrarError("Error cargando los condominios asignados.");
+        return;
+      }
+
+      const lista: CondominioAsignado[] = (condominiosData || [])
+        .map((item: any) => {
+          const condominioRelacion = Array.isArray(item.condominios)
+            ? item.condominios[0]
+            : item.condominios;
+
+          return {
+            id: Number(condominioRelacion?.id),
+            nombre: condominioRelacion?.nombre || "",
+            logo_url: condominioRelacion?.logo_url || null,
+          };
+        })
+        .filter((condominio) => condominio.id && condominio.nombre);
+
+      if (lista.length === 0) {
+        await supabase.auth.signOut();
+        mostrarError("Este usuario no tiene condominios asignados.");
+        return;
+      }
+
+      const permisos = await cargarPermisosUsuario(uid, empresaActualId);
+
+      if (lista.length === 1) {
+        guardarSesion({
+          uid,
+          empresaActualId,
+          empresaNombreActual,
+          usuarioNombreActual,
+          rolGlobalActual,
+          condominio: lista[0],
+          permisos,
+        });
+
+        router.replace("/dashboard");
+        router.refresh();
+        return;
+      }
+
+      localStorage.setItem(
+        "permisos_usuario",
+        JSON.stringify(permisos || [])
+      );
+
+      setCondominios(lista);
+      setCondominioId("");
+      mostrarInfo("Seleccione el condominio con el que desea trabajar.");
+    } catch (error) {
+      console.error("Error en el inicio de sesión:", error);
+      mostrarError("No fue posible completar el inicio de sesión.");
+    } finally {
       setLoading(false);
-      router.push("/dashboard");
-      return;
     }
-
-    localStorage.setItem("permisos_usuario", JSON.stringify(permisos || []));
-
-    setCondominios(lista);
-    setLoading(false);
-    setMensaje("Seleccione el condominio con el que desea trabajar.");
   }
 
-  async function cargarPermisosUsuario(uid: string, empresaActualId: number) {
+  async function cargarPermisosUsuario(
+    uid: string,
+    empresaActualId: number
+  ): Promise<string[]> {
     const { data, error } = await supabase
       .from("usuarios_roles")
       .select(`
@@ -187,14 +253,17 @@ export default function LoginPage() {
 
     const permisos: string[] = [];
 
-    (data || []).forEach((ur: any) => {
-      const rol = Array.isArray(ur.roles) ? ur.roles[0] : ur.roles;
+    (data || []).forEach((usuarioRol: any) => {
+      const rol = Array.isArray(usuarioRol.roles)
+        ? usuarioRol.roles[0]
+        : usuarioRol.roles;
+
       const rolesPermisos = rol?.roles_permisos || [];
 
-      rolesPermisos.forEach((rp: any) => {
-        const permiso = Array.isArray(rp.permisos)
-          ? rp.permisos[0]
-          : rp.permisos;
+      rolesPermisos.forEach((rolPermiso: any) => {
+        const permiso = Array.isArray(rolPermiso.permisos)
+          ? rolPermiso.permisos[0]
+          : rolPermiso.permisos;
 
         if (permiso?.codigo && !permisos.includes(permiso.codigo)) {
           permisos.push(permiso.codigo);
@@ -213,217 +282,339 @@ export default function LoginPage() {
     rolGlobalActual,
     condominio,
     permisos,
-  }: {
-    uid: string;
-    empresaActualId: number;
-    empresaNombreActual: string;
-    usuarioNombreActual: string;
-    rolGlobalActual: string;
-    condominio: CondominioAsignado;
-    permisos: string[];
-  }) {
+  }: DatosSesion) {
     localStorage.setItem("user_id", uid);
     localStorage.setItem("empresa_id", String(empresaActualId));
     localStorage.setItem("empresa_nombre", empresaNombreActual);
 
     localStorage.setItem("condominio_id", String(condominio.id));
     localStorage.setItem("condominio_nombre", condominio.nombre);
-    localStorage.setItem("condominioSeleccionado", condominio.nombre);
-    localStorage.setItem("condominio_logo_url", condominio.logo_url || "");
+    localStorage.setItem(
+      "condominio_logo_url",
+      condominio.logo_url || ""
+    );
 
     localStorage.setItem("usuario_rol", rolGlobalActual);
     localStorage.setItem("usuario_nombre", usuarioNombreActual);
-
-    localStorage.setItem("permisos_usuario", JSON.stringify(permisos || []));
+    localStorage.setItem(
+      "permisos_usuario",
+      JSON.stringify(permisos || [])
+    );
   }
 
   async function entrarConCondominio() {
     if (!condominioId) {
-      setMensaje("Debe seleccionar un condominio.");
+      mostrarError("Debe seleccionar un condominio.");
       return;
     }
 
-    const condominio = condominios.find((c) => String(c.id) === condominioId);
+    const condominio = condominios.find(
+      (item) => String(item.id) === condominioId
+    );
 
-    if (!condominio || !empresaId) {
-      setMensaje("No se pudo validar el condominio seleccionado.");
+    if (!condominio || !empresaId || !userId) {
+      mostrarError("No se pudo validar el condominio seleccionado.");
       return;
     }
 
-    const permisos = await cargarPermisosUsuario(userId, empresaId);
+    setLoading(true);
+    setMensaje("");
 
-    guardarSesion({
-      uid: userId,
-      empresaActualId: empresaId,
-      empresaNombreActual: empresaNombre,
-      usuarioNombreActual: usuarioNombre,
-      rolGlobalActual: rolGlobal,
-      condominio,
-      permisos,
-    });
+    try {
+      const permisos = await cargarPermisosUsuario(userId, empresaId);
 
-    router.push("/dashboard");
+      guardarSesion({
+        uid: userId,
+        empresaActualId: empresaId,
+        empresaNombreActual: empresaNombre,
+        usuarioNombreActual: usuarioNombre,
+        rolGlobalActual: rolGlobal,
+        condominio,
+        permisos,
+      });
+
+      router.replace("/dashboard");
+      router.refresh();
+    } catch (error) {
+      console.error("Error entrando al condominio:", error);
+      mostrarError("No fue posible entrar al condominio seleccionado.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function volverAlLogin() {
+    setLoading(true);
+
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      limpiarSesionLocal();
+      setCondominios([]);
+      setCondominioId("");
+      setUserId("");
+      setEmpresaId(null);
+      setEmpresaNombre("");
+      setEmpresaLogoUrl("");
+      setUsuarioNombre("");
+      setRolGlobal("");
+      setClave("");
+      setMensaje("");
+      setLoading(false);
+    }
   }
 
   const condominioSeleccionado = condominios.find(
-    (c) => String(c.id) === condominioId
+    (item) => String(item.id) === condominioId
   );
 
+  const logoActual =
+    condominioSeleccionado?.logo_url || empresaLogoUrl || "/logo.jpg";
+
   return (
-    <main className="min-h-screen bg-slate-950">
-      <div className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
-        <section className="relative hidden overflow-hidden bg-slate-950 lg:flex">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(14,165,233,0.45),transparent_35%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(3,32,68,0.92))]" />
-          <div className="absolute inset-0 opacity-30 bg-[linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[size:48px_48px]" />
+    <main className="h-[100dvh] overflow-hidden bg-[#e7eef7] p-2 sm:p-3 lg:p-4">
+      <section className="mx-auto grid h-full w-full max-w-[1380px] overflow-hidden rounded-[26px] border border-white/70 bg-white shadow-[0_28px_80px_rgba(7,42,76,0.25)] lg:grid-cols-[1.08fr_0.92fr]">
+        <aside className="relative hidden overflow-hidden bg-[linear-gradient(145deg,#062f56_0%,#084c82_42%,#0b6aa7_72%,#1689bd_100%)] lg:flex lg:flex-col lg:justify-between lg:p-8 xl:p-10">
+          <div className="absolute -left-32 -top-36 h-[390px] w-[390px] rounded-full border border-white/10 bg-white/[0.06]" />
+          <div className="absolute -bottom-44 -right-32 h-[470px] w-[470px] rounded-full border border-white/10 bg-white/[0.06]" />
+          <div className="absolute left-[13%] top-[30%] h-24 w-24 rotate-12 rounded-[28px] border border-white/10 bg-white/[0.04] backdrop-blur-md" />
+          <div className="absolute bottom-[19%] right-[13%] h-16 w-16 -rotate-12 rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-md" />
 
-          <div className="relative z-10 flex w-full flex-col justify-between p-10 xl:p-14 text-white">
-            <div>
-              <div className="flex items-center gap-4">
-                <img
-                  src="/logo.jpg"
-                  alt="VAM Condominios"
-                  className="h-20 w-20 rounded-2xl bg-white object-contain p-2 shadow-2xl"
-                />
-
-                <div>
-                  <h1 className="text-4xl font-black tracking-tight">VAM</h1>
-                  <p className="text-sm font-semibold uppercase tracking-[0.35em] text-sky-200">
-                    Condominios
-                  </p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.24em] text-orange-200">
-                    Administración inteligente
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-12 max-w-xl">
-                <h2 className="text-5xl font-black leading-tight xl:text-6xl">
-                  La administración de condominios{" "}
-                  <span className="text-sky-400">más avanzada</span>
-                </h2>
-
-                <p className="mt-3 text-lg leading-4 text-slate-200">
-                  Una plataforma completa para gestionar cobros, gastos,
-                  incidencias, reservas, comunicaciones, permisos y estados
-                  financieros desde un solo lugar.
-                </p>
-              </div>
-
-              <div className="mt-6 grid max-w-xl gap-3">
-                {[
-                  ["📊", "Gestión financiera", "Cobros, pagos, gastos, reportes y morosidad automática."],
-                  ["📣", "Comunicaciones", "Avisos, anuncios y notificaciones para residentes."],
-                  ["🛠️", "Solicitudes y permisos", "Trabajos, mudanzas, servicios, incidencias y seguimiento."],
-                  ["🛡️", "Seguridad y control", "Accesos, visitantes, evidencias y trazabilidad."],
-                ].map(([icono, titulo, texto]) => (
-                  <div
-                    key={titulo}
-                    className="flex items-start gap-4 rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur"
-                  >
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-500/25 text-2xl">
-                      {icono}
-                    </div>
-                    <div>
-                      <p className="font-bold">{titulo}</p>
-                      <p className="text-sm text-slate-200">{texto}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+          <div className="relative z-10 inline-flex w-fit items-center gap-3 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 backdrop-blur-md">
+            <div className="grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-white shadow-lg">
+              <img
+                src="/logo.jpg"
+                alt="VAM Condominios"
+                className="h-full w-full object-contain p-1"
+              />
             </div>
 
-            <div className="mt-10 grid grid-cols-4 gap-3 rounded-3xl border border-white/10 bg-white/10 p-5 backdrop-blur">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-white/60">
+                Administración inteligente
+              </p>
+              <p className="text-base font-extrabold text-white">
+                VAM Condominios
+              </p>
+            </div>
+          </div>
+
+          <div className="relative z-10 max-w-[590px]">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[11px] font-bold text-white/90 backdrop-blur-md">
+              <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_0_5px_rgba(110,231,183,0.13)]" />
+              Plataforma multicondominio
+            </div>
+
+            <h1 className="text-[38px] font-black leading-[1.04] tracking-[-0.045em] text-white xl:text-[50px]">
+              Toda la administración en una sola plataforma.
+            </h1>
+
+            <p className="mt-4 max-w-[555px] text-sm leading-6 text-white/72 xl:text-base xl:leading-7">
+              Finanzas, propietarios, operaciones, seguridad y recursos
+              humanos conectados para ofrecer una gestión más clara,
+              eficiente y segura.
+            </p>
+
+            <div className="mt-6 grid grid-cols-3 gap-3">
               {[
-                ["🏢", "Multi-condominio"],
-                ["🔐", "Seguro"],
-                ["☁️", "Acceso 24/7"],
-                ["🎧", "Soporte"],
-              ].map(([icono, texto]) => (
-                <div key={texto} className="text-center">
-                  <div className="text-3xl">{icono}</div>
-                  <p className="mt-2 text-sm font-semibold text-slate-100">
+                ["01", "Control financiero"],
+                ["02", "Acceso por roles"],
+                ["03", "Datos por condominio"],
+              ].map(([numero, texto]) => (
+                <div
+                  key={numero}
+                  className="rounded-2xl border border-white/12 bg-white/[0.08] px-4 py-3.5 backdrop-blur-md"
+                >
+                  <p className="text-[10px] font-black text-white/38">
+                    {numero}
+                  </p>
+                  <p className="mt-1.5 text-xs font-bold leading-5 text-white xl:text-sm">
                     {texto}
                   </p>
                 </div>
               ))}
             </div>
           </div>
-        </section>
 
-        <section className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
-          <div className="w-full max-w-xl">
-            <div className="mb-8 text-center">
-              <div className="mb-5 flex justify-center">
-                <img
-                  src={condominioSeleccionado?.logo_url || "/logo.jpg"}
-                  alt="Logo"
-                  className="h-28 w-28 rounded-3xl border bg-white object-contain p-3 shadow-xl"
-                />
+          <div className="relative z-10 flex items-center justify-between text-[10px] font-semibold text-white/42">
+            <span>VAM Administración de Condominios</span>
+            <span>Seguro · Ágil · Multicondominio</span>
+          </div>
+        </aside>
+
+        <div className="relative flex min-h-0 items-center justify-center overflow-hidden px-4 py-4 sm:px-7 sm:py-5 lg:px-10 xl:px-14">
+          <div className="absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_top_right,rgba(8,76,130,0.15),transparent_62%)] lg:hidden" />
+
+          <div className="relative w-full max-w-[430px]">
+            <div className="mb-4 flex items-center justify-between lg:hidden">
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl bg-white shadow-md ring-1 ring-slate-200">
+                  <img
+                    src="/logo.jpg"
+                    alt="VAM Condominios"
+                    className="h-full w-full object-contain p-1"
+                  />
+                </div>
+
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                    Administración inteligente
+                  </p>
+                  <p className="text-sm font-extrabold text-slate-800">
+                    VAM Condominios
+                  </p>
+                </div>
               </div>
 
-              <h1 className="text-4xl font-black text-slate-900">
-                VAM Condominios
-              </h1>
-              <p className="mt-2 text-sm uppercase tracking-[0.28em] text-slate-500">
-                Administración inteligente
-              </p>
+              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[9px] font-bold text-emerald-700">
+                Sistema activo
+              </span>
             </div>
 
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-7 shadow-2xl md:p-9">
-              <div className="mb-7 text-center">
-                <h2 className="text-3xl font-black text-slate-900">
-                  Iniciar sesión
-                </h2>
-                <p className="mt-2 text-slate-500">
-                  Accede a tu cuenta para continuar
-                </p>
-              </div>
+            <div className="mb-4 flex items-center gap-2">
+              <div
+                className={`h-1.5 flex-1 rounded-full ${
+                  seleccionandoCondominio ? "bg-[#9db9d1]" : "bg-[#084c82]"
+                }`}
+              />
+              <div
+                className={`h-1.5 flex-1 rounded-full ${
+                  seleccionandoCondominio ? "bg-[#084c82]" : "bg-slate-200"
+                }`}
+              />
+            </div>
 
-              {condominios.length === 0 ? (
-                <form onSubmit={iniciarSesion} className="space-y-5">
+            {!seleccionandoCondominio ? (
+              <>
+                <div className="mb-5">
+                  <p className="mb-1.5 text-[10px] font-black uppercase tracking-[0.28em] text-[#084c82]">
+                    Paso 1 de 2 · Acceso seguro
+                  </p>
+                  <h2 className="text-[30px] font-black tracking-[-0.04em] text-slate-900 sm:text-[34px]">
+                    Bienvenido de nuevo
+                  </h2>
+                  <p className="mt-1.5 text-sm leading-6 text-slate-500">
+                    Ingresa tus credenciales para validar tu empresa y los
+                    condominios asignados.
+                  </p>
+                </div>
+
+                <form onSubmit={iniciarSesion} className="space-y-3.5">
                   <div>
-                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    <label
+                      htmlFor="usuario"
+                      className="mb-1.5 block text-[12px] font-bold text-slate-700"
+                    >
                       Correo electrónico
                     </label>
-                    <input
-                      type="email"
-                      value={usuario}
-                      onChange={(e) => {
-                        setUsuario(e.target.value);
-                        setMensaje("");
-                      }}
-                      placeholder="usuario@correo.com"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                    />
+
+                    <div className="flex h-12 items-center rounded-2xl border border-slate-200 bg-slate-50/80 px-3.5 transition focus-within:border-[#0b6aa7] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#dceaf4]">
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-[18px] w-[18px] flex-none text-slate-400"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                      >
+                        <path d="M4 6.5h16v11H4z" />
+                        <path d="m4.5 7 7.5 6 7.5-6" />
+                      </svg>
+
+                      <input
+                        id="usuario"
+                        type="email"
+                        autoComplete="email"
+                        value={usuario}
+                        onChange={(e) => {
+                          setUsuario(e.target.value);
+                          setMensaje("");
+                        }}
+                        placeholder="usuario@correo.com"
+                        className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm font-medium text-slate-800 outline-none placeholder:text-slate-400"
+                      />
+                    </div>
                   </div>
 
                   <div>
-                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    <label
+                      htmlFor="clave"
+                      className="mb-1.5 block text-[12px] font-bold text-slate-700"
+                    >
                       Contraseña
                     </label>
-                    <div className="relative">
+
+                    <div className="flex h-12 items-center rounded-2xl border border-slate-200 bg-slate-50/80 px-3.5 transition focus-within:border-[#0b6aa7] focus-within:bg-white focus-within:ring-4 focus-within:ring-[#dceaf4]">
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-[18px] w-[18px] flex-none text-slate-400"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                      >
+                        <rect x="5" y="10" width="14" height="10" rx="2" />
+                        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                      </svg>
+
                       <input
-                        type={verClave ? "text" : "password"}
+                        id="clave"
+                        type={mostrarClave ? "text" : "password"}
+                        autoComplete="current-password"
                         value={clave}
                         onChange={(e) => {
                           setClave(e.target.value);
                           setMensaje("");
                         }}
                         placeholder="Digite su clave"
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 pr-14 text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                        className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm font-medium text-slate-800 outline-none placeholder:text-slate-400"
                       />
+
                       <button
                         type="button"
-                        onClick={() => setVerClave(!verClave)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-900"
+                        onClick={() => setMostrarClave((valor) => !valor)}
+                        className="grid h-8 w-8 flex-none place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                        aria-label={
+                          mostrarClave
+                            ? "Ocultar contraseña"
+                            : "Mostrar contraseña"
+                        }
                       >
-                        {verClave ? "🙈" : "👁️"}
+                        {mostrarClave ? (
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="h-[18px] w-[18px]"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                          >
+                            <path d="M3 3l18 18" />
+                            <path d="M10.7 10.8a2 2 0 0 0 2.5 2.5" />
+                            <path d="M9.9 4.2A11 11 0 0 1 21 12a14 14 0 0 1-2.1 3.4" />
+                            <path d="M6.2 6.2A13 13 0 0 0 3 12s3.2 6 9 6a9 9 0 0 0 3.2-.6" />
+                          </svg>
+                        ) : (
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="h-[18px] w-[18px]"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                          >
+                            <path d="M3 12s3.2-6 9-6 9 6 9 6-3.2 6-9 6-9-6-9-6Z" />
+                            <circle cx="12" cy="12" r="2.5" />
+                          </svg>
+                        )}
                       </button>
                     </div>
                   </div>
 
                   {mensaje && (
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700">
+                    <div
+                      className={`rounded-2xl border px-3.5 py-2.5 text-xs font-semibold leading-5 ${
+                        tipoMensaje === "error"
+                          ? "border-rose-200 bg-rose-50 text-rose-700"
+                          : "border-[#bfd6e7] bg-[#edf5fa] text-[#084c82]"
+                      }`}
+                    >
                       {mensaje}
                     </div>
                   )}
@@ -431,100 +622,188 @@ export default function LoginPage() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full rounded-2xl bg-blue-900 px-5 py-4 font-bold text-white shadow-lg shadow-blue-900/25 transition hover:bg-blue-800 disabled:opacity-60"
+                    className="group relative flex h-12 w-full items-center justify-center overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#062f56_0%,#084c82_52%,#0b6aa7_100%)] px-4 text-sm font-extrabold text-white shadow-[0_12px_28px_rgba(8,76,130,0.32)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_34px_rgba(8,76,130,0.38)] disabled:cursor-not-allowed disabled:opacity-65 disabled:hover:translate-y-0"
                   >
-                    {loading ? "Validando..." : "Iniciar sesión"}
+                    {loading ? (
+                      <span className="flex items-center gap-2">
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white" />
+                        Validando...
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        Entrar al sistema
+                        <svg
+                          viewBox="0 0 24 24"
+                          className="h-4 w-4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M5 12h14" />
+                          <path d="m13 6 6 6-6 6" />
+                        </svg>
+                      </span>
+                    )}
                   </button>
                 </form>
-              ) : (
-                <div className="space-y-5">
-                  <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
-                    Empresa: <b>{empresaNombre}</b>
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-semibold text-slate-700">
-                      Condominio asignado
-                    </label>
-                    <select
-                      value={condominioId}
-                      onChange={(e) => {
-                        setCondominioId(e.target.value);
-                        setMensaje("");
-                      }}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                    >
-                      <option value="">Seleccione condominio</option>
-                      {condominios.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {mensaje && (
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700">
-                      {mensaje}
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={entrarConCondominio}
-                    className="w-full rounded-2xl bg-blue-900 px-5 py-4 font-bold text-white shadow-lg shadow-blue-900/25 transition hover:bg-blue-800"
-                  >
-                    Entrar al condominio
-                  </button>
+              </>
+            ) : (
+              <>
+                <div className="mb-5">
+                  <p className="mb-1.5 text-[10px] font-black uppercase tracking-[0.28em] text-[#084c82]">
+                    Paso 2 de 2 · Condominio
+                  </p>
+                  <h2 className="text-[28px] font-black tracking-[-0.04em] text-slate-900 sm:text-[32px]">
+                    Selecciona dónde trabajar
+                  </h2>
+                  <p className="mt-1.5 text-sm leading-6 text-slate-500">
+                    Hola, {usuarioNombre || "usuario"}. Elige uno de tus
+                    condominios asignados.
+                  </p>
                 </div>
-              )}
 
-              <div className="my-7 flex items-center gap-4 text-sm text-slate-400">
-                <div className="h-px flex-1 bg-slate-200" />
-                <span>o</span>
-                <div className="h-px flex-1 bg-slate-200" />
-              </div>
+                <div className="mb-4 flex items-center gap-3 rounded-2xl border border-[#c5d9e8] bg-[#f1f6fa] p-3">
+                  <div className="grid h-12 w-12 flex-none place-items-center overflow-hidden rounded-xl border border-white bg-white shadow-sm">
+                    <img
+                      src={logoActual}
+                      alt={empresaNombre || "Empresa"}
+                      className="h-full w-full object-contain p-1.5"
+                    />
+                  </div>
 
-              <Link
-                href="/portal-propietario"
-                className="block w-full rounded-2xl border border-blue-900 px-5 py-4 text-center font-bold text-blue-900 transition hover:bg-blue-50"
-              >
-                Acceso para residentes
-              </Link>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#0b6aa7]">
+                      Empresa activa
+                    </p>
+                    <p className="truncate text-sm font-extrabold text-slate-800">
+                      {empresaNombre || "VAM Enterprise"}
+                    </p>
+                    <p className="truncate text-[11px] font-medium text-slate-500">
+                      {rolGlobal || "Usuario autorizado"}
+                    </p>
+                  </div>
+                </div>
 
-              <div className="mt-5 text-center">
+                <div>
+                  <label
+                    htmlFor="condominio"
+                    className="mb-1.5 block text-[12px] font-bold text-slate-700"
+                  >
+                    Condominio asignado
+                  </label>
+
+                  <select
+                    id="condominio"
+                    value={condominioId}
+                    onChange={(e) => {
+                      setCondominioId(e.target.value);
+                      setMensaje("");
+                    }}
+                    className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50/80 px-4 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#0b6aa7] focus:bg-white focus:ring-4 focus:ring-[#dceaf4]"
+                  >
+                    <option value="">Seleccione un condominio</option>
+
+                    {condominios.map((condominio) => (
+                      <option key={condominio.id} value={condominio.id}>
+                        {condominio.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {condominioSeleccionado && (
+                  <div className="mt-3 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <div className="grid h-11 w-11 flex-none place-items-center overflow-hidden rounded-xl border border-slate-200 bg-white">
+                      <img
+                        src={condominioSeleccionado.logo_url || "/logo.jpg"}
+                        alt={condominioSeleccionado.nombre}
+                        className="h-full w-full object-contain p-1.5"
+                      />
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                        Condominio seleccionado
+                      </p>
+                      <p className="truncate text-sm font-extrabold text-slate-800">
+                        {condominioSeleccionado.nombre}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {mensaje && (
+                  <div
+                    className={`mt-3 rounded-2xl border px-3.5 py-2.5 text-xs font-semibold leading-5 ${
+                      tipoMensaje === "error"
+                        ? "border-rose-200 bg-rose-50 text-rose-700"
+                        : "border-[#bfd6e7] bg-[#edf5fa] text-[#084c82]"
+                    }`}
+                  >
+                    {mensaje}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={entrarConCondominio}
+                  disabled={loading}
+                  className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#062f56_0%,#084c82_52%,#0b6aa7_100%)] px-4 text-sm font-extrabold text-white shadow-[0_12px_28px_rgba(8,76,130,0.32)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_34px_rgba(8,76,130,0.38)] disabled:cursor-not-allowed disabled:opacity-65 disabled:hover:translate-y-0"
+                >
+                  {loading ? (
+                    <>
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white" />
+                      Entrando...
+                    </>
+                  ) : (
+                    <>
+                      Entrar al condominio
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M5 12h14" />
+                        <path d="m13 6 6 6-6 6" />
+                      </svg>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={volverAlLogin}
+                  disabled={loading}
+                  className="mt-2 h-10 w-full rounded-xl text-xs font-bold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50"
+                >
+                  Volver y usar otra cuenta
+                </button>
+              </>
+            )}
+
+            {!seleccionandoCondominio && (
+              <div className="mt-4 border-t border-slate-100 pt-4 text-center">
+                <p className="mb-2 text-[10px] font-semibold text-slate-400">
+                  Acceso exclusivo del dueño del sistema
+                </p>
+
                 <Link
                   href="/super-login"
-                  className="text-sm font-semibold text-slate-600 hover:text-blue-900"
+                  className="inline-flex h-9 items-center justify-center rounded-xl border border-[#bfd6e7] bg-[#edf5fa] px-4 text-[11px] font-extrabold text-[#084c82] transition hover:border-[#0b6aa7] hover:bg-[#e2eef6]"
                 >
-                  Acceso exclusivo Full Administrador
+                  Entrar como Full Administrador
                 </Link>
               </div>
-            </div>
+            )}
 
-            <div className="mt-7 rounded-3xl bg-blue-900 p-4 text-white shadow-xl">
-              <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
-                <div>
-                  <p className="font-bold">Contáctanos</p>
-                  <p>829-792-9292</p>
-                </div>
-                <div>
-                  <p className="font-bold">WhatsApp</p>
-                  <p>829-792-9292</p>
-                </div>
-                <div>
-                  <p className="font-bold">Email</p>
-                  <p className="break-all">vamcondominiosrd@gmail.com</p>
-                </div>
-              </div>
-            </div>
-
-            <p className="mt-6 text-center text-sm italic text-blue-900">
-              Tu condominio en buenas manos
+            <p className="mt-3 text-center text-[9px] font-semibold text-slate-400">
+              VAM Condominios · Acceso seguro y multicondominio
             </p>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
     </main>
   );
 }
