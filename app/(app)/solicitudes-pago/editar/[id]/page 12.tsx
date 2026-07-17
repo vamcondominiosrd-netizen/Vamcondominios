@@ -315,18 +315,19 @@ export default function EditarSolicitudPagoPage() {
 
     setSoporteUrl(publicUrl);
 
-    const { data: resultadoActualizacion, error: updateError } =
-      await supabase.rpc("actualizar_soporte_solicitud_pago", {
-        p_solicitud_id: solicitud.id,
-        p_condominio_id: Number(condominioId),
-        p_soporte_url: publicUrl,
-      });
+    const { error: updateError } = await supabase
+      .from("solicitudes_pago")
+      .update({
+        soporte_url: publicUrl,
+      })
+      .eq("id", solicitud.id)
+      .eq("condominio_id", Number(condominioId));
 
     setSubiendoSoporte(false);
 
     if (updateError) {
       alert(
-        "El archivo fue subido, pero no se pudo sincronizar la solicitud y el gasto: " +
+        "El archivo fue subido, pero no se pudo actualizar la solicitud: " +
           updateError.message
       );
       return;
@@ -337,13 +338,7 @@ export default function EditarSolicitudPagoPage() {
       soporte_url: publicUrl,
     });
 
-    const resultado = resultadoActualizacion as any;
-
-    alert(
-      resultado?.gasto_actualizado
-        ? "Documento reemplazado correctamente en la solicitud y en el gasto relacionado."
-        : "Documento reemplazado correctamente en la solicitud."
-    );
+    alert("Soporte subido correctamente.");
   }
 
   async function guardarCambios() {

@@ -22,25 +22,7 @@ type FacturaDetalle = {
   monto: string;
 };
 
-type SoporteSubido = {
-  ruta: string;
-  url: string;
-};
-
-const BUCKET_SOPORTES = "solicitudes-pago-agrupadas";
-const ESTADO_INICIAL = "Pendiente aprobación tesorero";
-const MAX_ARCHIVO_BYTES = 10 * 1024 * 1024;
-const EXTENSIONES_PERMITIDAS = ["pdf", "jpg", "jpeg", "png", "webp"];
-
-function hoyLocal() {
-  const ahora = new Date();
-  const year = ahora.getFullYear();
-  const month = String(ahora.getMonth() + 1).padStart(2, "0");
-  const day = String(ahora.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-export default function SolicitudPagoAgrupadaPage() {
+export default function SolicitudPagoAgrupadaPruebaPage() {
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
@@ -49,14 +31,16 @@ export default function SolicitudPagoAgrupadaPage() {
 
   const [proveedorId, setProveedorId] = useState("");
   const [categoriaId, setCategoriaId] = useState("");
-  const [fechaSolicitud, setFechaSolicitud] = useState(hoyLocal());
+  const [fechaSolicitud, setFechaSolicitud] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
   const [concepto, setConcepto] = useState("");
   const [soporte, setSoporte] = useState<File | null>(null);
 
   const [facturas, setFacturas] = useState<FacturaDetalle[]>([
     {
       no_factura: "",
-      fecha_factura: hoyLocal(),
+      fecha_factura: new Date().toISOString().slice(0, 10),
       ncf: "",
       monto: "",
     },
@@ -65,63 +49,28 @@ export default function SolicitudPagoAgrupadaPage() {
   const [mostrarVistaPrevia, setMostrarVistaPrevia] = useState(false);
 
   useEffect(() => {
-    const id = localStorage.getItem("condominio_id") || "";
-    const nombre = localStorage.getItem("condominio_nombre") || "";
-
-    setCondominioId(id);
-    setCondominioNombre(nombre);
-
-    if (!id) {
-      alert("No se encontró el condominio activo. Debe iniciar sesión nuevamente.");
-      return;
-    }
-
-    cargarCatalogos(id);
+    setCondominioId(localStorage.getItem("condominio_id") || "");
+    setCondominioNombre(localStorage.getItem("condominio_nombre") || "");
+    cargarCatalogos();
   }, []);
 
-  async function cargarCatalogos(idCondominio: string) {
-    const [proveedoresResultado, categoriasResultado] = await Promise.all([
-      supabase
-        .from("catalogo_proveedores")
-        .select("id, nombre_proveedor")
-        .eq("condominio_id", Number(idCondominio))
-        .order("nombre_proveedor", { ascending: true }),
-      supabase
-        .from("catalogo_categoria_gastos")
-        .select("id, nombre_categoria")
-        .eq("condominio_id", Number(idCondominio))
-        .order("nombre_categoria", { ascending: true }),
-    ]);
+  async function cargarCatalogos() {
+    const { data: proveedoresData } = await supabase
+      .from("catalogo_proveedores")
+      .select("id, nombre_proveedor")
+      .order("nombre_proveedor", { ascending: true });
 
-    if (proveedoresResultado.error) {
-      console.error(proveedoresResultado.error);
-      alert(
-        "Error cargando proveedores del condominio: " +
-          proveedoresResultado.error.message
-      );
-      setProveedores([]);
-    } else {
-      setProveedores(
-        (proveedoresResultado.data as Proveedor[] | null) || []
-      );
-    }
+    const { data: categoriasData } = await supabase
+      .from("catalogo_categoria_gastos")
+      .select("id, nombre_categoria")
+      .order("nombre_categoria", { ascending: true });
 
-    if (categoriasResultado.error) {
-      console.error(categoriasResultado.error);
-      alert(
-        "Error cargando categorías del condominio: " +
-          categoriasResultado.error.message
-      );
-      setCategorias([]);
-    } else {
-      setCategorias(
-        (categoriasResultado.data as Categoria[] | null) || []
-      );
-    }
+    setProveedores((proveedoresData as Proveedor[]) || []);
+    setCategorias((categoriasData as Categoria[]) || []);
   }
 
   function dinero(valor: number) {
-    return Number(valor || 0).toLocaleString("es-DO", {
+    return valor.toLocaleString("es-DO", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
@@ -132,7 +81,7 @@ export default function SolicitudPagoAgrupadaPage() {
       ...prev,
       {
         no_factura: "",
-        fecha_factura: hoyLocal(),
+        fecha_factura: new Date().toISOString().slice(0, 10),
         ncf: "",
         monto: "",
       },
@@ -145,40 +94,12 @@ export default function SolicitudPagoAgrupadaPage() {
     valor: string
   ) {
     setFacturas((prev) =>
-      prev.map((factura, i) =>
-        i === index ? { ...factura, [campo]: valor } : factura
-      )
+      prev.map((f, i) => (i === index ? { ...f, [campo]: valor } : f))
     );
   }
 
   function eliminarFactura(index: number) {
-    setFacturas((prev) => {
-      if (prev.length === 1) return prev;
-      return prev.filter((_, i) => i !== index);
-    });
-  }
-
-  function seleccionarSoporte(archivo: File | null) {
-    if (!archivo) {
-      setSoporte(null);
-      return;
-    }
-
-    const extension = archivo.name.split(".").pop()?.toLowerCase() || "";
-
-    if (!EXTENSIONES_PERMITIDAS.includes(extension)) {
-      alert("Formato no permitido. Use PDF, JPG, JPEG, PNG o WEBP.");
-      setSoporte(null);
-      return;
-    }
-
-    if (archivo.size > MAX_ARCHIVO_BYTES) {
-      alert("El archivo no puede superar los 10 MB.");
-      setSoporte(null);
-      return;
-    }
-
-    setSoporte(archivo);
+    setFacturas((prev) => prev.filter((_, i) => i !== index));
   }
 
   const proveedorNombre =
@@ -190,21 +111,11 @@ export default function SolicitudPagoAgrupadaPage() {
     "-";
 
   const totalGeneral = useMemo(() => {
-    return facturas.reduce(
-      (sum, factura) => sum + Number(factura.monto || 0),
-      0
-    );
+    return facturas.reduce((sum, f) => sum + Number(f.monto || 0), 0);
   }, [facturas]);
 
-  const facturasValidas = useMemo(
-    () =>
-      facturas.filter(
-        (factura) =>
-          factura.no_factura.trim() &&
-          factura.fecha_factura &&
-          Number(factura.monto || 0) > 0
-      ),
-    [facturas]
+  const facturasValidas = facturas.filter(
+    (f) => f.no_factura.trim() && Number(f.monto || 0) > 0
   );
 
   function validarFormulario() {
@@ -223,58 +134,13 @@ export default function SolicitudPagoAgrupadaPage() {
       return false;
     }
 
-    if (!fechaSolicitud) {
-      alert("Debe indicar la fecha de solicitud.");
-      return false;
-    }
-
     if (!concepto.trim()) {
       alert("Debe indicar el concepto general.");
       return false;
     }
 
-    if (!soporte) {
-      alert(
-        "Debe adjuntar el soporte general con las facturas antes de enviar la solicitud."
-      );
-      return false;
-    }
-
-    if (facturas.length === 0) {
-      alert("Debe registrar al menos una factura.");
-      return false;
-    }
-
-    for (let index = 0; index < facturas.length; index += 1) {
-      const factura = facturas[index];
-
-      if (!factura.no_factura.trim()) {
-        alert(`Debe indicar el número de la factura ${index + 1}.`);
-        return false;
-      }
-
-      if (!factura.fecha_factura) {
-        alert(`Debe indicar la fecha de la factura ${index + 1}.`);
-        return false;
-      }
-
-      if (Number(factura.monto || 0) <= 0) {
-        alert(`El monto de la factura ${index + 1} debe ser mayor que cero.`);
-        return false;
-      }
-    }
-
-    const numerosFactura = facturas.map((factura) =>
-      factura.no_factura.trim().toLowerCase()
-    );
-
-    if (new Set(numerosFactura).size !== numerosFactura.length) {
-      alert("Hay números de factura duplicados dentro de la solicitud.");
-      return false;
-    }
-
-    if (totalGeneral <= 0) {
-      alert("El total general debe ser mayor que cero.");
+    if (facturasValidas.length === 0) {
+      alert("Debe registrar al menos una factura con monto.");
       return false;
     }
 
@@ -288,173 +154,99 @@ export default function SolicitudPagoAgrupadaPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function obtenerProximoNumeroSolicitud() {
-    const { data, error } = await supabase.rpc(
-      "obtener_proximo_numero_solicitud",
-      {
-        p_condominio_id: Number(condominioId),
-      }
-    );
+  async function subirSoporteGeneral() {
+    if (!soporte) return null;
 
-    if (error) {
-      throw new Error(
-        "No se pudo obtener el próximo número de solicitud: " + error.message
-      );
-    }
-
-    return Number(data || 1);
-  }
-
-  async function subirSoporteGeneral(): Promise<SoporteSubido> {
-    if (!soporte) {
-      throw new Error("Debe seleccionar el soporte general.");
-    }
-
-    const extension = soporte.name.split(".").pop()?.toLowerCase() || "pdf";
-    const nombreBase = soporte.name
-      .replace(/\.[^/.]+$/, "")
-      .replace(/[^a-zA-Z0-9-_]/g, "_")
-      .slice(0, 60);
-
-    const ruta = `${condominioId}/agrupadas/${Date.now()}-${Math.random()
+    const extension = soporte.name.split(".").pop();
+    const nombreArchivo = `${condominioId}/agrupadas/${Date.now()}-${Math.random()
       .toString(36)
-      .slice(2)}-${nombreBase}.${extension}`;
+      .slice(2)}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
-      .from(BUCKET_SOPORTES)
-      .upload(ruta, soporte, {
-        cacheControl: "3600",
-        upsert: false,
-      });
+      .from("solicitudes-pago-agrupadas")
+      .upload(nombreArchivo, soporte);
 
     if (uploadError) {
-      throw new Error("Error subiendo el soporte: " + uploadError.message);
+      throw new Error(uploadError.message);
     }
 
     const { data } = supabase.storage
-      .from(BUCKET_SOPORTES)
-      .getPublicUrl(ruta);
+      .from("solicitudes-pago-agrupadas")
+      .getPublicUrl(nombreArchivo);
 
-    return {
-      ruta,
-      url: data.publicUrl,
-    };
-  }
-
-  async function eliminarSoporteSubido(ruta: string) {
-    const { error } = await supabase.storage
-      .from(BUCKET_SOPORTES)
-      .remove([ruta]);
-
-    if (error) {
-      console.error("No se pudo eliminar el soporte huérfano:", error.message);
-    }
+    return data.publicUrl;
   }
 
   async function guardarSolicitud() {
-    if (loading || !validarFormulario()) return;
+    if (!validarFormulario()) return;
 
     const confirmar = confirm(
-      `¿Desea crear esta solicitud agrupada por RD$ ${dinero(
-        totalGeneral
-      )} y enviarla al tesorero para aprobación?`
+      `¿Desea crear esta solicitud agrupada por RD$ ${dinero(totalGeneral)}?`
     );
 
     if (!confirmar) return;
 
     setLoading(true);
 
-    let soporteSubido: SoporteSubido | null = null;
-    let solicitudCreadaId: number | null = null;
-    let numeroSolicitudCreada: number | null = null;
-
     try {
-      soporteSubido = await subirSoporteGeneral();
+      const soporteUrl = await subirSoporteGeneral();
 
       const usuario =
         localStorage.getItem("usuario_nombre") ||
         localStorage.getItem("user_name") ||
         "Sistema";
 
-      const detalleTexto = facturas.map(
-        (factura) =>
-          `Factura ${factura.no_factura.trim()} | Fecha ${
-            factura.fecha_factura
-          } | NCF ${factura.ncf.trim() || "-"} | RD$ ${dinero(
-            Number(factura.monto || 0)
-          )}`
-      ).join("\n");
+      const detalleTexto = facturasValidas
+        .map(
+          (f) =>
+            `Factura ${f.no_factura} | Fecha ${f.fecha_factura} | NCF ${
+              f.ncf || "-"
+            } | RD$ ${dinero(Number(f.monto || 0))}`
+        )
+        .join("\n");
 
-      let ultimoError = "";
+      const { data: solicitud, error } = await supabase
+        .from("solicitudes_pago")
+        .insert({
+          condominio_id: Number(condominioId),
+          condominio: condominioNombre,
+          fecha_solicitud: fechaSolicitud,
+          proveedor_id: Number(proveedorId),
+          categoria_id: Number(categoriaId),
+          concepto: concepto.trim(),
+          detalle: `Solicitud agrupada de facturas\n\n${detalleTexto}\n\nTotal facturas: ${facturasValidas.length}\nTotal general: RD$ ${dinero(
+            totalGeneral
+          )}`,
+          monto: totalGeneral,
+          itbis: 0,
+          total: totalGeneral,
+          no_factura: "VARIAS",
+          ncf: "VARIOS",
+          metodo_pago: "Cheque",
+          soporte_url: soporteUrl,
+          prioridad: "Normal",
+          estado: "Pendiente",
+          created_by: usuario,
+        })
+        .select("id")
+        .single();
 
-      for (let intento = 1; intento <= 3; intento += 1) {
-        const numeroSolicitud = await obtenerProximoNumeroSolicitud();
-
-        const { data: solicitud, error } = await supabase
-          .from("solicitudes_pago")
-          .insert({
-            condominio_id: Number(condominioId),
-            condominio: condominioNombre,
-            fecha_solicitud: fechaSolicitud,
-            proveedor_id: Number(proveedorId),
-            categoria_id: Number(categoriaId),
-            concepto: concepto.trim(),
-            detalle: `Solicitud agrupada de facturas\n\n${detalleTexto}\n\nTotal facturas: ${
-              facturas.length
-            }\nTotal general: RD$ ${dinero(totalGeneral)}`,
-            monto: totalGeneral,
-            itbis: 0,
-            total: totalGeneral,
-            no_factura: "VARIAS",
-            ncf: "VARIOS",
-            metodo_pago: "Cheque",
-            cuenta_banco: null,
-            soporte_url: soporteSubido.url,
-            prioridad: "Normal",
-            estado: ESTADO_INICIAL,
-            created_by: usuario,
-            numero_solicitud: numeroSolicitud,
-            origen_modulo: "PAGO_AGRUPADO",
-          })
-          .select("id, numero_solicitud")
-          .single();
-
-        if (!error && solicitud) {
-          solicitudCreadaId = Number(solicitud.id);
-          numeroSolicitudCreada = Number(
-            solicitud.numero_solicitud || numeroSolicitud
-          );
-          break;
-        }
-
-        ultimoError = error?.message || "Error creando la solicitud.";
-
-        const consecutivoDuplicado =
-          error?.code === "23505" &&
-          ultimoError.includes("solicitudes_pago_condominio_numero_unique");
-
-        if (!consecutivoDuplicado) {
-          throw new Error(ultimoError);
-        }
+      if (error) {
+        alert("Error creando solicitud: " + error.message);
+        setLoading(false);
+        return;
       }
 
-      if (!solicitudCreadaId) {
-        throw new Error(
-          ultimoError ||
-            "No fue posible generar un número único para la solicitud."
-        );
-      }
-
-      const detalleInsert = facturas.map((factura) => ({
-        solicitud_pago_id: solicitudCreadaId,
+      const detalleInsert = facturasValidas.map((f) => ({
+        solicitud_pago_id: solicitud.id,
         condominio_id: Number(condominioId),
         proveedor_id: Number(proveedorId),
-        no_factura: factura.no_factura.trim(),
-        fecha_factura: factura.fecha_factura,
-        ncf: factura.ncf.trim() || null,
+        no_factura: f.no_factura.trim(),
+        fecha_factura: f.fecha_factura || null,
+        ncf: f.ncf.trim() || null,
         concepto: concepto.trim(),
-        monto: Number(factura.monto || 0),
-        soporte_url: soporteSubido?.url || null,
+        monto: Number(f.monto || 0),
+        soporte_url: soporteUrl,
       }));
 
       const { error: detalleError } = await supabase
@@ -462,53 +254,21 @@ export default function SolicitudPagoAgrupadaPage() {
         .insert(detalleInsert);
 
       if (detalleError) {
-        const { error: rollbackError } = await supabase
-          .from("solicitudes_pago")
-          .delete()
-          .eq("id", solicitudCreadaId)
-          .eq("condominio_id", Number(condominioId));
-
-        if (!rollbackError && soporteSubido) {
-          await eliminarSoporteSubido(soporteSubido.ruta);
-          soporteSubido = null;
-          solicitudCreadaId = null;
-        }
-
-        if (rollbackError) {
-          throw new Error(
-            `Falló el detalle (${detalleError.message}) y no fue posible revertir la solicitud ${solicitudCreadaId}. Revísela antes de continuar.`
-          );
-        }
-
-        throw new Error(
-          "No se pudo guardar el detalle de las facturas. La solicitud fue revertida para evitar registros incompletos."
+        alert(
+          "La solicitud se creó, pero falló el detalle: " +
+            detalleError.message
         );
+        setLoading(false);
+        return;
       }
 
-      alert(
-        `Solicitud agrupada No. ${String(
-          numeroSolicitudCreada || solicitudCreadaId
-        ).padStart(
-          5,
-          "0"
-        )} creada correctamente y enviada al tesorero para aprobación.`
-      );
-
+      alert("Solicitud agrupada creada correctamente.");
       window.location.href = "/solicitudes-pago";
-    } catch (error: unknown) {
-      if (!solicitudCreadaId && soporteSubido) {
-        await eliminarSoporteSubido(soporteSubido.ruta);
-      }
-
-      const mensaje =
-        error instanceof Error
-          ? error.message
-          : "Ocurrió un error guardando la solicitud agrupada.";
-
-      alert("Error guardando solicitud agrupada: " + mensaje);
-    } finally {
-      setLoading(false);
+    } catch (error: any) {
+      alert("Error guardando solicitud agrupada: " + error.message);
     }
+
+    setLoading(false);
   }
 
   return (
@@ -592,10 +352,6 @@ export default function SolicitudPagoAgrupadaPage() {
                 <p>
                   <strong>Soporte general:</strong>{" "}
                   {soporte ? soporte.name : "Sin soporte seleccionado"}
-                </p>
-                <p>
-                  <strong>Estado inicial:</strong>{" "}
-                  Pendiente aprobación tesorero
                 </p>
               </div>
 
@@ -699,12 +455,9 @@ export default function SolicitudPagoAgrupadaPage() {
                 <input
                   type="file"
                   accept=".jpg,.jpeg,.png,.webp,.pdf"
-                  onChange={(e) => seleccionarSoporte(e.target.files?.[0] || null)}
+                  onChange={(e) => setSoporte(e.target.files?.[0] || null)}
                   className="border rounded-xl px-4 py-3 w-full bg-white"
                 />
-                <p className="text-xs text-slate-500 mt-1">
-                  Requerido. PDF o imagen, máximo 10 MB.
-                </p>
               </div>
 
               <div className="md:col-span-4">
@@ -857,7 +610,7 @@ export default function SolicitudPagoAgrupadaPage() {
                   disabled={loading}
                   className="bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white px-5 py-3 rounded-xl font-bold"
                 >
-                  {loading ? "Guardando..." : "Guardar y enviar al tesorero"}
+                  {loading ? "Guardando..." : "Guardar solicitud"}
                 </button>
               </div>
             </div>

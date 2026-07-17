@@ -282,8 +282,11 @@ export default function EditarSolicitudPagoPage() {
       return;
     }
 
-    // El documento soporte puede reemplazarse aunque la solicitud ya esté
-    // aprobada, procesada o pagada. Ningún otro dato financiero se modifica.
+    if (!puedeEditar(solicitud)) {
+      alert("Esta solicitud no puede editarse porque ya fue aprobada o procesada.");
+      return;
+    }
+
     const extension = archivo.name.split(".").pop();
     const nombreLimpio = archivo.name
       .replace(/\.[^/.]+$/, "")
@@ -315,18 +318,19 @@ export default function EditarSolicitudPagoPage() {
 
     setSoporteUrl(publicUrl);
 
-    const { data: resultadoActualizacion, error: updateError } =
-      await supabase.rpc("actualizar_soporte_solicitud_pago", {
-        p_solicitud_id: solicitud.id,
-        p_condominio_id: Number(condominioId),
-        p_soporte_url: publicUrl,
-      });
+    const { error: updateError } = await supabase
+      .from("solicitudes_pago")
+      .update({
+        soporte_url: publicUrl,
+      })
+      .eq("id", solicitud.id)
+      .eq("condominio_id", Number(condominioId));
 
     setSubiendoSoporte(false);
 
     if (updateError) {
       alert(
-        "El archivo fue subido, pero no se pudo sincronizar la solicitud y el gasto: " +
+        "El archivo fue subido, pero no se pudo actualizar la solicitud: " +
           updateError.message
       );
       return;
@@ -337,13 +341,7 @@ export default function EditarSolicitudPagoPage() {
       soporte_url: publicUrl,
     });
 
-    const resultado = resultadoActualizacion as any;
-
-    alert(
-      resultado?.gasto_actualizado
-        ? "Documento reemplazado correctamente en la solicitud y en el gasto relacionado."
-        : "Documento reemplazado correctamente en la solicitud."
-    );
+    alert("Soporte subido correctamente.");
   }
 
   async function guardarCambios() {
@@ -492,9 +490,8 @@ export default function EditarSolicitudPagoPage() {
 
       {!editable && (
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-2xl p-4 text-sm font-semibold">
-          Esta solicitud ya fue aprobada, procesada o convertida en gasto.
-          Los datos financieros permanecen bloqueados; solamente puede
-          reemplazarse el documento soporte.
+          Esta solicitud no puede editarse porque ya fue aprobada, procesada o
+          convertida en gasto.
         </div>
       )}
 
@@ -698,7 +695,7 @@ export default function EditarSolicitudPagoPage() {
               <input
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png,.webp"
-                disabled={subiendoSoporte}
+                disabled={!editable || subiendoSoporte}
                 onChange={(e) => {
                   const archivo = e.target.files?.[0];
                   if (archivo) subirSoporteFactura(archivo);
@@ -734,9 +731,15 @@ export default function EditarSolicitudPagoPage() {
                     Ver soporte actual
                   </a>
 
-                  <span className="text-xs font-semibold text-slate-600">
-                    Para reemplazarlo, seleccione un archivo nuevo.
-                  </span>
+                  {editable && (
+                    <button
+                      type="button"
+                      onClick={() => setSoporteUrl("")}
+                      className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded-xl font-bold"
+                    >
+                      Quitar enlace
+                    </button>
+                  )}
                 </div>
               )}
             </div>

@@ -395,8 +395,8 @@ export default function SolicitudesPagoPage() {
     }
   }
 
-  function facturaProveedorUrl(s: SolicitudPagoOperativa) {
-    return s.factura_url || s.soporte_url || "";
+    function facturaProveedorUrl(s: SolicitudPagoOperativa) {
+     return s.soporte_url || s.factura_url || "";
   }
 
   async function subirComprobantePago(archivo: File) {

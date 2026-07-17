@@ -553,9 +553,9 @@ export default function CajaChicaPage() {
         tone="green"
         items={[
           { href: "/finanzas/caja-chica", label: "Dashboard", icon: BarChart3 },
-          { href: "/finanzas/caja-chica/balance", label: "Balance", icon: BarChart3 },
-          { href: "/finanzas/caja-chica/reporte", label: "Reportes", icon: FileSpreadsheet },
-          { href: "/finanzas/caja-chica/reporte1", label: "Reportes Mensual", icon: FileSpreadsheet },
+          { href: "/caja-chica", label: "Movimientos", icon: Coins },
+          { href: "/caja-chica/balance", label: "Balance", icon: BarChart3 },
+          { href: "/caja-chica/reporte", label: "Reportes", icon: FileSpreadsheet },
         ]}
       />
 
@@ -570,7 +570,7 @@ export default function CajaChicaPage() {
             onRefresh={refrescar}
             extra={
               <Link
-                href="/finanzas/caja-chica/reporte1"
+                href="/caja-chica/reporte"
                 className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
               >
                 <FileSpreadsheet className="h-4 w-4" />
@@ -944,7 +944,7 @@ export default function CajaChicaPage() {
         subtitle="Vista rápida. La consulta completa está en reportes."
         action={
           <Link
-            href="/finanzas/caja-chica/reporte"
+            href="/caja-chica/reporte"
             className="text-sm font-bold text-emerald-700 hover:underline"
           >
             Ver reporte
@@ -1003,7 +1003,7 @@ export default function CajaChicaPage() {
                   </td>
                   <td className="px-4 py-3 text-center">
                     <Link
-                      href={`/finanzas/caja-chica/gastos/reporte/${g.id}`}
+                      href={`/caja-chica/gastos/reporte/${g.id}`}
                       className="inline-block rounded-lg bg-purple-700 px-3 py-1 text-xs font-bold text-white hover:bg-purple-800"
                     >
                       Reporte
