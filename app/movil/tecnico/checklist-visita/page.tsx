@@ -88,7 +88,7 @@ export default function MobileTecnicoChecklistVisitaPage() {
     const usuarioId = localStorage.getItem("usuario_admin_id") || "";
 
     if (!id || rol !== "tecnico") {
-      router.push("/mobile/tecnico/login");
+      router.push("/movil/login");
       return;
     }
 
@@ -327,7 +327,7 @@ export default function MobileTecnicoChecklistVisitaPage() {
 
     await supabase.auth.signOut();
 
-    router.push("/mobile/tecnico/login");
+    router.push("/movil/login");
   }
 
   const resumenActual = useMemo(() => {
@@ -340,7 +340,7 @@ export default function MobileTecnicoChecklistVisitaPage() {
   }, [puntos]);
 
   return (
-    <RequireAuth allowedRoles={["tecnico"]} redirectTo="/mobile/tecnico/login">
+    <RequireAuth allowedRoles={["tecnico"]} redirectTo="/movil/login">
     <main className="min-h-screen bg-slate-100 p-4">
       <div className="mx-auto max-w-md space-y-4">
         <section className="rounded-3xl bg-white border shadow-sm p-5">
@@ -380,7 +380,7 @@ export default function MobileTecnicoChecklistVisitaPage() {
 
           <div className="mt-4 flex gap-2">
             <Link
-              href="/mobile/tecnico"
+              href="/movil/tecnico"
               className="flex-1 rounded-xl bg-slate-800 px-4 py-3 text-center text-sm font-bold text-white"
             >
               Menú

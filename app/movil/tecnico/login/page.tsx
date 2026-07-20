@@ -104,7 +104,7 @@ export default function LoginTecnicoPage() {
     );
     localStorage.setItem("condominio_logo_url", condominio?.logo_url || "");
 
-    router.push("/mobile/tecnico");
+    router.push("/movil/tecnico");
 
     setLoading(false);
   }

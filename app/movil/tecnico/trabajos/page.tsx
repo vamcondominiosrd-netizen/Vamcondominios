@@ -5,34 +5,31 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
 
-type Incidencia = {
+type TrabajoTecnico = {
   id: number;
-  propietario_id?: number | null;
-  condominio_id?: number | null;
-  condominio?: string | null;
-  unidad_id?: number | null;
-  no_apartamento?: string | null;
-  nombre_propietario?: string | null;
-  cedula?: string | null;
-  telefono?: string | null;
-  tipo_incidencia?: string | null;
-  categoria?: string | null;
-  titulo?: string | null;
-  descripcion?: string | null;
-  prioridad?: string | null;
-  evidencia_url?: string | null;
-  foto_url?: string | null;
-  estado?: string | null;
-  responsable?: string | null;
-  comentario_admin?: string | null;
-  comentario_tecnico?: string | null;
-  evidencia_cierre_url?: string | null;
-  fecha_reporte?: string | null;
-  fecha_cierre?: string | null;
-  created_at?: string | null;
+  condominio_id: number;
+  tecnico_id: number | null;
+  tecnico_nombre: string | null;
+  tipo_trabajo: string;
+  incidencia_id: number | null;
+  titulo: string;
+  descripcion: string | null;
+  ubicacion: string | null;
+  prioridad: string;
+  fecha_asignacion: string;
+  fecha_limite: string | null;
+  fecha_inicio: string | null;
+  fecha_completado: string | null;
+  fecha_revisado: string | null;
+  estado: string;
+  comentario_tecnico: string | null;
+  evidencia_url: string | null;
+  creado_por_id: number | null;
+  creado_por_nombre: string | null;
+  created_at: string | null;
 };
 
-export default function MobileTecnicoIncidenciasPage() {
+export default function MobileTecnicoTrabajosPage() {
   const router = useRouter();
 
   const [condominioId, setCondominioId] = useState("");
@@ -40,18 +37,18 @@ export default function MobileTecnicoIncidenciasPage() {
   const [usuarioNombre, setUsuarioNombre] = useState("");
   const [usuarioAdminId, setUsuarioAdminId] = useState("");
 
-  const [incidencias, setIncidencias] = useState<Incidencia[]>([]);
+  const [trabajos, setTrabajos] = useState<TrabajoTecnico[]>([]);
   const [loading, setLoading] = useState(false);
   const [mensaje, setMensaje] = useState("");
 
-  const [filtroEstado, setFiltroEstado] = useState("ABIERTAS");
+  const [filtroEstado, setFiltroEstado] = useState("ACTIVOS");
   const [buscar, setBuscar] = useState("");
 
-  const [incidenciaActiva, setIncidenciaActiva] = useState<Incidencia | null>(
+  const [trabajoActivo, setTrabajoActivo] = useState<TrabajoTecnico | null>(
     null
   );
   const [comentarioTecnico, setComentarioTecnico] = useState("");
-  const [archivoCierre, setArchivoCierre] = useState<File | null>(null);
+  const [archivoEvidencia, setArchivoEvidencia] = useState<File | null>(null);
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
@@ -61,7 +58,7 @@ export default function MobileTecnicoIncidenciasPage() {
     const usuarioId = localStorage.getItem("usuario_admin_id") || "";
 
     if (!id || rol !== "tecnico") {
-      router.push("/mobile/tecnico/login");
+      router.push("/movil/login");
       return;
     }
 
@@ -70,27 +67,35 @@ export default function MobileTecnicoIncidenciasPage() {
     setUsuarioNombre(usuario);
     setUsuarioAdminId(usuarioId);
 
-    cargarIncidencias(id);
+    cargarTrabajos(id, usuarioId);
   }, [router]);
 
-  async function cargarIncidencias(id: string) {
+  async function cargarTrabajos(id: string, tecnicoId?: string) {
+    const tecnico = tecnicoId || usuarioAdminId;
+
+    if (!tecnico) {
+      setMensaje("No se encontró el ID del técnico.");
+      return;
+    }
+
     setLoading(true);
     setMensaje("");
 
     const { data, error } = await supabase
-      .from("incidencias")
+      .from("trabajos_tecnicos")
       .select("*")
       .eq("condominio_id", Number(id))
-      .order("created_at", { ascending: false });
+      .eq("tecnico_id", Number(tecnico))
+      .order("id", { ascending: false });
 
     setLoading(false);
 
     if (error) {
-      setMensaje("Error cargando incidencias: " + error.message);
+      setMensaje("Error cargando trabajos técnicos: " + error.message);
       return;
     }
 
-    setIncidencias((data as Incidencia[]) || []);
+    setTrabajos((data as TrabajoTecnico[]) || []);
   }
 
   function fechaDominicana(fecha?: string | null) {
@@ -107,72 +112,45 @@ export default function MobileTecnicoIncidenciasPage() {
     });
   }
 
-  function evidenciaInicial(i: Incidencia) {
-    return i.evidencia_url || i.foto_url || "";
-  }
-
-  function tipoIncidencia(i: Incidencia) {
-    return i.tipo_incidencia || i.categoria || "-";
-  }
-
   function colorEstado(estado?: string | null) {
-    if (estado === "Reportado" || estado === "Pendiente") {
-      return "bg-yellow-100 text-yellow-700";
-    }
-
-    if (estado === "Recibido" || estado === "En revisión") {
-      return "bg-orange-100 text-orange-700";
-    }
-
-    if (estado === "En proceso") {
-      return "bg-blue-100 text-blue-700";
-    }
-
-    if (estado === "Pendiente proveedor") {
-      return "bg-purple-100 text-purple-700";
-    }
-
-    if (estado === "Resuelto" || estado === "Cerrado") {
-      return "bg-green-100 text-green-700";
-    }
-
-    if (estado === "Rechazado") {
-      return "bg-red-100 text-red-700";
-    }
-
+    if (estado === "Asignado") return "bg-yellow-100 text-yellow-700";
+    if (estado === "En proceso") return "bg-blue-100 text-blue-700";
+    if (estado === "Completado") return "bg-purple-100 text-purple-700";
+    if (estado === "Revisado") return "bg-green-100 text-green-700";
+    if (estado === "Anulado") return "bg-red-100 text-red-700";
     return "bg-slate-100 text-slate-700";
   }
 
-  function colorPrioridad(prioridad?: string | null) {
-    if (prioridad === "Urgente") return "bg-red-100 text-red-700";
-    if (prioridad === "Alta") return "bg-orange-100 text-orange-700";
-    if (prioridad === "Baja") return "bg-slate-100 text-slate-700";
+  function colorPrioridad(valor?: string | null) {
+    if (valor === "Urgente") return "bg-red-100 text-red-700";
+    if (valor === "Alta") return "bg-orange-100 text-orange-700";
+    if (valor === "Baja") return "bg-slate-100 text-slate-700";
     return "bg-blue-100 text-blue-700";
   }
 
-  function abrirCerrar(i: Incidencia) {
-    setIncidenciaActiva(i);
-    setComentarioTecnico(i.comentario_tecnico || "");
-    setArchivoCierre(null);
+  function abrirCompletar(trabajo: TrabajoTecnico) {
+    setTrabajoActivo(trabajo);
+    setComentarioTecnico(trabajo.comentario_tecnico || "");
+    setArchivoEvidencia(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function cancelarCerrar() {
-    setIncidenciaActiva(null);
+  function cancelarCompletar() {
+    setTrabajoActivo(null);
     setComentarioTecnico("");
-    setArchivoCierre(null);
+    setArchivoEvidencia(null);
   }
 
-  async function subirArchivoCierre(archivo: File | null) {
+  async function subirEvidencia(archivo: File | null) {
     if (!archivo) return null;
 
     const extension = archivo.name.split(".").pop();
-    const nombreArchivo = `${condominioId}/cierres/${Date.now()}-${Math.random()
+    const nombreArchivo = `${condominioId}/trabajos/${Date.now()}-${Math.random()
       .toString(36)
       .slice(2)}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
-      .from("incidencias-cierres")
+      .from("trabajos-tecnicos")
       .upload(nombreArchivo, archivo);
 
     if (uploadError) {
@@ -180,52 +158,53 @@ export default function MobileTecnicoIncidenciasPage() {
     }
 
     const { data } = supabase.storage
-      .from("incidencias-cierres")
+      .from("trabajos-tecnicos")
       .getPublicUrl(nombreArchivo);
 
     return data.publicUrl;
   }
 
-  async function marcarEnProceso(i: Incidencia) {
+  async function marcarEnProceso(trabajo: TrabajoTecnico) {
     const confirmar = confirm(
-      `¿Desea marcar la incidencia #${i.id} como En proceso?`
+      `¿Desea marcar el trabajo #${trabajo.id} como En proceso?`
     );
 
     if (!confirmar) return;
 
     const { error } = await supabase
-      .from("incidencias")
+      .from("trabajos_tecnicos")
       .update({
         estado: "En proceso",
-        responsable: usuarioNombre || "Técnico VAM",
+        fecha_inicio: new Date().toISOString(),
       })
-      .eq("id", i.id)
-      .eq("condominio_id", Number(condominioId));
+      .eq("id", trabajo.id)
+      .eq("condominio_id", Number(condominioId))
+      .eq("tecnico_id", Number(usuarioAdminId));
 
     if (error) {
-      alert("Error actualizando incidencia: " + error.message);
+      alert("Error actualizando trabajo: " + error.message);
       return;
     }
 
-    alert("Incidencia marcada en proceso.");
-    cargarIncidencias(condominioId);
+    alert("Trabajo marcado en proceso.");
+    await cargarTrabajos(condominioId);
   }
 
-  async function cerrarIncidencia(e: React.FormEvent<HTMLFormElement>) {
+  async function completarTrabajo(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    if (!incidenciaActiva) {
-      alert("Debe seleccionar una incidencia.");
+    if (!trabajoActivo) {
+      alert("Debe seleccionar un trabajo.");
       return;
     }
 
     if (!comentarioTecnico.trim()) {
-      alert("Debe escribir el comentario técnico del cierre.");
+      alert("Debe escribir el comentario del trabajo realizado.");
       return;
     }
 
     const confirmar = confirm(
-      `¿Desea cerrar la incidencia #${incidenciaActiva.id}?`
+      `¿Desea completar el trabajo #${trabajoActivo.id}?`
     );
 
     if (!confirmar) return;
@@ -234,33 +213,30 @@ export default function MobileTecnicoIncidenciasPage() {
     setMensaje("");
 
     try {
-      const evidenciaCierreUrl = await subirArchivoCierre(archivoCierre);
+      const evidenciaUrl = await subirEvidencia(archivoEvidencia);
 
       const { error } = await supabase
-        .from("incidencias")
+        .from("trabajos_tecnicos")
         .update({
-          estado: "Cerrado",
+          estado: "Completado",
           comentario_tecnico: comentarioTecnico.trim(),
-          comentario_admin: comentarioTecnico.trim(),
-          responsable: usuarioNombre || "Técnico VAM",
-          tecnico_cierre_id: usuarioAdminId ? Number(usuarioAdminId) : null,
-          tecnico_cierre_nombre: usuarioNombre || "Técnico VAM",
-          evidencia_cierre_url:
-            evidenciaCierreUrl || incidenciaActiva.evidencia_cierre_url || null,
-          fecha_cierre: new Date().toISOString(),
+          evidencia_url: evidenciaUrl || trabajoActivo.evidencia_url || null,
+          fecha_completado: new Date().toISOString(),
+          fecha_inicio: trabajoActivo.fecha_inicio || new Date().toISOString(),
         })
-        .eq("id", incidenciaActiva.id)
-        .eq("condominio_id", Number(condominioId));
+        .eq("id", trabajoActivo.id)
+        .eq("condominio_id", Number(condominioId))
+        .eq("tecnico_id", Number(usuarioAdminId));
 
       if (error) {
-        alert("Error cerrando incidencia: " + error.message);
+        alert("Error completando trabajo: " + error.message);
         setLoading(false);
         return;
       }
 
-      alert("Incidencia cerrada correctamente.");
-      cancelarCerrar();
-      await cargarIncidencias(condominioId);
+      alert("Trabajo completado correctamente.");
+      cancelarCompletar();
+      await cargarTrabajos(condominioId);
     } catch (error: any) {
       alert("Error subiendo evidencia: " + error.message);
     }
@@ -278,34 +254,33 @@ export default function MobileTecnicoIncidenciasPage() {
 
     await supabase.auth.signOut();
 
-    router.push("/mobile/tecnico/login");
+    router.push("/movil/login");
   }
 
-  const incidenciasFiltradas = useMemo(() => {
-    let lista = incidencias;
+  const trabajosFiltrados = useMemo(() => {
+    let lista = trabajos;
 
-    if (filtroEstado === "ABIERTAS") {
+    if (filtroEstado === "ACTIVOS") {
       lista = lista.filter(
-        (i) => i.estado !== "Cerrado" && i.estado !== "Resuelto"
+        (t) => t.estado === "Asignado" || t.estado === "En proceso"
       );
     } else if (filtroEstado !== "TODOS") {
-      lista = lista.filter((i) => i.estado === filtroEstado);
+      lista = lista.filter((t) => t.estado === filtroEstado);
     }
 
     if (buscar.trim()) {
       const texto = buscar.toLowerCase().trim();
 
-      lista = lista.filter((i) => {
+      lista = lista.filter((t) => {
         const cadena = `
-          ${i.id || ""}
-          ${i.no_apartamento || ""}
-          ${i.nombre_propietario || ""}
-          ${i.titulo || ""}
-          ${i.descripcion || ""}
-          ${i.tipo_incidencia || ""}
-          ${i.categoria || ""}
-          ${i.prioridad || ""}
-          ${i.estado || ""}
+          ${t.id || ""}
+          ${t.tipo_trabajo || ""}
+          ${t.titulo || ""}
+          ${t.descripcion || ""}
+          ${t.ubicacion || ""}
+          ${t.prioridad || ""}
+          ${t.estado || ""}
+          ${t.comentario_tecnico || ""}
         `.toLowerCase();
 
         return cadena.includes(texto);
@@ -313,18 +288,14 @@ export default function MobileTecnicoIncidenciasPage() {
     }
 
     return lista;
-  }, [incidencias, filtroEstado, buscar]);
+  }, [trabajos, filtroEstado, buscar]);
 
-  const abiertas = incidencias.filter(
-    (i) => i.estado !== "Cerrado" && i.estado !== "Resuelto"
-  ).length;
-
-  const cerradas = incidencias.filter(
-    (i) => i.estado === "Cerrado" || i.estado === "Resuelto"
-  ).length;
+  const asignados = trabajos.filter((t) => t.estado === "Asignado").length;
+  const enProceso = trabajos.filter((t) => t.estado === "En proceso").length;
+  const completados = trabajos.filter((t) => t.estado === "Completado").length;
 
   return (
-  <RequireAuth allowedRoles={["tecnico"]} redirectTo="/mobile/tecnico/login">
+  <RequireAuth allowedRoles={["tecnico"]} redirectTo="/movil/login">
     <main className="min-h-screen bg-slate-100 p-4">
       <div className="mx-auto max-w-md space-y-4">
         <section className="rounded-3xl bg-white border shadow-sm p-5">
@@ -334,10 +305,10 @@ export default function MobileTecnicoIncidenciasPage() {
                 VAM Administradora
               </p>
               <h1 className="text-2xl font-black text-slate-900">
-                Incidencias
+                Mis Trabajos
               </h1>
               <p className="text-sm text-slate-500 mt-1">
-                Consultar y cerrar incidencias desde el celular.
+                Trabajos asignados para realizar desde el celular.
               </p>
             </div>
 
@@ -364,7 +335,7 @@ export default function MobileTecnicoIncidenciasPage() {
 
           <div className="mt-4 flex gap-2">
             <Link
-              href="/mobile/tecnico"
+              href="/movil/tecnico"
               className="flex-1 rounded-xl bg-slate-800 px-4 py-3 text-center text-sm font-bold text-white"
             >
               Menú
@@ -372,7 +343,7 @@ export default function MobileTecnicoIncidenciasPage() {
 
             <button
               type="button"
-              onClick={() => cargarIncidencias(condominioId)}
+              onClick={() => cargarTrabajos(condominioId)}
               className="flex-1 rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white"
             >
               Actualizar
@@ -386,62 +357,67 @@ export default function MobileTecnicoIncidenciasPage() {
           </div>
         )}
 
-        <section className="grid grid-cols-2 gap-3">
+        <section className="grid grid-cols-3 gap-3">
           <div className="rounded-2xl bg-white border shadow-sm p-4">
-            <p className="text-sm text-slate-500">Abiertas</p>
-            <p className="text-2xl font-black text-yellow-700">{abiertas}</p>
+            <p className="text-xs text-slate-500">Asignados</p>
+            <p className="text-2xl font-black text-yellow-700">{asignados}</p>
           </div>
 
           <div className="rounded-2xl bg-white border shadow-sm p-4">
-            <p className="text-sm text-slate-500">Cerradas</p>
-            <p className="text-2xl font-black text-green-700">{cerradas}</p>
+            <p className="text-xs text-slate-500">Proceso</p>
+            <p className="text-2xl font-black text-blue-700">{enProceso}</p>
+          </div>
+
+          <div className="rounded-2xl bg-white border shadow-sm p-4">
+            <p className="text-xs text-slate-500">Complet.</p>
+            <p className="text-2xl font-black text-purple-700">{completados}</p>
           </div>
         </section>
 
-        {incidenciaActiva && (
+        {trabajoActivo && (
           <section className="rounded-3xl bg-white border-2 border-green-300 shadow-sm p-5">
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-lg font-black text-slate-900">
-                  Cerrar incidencia #{incidenciaActiva.id}
+                  Completar trabajo #{trabajoActivo.id}
                 </h2>
                 <p className="text-sm text-slate-500">
-                  {incidenciaActiva.titulo || "Sin título"}
+                  {trabajoActivo.titulo}
                 </p>
               </div>
 
               <button
                 type="button"
-                onClick={cancelarCerrar}
+                onClick={cancelarCompletar}
                 className="rounded-xl bg-slate-100 border px-3 py-2 text-xs font-bold text-slate-700"
               >
                 Cancelar
               </button>
             </div>
 
-            <form onSubmit={cerrarIncidencia} className="space-y-4">
+            <form onSubmit={completarTrabajo} className="space-y-4">
               <div>
                 <label className="block text-sm font-bold mb-1">
-                  Comentario técnico
+                  Comentario del trabajo realizado
                 </label>
                 <textarea
                   value={comentarioTecnico}
                   onChange={(e) => setComentarioTecnico(e.target.value)}
                   className="w-full rounded-xl border px-4 py-3"
                   rows={4}
-                  placeholder="Describa el trabajo realizado..."
+                  placeholder="Describa lo realizado..."
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-bold mb-1">
-                  Foto final / evidencia cierre
+                  Foto / evidencia
                 </label>
                 <input
                   type="file"
                   accept=".jpg,.jpeg,.png,.webp"
                   onChange={(e) =>
-                    setArchivoCierre(e.target.files?.[0] || null)
+                    setArchivoEvidencia(e.target.files?.[0] || null)
                   }
                   className="w-full rounded-xl border px-4 py-3 bg-white"
                 />
@@ -452,7 +428,7 @@ export default function MobileTecnicoIncidenciasPage() {
                 disabled={loading}
                 className="w-full rounded-xl bg-green-700 py-3 font-black text-white disabled:opacity-60"
               >
-                {loading ? "Cerrando..." : "Cerrar incidencia"}
+                {loading ? "Completando..." : "Completar trabajo"}
               </button>
             </form>
           </section>
@@ -469,16 +445,13 @@ export default function MobileTecnicoIncidenciasPage() {
               onChange={(e) => setFiltroEstado(e.target.value)}
               className="w-full rounded-xl border px-4 py-3 bg-white"
             >
-              <option value="ABIERTAS">Abiertas</option>
-              <option value="TODOS">Todas</option>
-              <option value="Reportado">Reportado</option>
-              <option value="Recibido">Recibido</option>
-              <option value="En revisión">En revisión</option>
+              <option value="ACTIVOS">Activos</option>
+              <option value="TODOS">Todos</option>
+              <option value="Asignado">Asignado</option>
               <option value="En proceso">En proceso</option>
-              <option value="Pendiente proveedor">Pendiente proveedor</option>
-              <option value="Resuelto">Resuelto</option>
-              <option value="Cerrado">Cerrado</option>
-              <option value="Rechazado">Rechazado</option>
+              <option value="Completado">Completado</option>
+              <option value="Revisado">Revisado</option>
+              <option value="Anulado">Anulado</option>
             </select>
 
             <input
@@ -486,7 +459,7 @@ export default function MobileTecnicoIncidenciasPage() {
               value={buscar}
               onChange={(e) => setBuscar(e.target.value)}
               className="w-full rounded-xl border px-4 py-3"
-              placeholder="Buscar por apto, título o descripción..."
+              placeholder="Buscar trabajo..."
             />
           </div>
         </section>
@@ -494,133 +467,116 @@ export default function MobileTecnicoIncidenciasPage() {
         <section className="space-y-3">
           {loading && (
             <div className="rounded-2xl bg-white border shadow-sm p-5 text-sm text-slate-500">
-              Cargando incidencias...
+              Cargando trabajos...
             </div>
           )}
 
           {!loading &&
-            incidenciasFiltradas.map((i) => (
-              <div key={i.id} className="rounded-3xl bg-white border shadow-sm p-5">
+            trabajosFiltrados.map((t) => (
+              <div key={t.id} className="rounded-3xl bg-white border shadow-sm p-5">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1">
+                  <div>
                     <div className="flex flex-wrap gap-2 mb-2">
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-bold ${colorEstado(
-                          i.estado
+                          t.estado
                         )}`}
                       >
-                        {i.estado || "Sin estado"}
+                        {t.estado}
                       </span>
 
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-bold ${colorPrioridad(
-                          i.prioridad
+                          t.prioridad
                         )}`}
                       >
-                        {i.prioridad || "Normal"}
+                        {t.prioridad}
                       </span>
                     </div>
 
                     <h3 className="text-lg font-black text-slate-900">
-                      #{i.id} - {i.titulo || "Incidencia"}
+                      #{t.id} - {t.titulo}
                     </h3>
 
-                    <p className="text-sm text-slate-500 mt-1">
-                      Apto. {i.no_apartamento || "-"} ·{" "}
-                      {fechaDominicana(i.fecha_reporte || i.created_at)}
+                    <p className="text-sm text-slate-500">
+                      {t.tipo_trabajo} · Asignado{" "}
+                      {fechaDominicana(t.fecha_asignacion)}
                     </p>
                   </div>
                 </div>
 
                 <div className="mt-3 text-sm text-slate-600 space-y-1">
                   <p>
-                    <strong>Tipo:</strong> {tipoIncidencia(i)}
+                    <strong>Ubicación:</strong> {t.ubicacion || "-"}
                   </p>
                   <p>
-                    <strong>Propietario:</strong>{" "}
-                    {i.nombre_propietario || "-"}
+                    <strong>Fecha límite:</strong>{" "}
+                    {fechaDominicana(t.fecha_limite)}
                   </p>
                   <p>
-                    <strong>Teléfono:</strong> {i.telefono || "-"}
+                    <strong>Descripción:</strong> {t.descripcion || "-"}
                   </p>
-                  <p>
-                    <strong>Descripción:</strong> {i.descripcion || "-"}
-                  </p>
+
+                  {t.incidencia_id && (
+                    <p>
+                      <strong>Incidencia:</strong> #{t.incidencia_id}
+                    </p>
+                  )}
                 </div>
 
-                {i.comentario_admin && (
-                  <div className="mt-3 rounded-2xl bg-slate-50 border p-3">
-                    <p className="text-xs font-bold text-slate-500">
-                      Comentario administración
-                    </p>
-                    <p className="text-sm text-slate-700">
-                      {i.comentario_admin}
-                    </p>
-                  </div>
-                )}
-
-                {i.comentario_tecnico && (
+                {t.comentario_tecnico && (
                   <div className="mt-3 rounded-2xl bg-green-50 border border-green-100 p-3">
                     <p className="text-xs font-bold text-green-700">
                       Comentario técnico
                     </p>
                     <p className="text-sm text-green-800">
-                      {i.comentario_tecnico}
+                      {t.comentario_tecnico}
                     </p>
                   </div>
                 )}
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {evidenciaInicial(i) && (
+                  {t.evidencia_url && (
                     <a
-                      href={evidenciaInicial(i)}
+                      href={t.evidencia_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-white"
+                      className="rounded-lg bg-purple-700 px-3 py-2 text-xs font-bold text-white"
                     >
-                      Evidencia inicial
-                    </a>
-                  )}
-
-                  {i.evidencia_cierre_url && (
-                    <a
-                      href={i.evidencia_cierre_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white"
-                    >
-                      Evidencia cierre
+                      Evidencia
                     </a>
                   )}
                 </div>
 
-                {i.estado !== "Cerrado" && i.estado !== "Resuelto" && (
-                  <div className="mt-4 grid grid-cols-1 gap-2">
-                    {i.estado !== "En proceso" && (
-                      <button
-                        type="button"
-                        onClick={() => marcarEnProceso(i)}
-                        className="w-full rounded-xl bg-blue-700 py-3 text-sm font-black text-white"
-                      >
-                        Marcar en proceso
-                      </button>
-                    )}
-
+                {t.estado === "Asignado" && (
+                  <div className="mt-4">
                     <button
                       type="button"
-                      onClick={() => abrirCerrar(i)}
+                      onClick={() => marcarEnProceso(t)}
+                      className="w-full rounded-xl bg-blue-700 py-3 text-sm font-black text-white"
+                    >
+                      Marcar en proceso
+                    </button>
+                  </div>
+                )}
+
+                {t.estado === "En proceso" && (
+                  <div className="mt-4">
+                    <button
+                      type="button"
+                      onClick={() => abrirCompletar(t)}
                       className="w-full rounded-xl bg-green-700 py-3 text-sm font-black text-white"
                     >
-                      Cerrar incidencia
+                      Completar trabajo
                     </button>
                   </div>
                 )}
               </div>
             ))}
 
-          {!loading && incidenciasFiltradas.length === 0 && (
+          {!loading && trabajosFiltrados.length === 0 && (
             <div className="rounded-3xl bg-white border shadow-sm p-6 text-center text-sm text-slate-500">
-              No hay incidencias para mostrar.
+              No hay trabajos para mostrar.
             </div>
           )}
         </section>
