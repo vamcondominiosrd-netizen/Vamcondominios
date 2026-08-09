@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import {
-  CheckCircle2,
-  Download,
-  Share2,
-  Smartphone,
-  X,
-} from "lucide-react";
+import { Download, Share2, Smartphone, X } from "lucide-react";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -22,28 +16,31 @@ function esIOS() {
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
 }
 
-function estaEnModoApp() {
+function estaInstalada() {
   if (typeof window === "undefined") return false;
 
-  const standalone = window.matchMedia("(display-mode: standalone)").matches;
+  const modoStandalone = window.matchMedia(
+    "(display-mode: standalone)"
+  ).matches;
 
   const navegadorIOS = navigator as Navigator & {
     standalone?: boolean;
   };
 
-  return standalone || navegadorIOS.standalone === true;
+  return modoStandalone || navegadorIOS.standalone === true;
 }
 
 export default function InstalarVAMButton() {
   const [eventoInstalacion, setEventoInstalacion] =
     useState<BeforeInstallPromptEvent | null>(null);
 
+  const [instalada, setInstalada] = useState(false);
   const [mostrarAyuda, setMostrarAyuda] = useState(false);
-  const [mostrarInstalada, setMostrarInstalada] = useState(false);
   const [ios, setIos] = useState(false);
 
   useEffect(() => {
     setIos(esIOS());
+    setInstalada(estaInstalada());
 
     const capturarInstalacion = (event: Event) => {
       event.preventDefault();
@@ -51,32 +48,44 @@ export default function InstalarVAMButton() {
     };
 
     const confirmarInstalacion = () => {
+      setInstalada(true);
       setEventoInstalacion(null);
       setMostrarAyuda(false);
-      setMostrarInstalada(true);
     };
 
-    window.addEventListener("beforeinstallprompt", capturarInstalacion);
-    window.addEventListener("appinstalled", confirmarInstalacion);
+    window.addEventListener(
+      "beforeinstallprompt",
+      capturarInstalacion
+    );
+
+    window.addEventListener(
+      "appinstalled",
+      confirmarInstalacion
+    );
 
     return () => {
-      window.removeEventListener("beforeinstallprompt", capturarInstalacion);
-      window.removeEventListener("appinstalled", confirmarInstalacion);
+      window.removeEventListener(
+        "beforeinstallprompt",
+        capturarInstalacion
+      );
+
+      window.removeEventListener(
+        "appinstalled",
+        confirmarInstalacion
+      );
     };
   }, []);
 
   async function instalar() {
-    if (estaEnModoApp()) {
-      setMostrarInstalada(true);
-      return;
-    }
+    if (instalada) return;
 
     if (eventoInstalacion) {
       await eventoInstalacion.prompt();
+
       const eleccion = await eventoInstalacion.userChoice;
 
       if (eleccion.outcome === "accepted") {
-        setMostrarInstalada(true);
+        setInstalada(true);
       }
 
       setEventoInstalacion(null);
@@ -86,9 +95,11 @@ export default function InstalarVAMButton() {
     setMostrarAyuda(true);
   }
 
+  if (instalada) return null;
+
   return (
     <>
-      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3">
+      <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/70 p-3">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-800 text-white shadow-sm">
             <Smartphone className="h-5 w-5" />
@@ -96,12 +107,11 @@ export default function InstalarVAMButton() {
 
           <div className="min-w-0 flex-1">
             <p className="text-sm font-black text-slate-900">
-              Instale VAM en su celular
+              Tenga VAM siempre a mano
             </p>
 
             <p className="mt-0.5 text-xs leading-5 text-slate-600">
-              Tendrá el icono de VAM en su pantalla y podrá entrar fácilmente.
-              Solo se hace una vez.
+              Instale el icono de VAM en su celular. Solo se hace una vez.
             </p>
           </div>
         </div>
@@ -115,33 +125,6 @@ export default function InstalarVAMButton() {
           Instalar VAM en mi celular
         </button>
       </div>
-
-      {mostrarInstalada && (
-        <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/50 p-3 sm:items-center">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-5 text-center shadow-2xl">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-              <CheckCircle2 className="h-6 w-6" />
-            </div>
-
-            <h3 className="mt-3 text-lg font-black text-slate-900">
-              VAM está listo
-            </h3>
-
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              Si ya ve el icono de VAM en la pantalla de su celular,
-              no necesita volver a instalarlo.
-            </p>
-
-            <button
-              type="button"
-              onClick={() => setMostrarInstalada(false)}
-              className="mt-4 h-11 w-full rounded-xl bg-slate-900 text-sm font-black text-white"
-            >
-              Entendido
-            </button>
-          </div>
-        </div>
-      )}
 
       {mostrarAyuda && (
         <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 p-3 sm:items-center">
@@ -178,7 +161,7 @@ export default function InstalarVAMButton() {
                   <Paso
                     numero="2"
                     titulo="Toque Compartir"
-                    texto="Pulse el botón de compartir de Safari."
+                    texto="Pulse el botón de compartir en la parte inferior de Safari."
                     icono={<Share2 className="h-4 w-4" />}
                   />
 
@@ -192,14 +175,14 @@ export default function InstalarVAMButton() {
                 <>
                   <Paso
                     numero="1"
-                    titulo="Abra el menú de Chrome"
-                    texto="Toque los tres puntos ⋮ en la parte superior."
+                    titulo="Abra el menú del navegador"
+                    texto="En Chrome, toque los tres puntos ⋮."
                   />
 
                   <Paso
                     numero="2"
-                    titulo="Seleccione instalar"
-                    texto='Pulse "Instalar aplicación" o "Agregar a pantalla principal".'
+                    titulo="Instale VAM"
+                    texto='Seleccione "Instalar aplicación" o "Agregar a pantalla principal".'
                   />
 
                   <Paso
@@ -243,8 +226,13 @@ function Paso({
       </div>
 
       <div>
-        <p className="text-sm font-black text-slate-900">{titulo}</p>
-        <p className="mt-0.5 text-xs leading-5 text-slate-600">{texto}</p>
+        <p className="text-sm font-black text-slate-900">
+          {titulo}
+        </p>
+
+        <p className="mt-0.5 text-xs leading-5 text-slate-600">
+          {texto}
+        </p>
       </div>
     </div>
   );
