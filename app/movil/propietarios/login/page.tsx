@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import InstalarVAMButton from "@/components/vam/InstalarVAMButton";
 import {
   ArrowLeft,
   Bell,
@@ -1164,6 +1165,7 @@ export default function LoginMovilVAMPage() {
                         )}
                         {loading ? "Validando acceso..." : "Entrar a mi cuenta"}
                       </button>
+                      <InstalarVAMButton />
 
                       <button
                         type="button"
