@@ -152,6 +152,36 @@ function limpiarTexto(value: any, fallback = "-"): string {
   return text || fallback;
 }
 
+/**
+ * Ordena los gastos por el número de cheque o documento.
+ * Los valores que no contienen números se colocan al final.
+ */
+function compararNumeroDocumento(a: string, b: string): number {
+  const textoA = limpiarTexto(a, "");
+  const textoB = limpiarTexto(b, "");
+
+  const numeroA = (textoA.match(/\d+/g) || []).join("");
+  const numeroB = (textoB.match(/\d+/g) || []).join("");
+
+  if (numeroA && numeroB) {
+    const comparacionNumerica = numeroA.localeCompare(numeroB, "es", {
+      numeric: true,
+      sensitivity: "base",
+    });
+
+    if (comparacionNumerica !== 0) return comparacionNumerica;
+  } else if (numeroA) {
+    return -1;
+  } else if (numeroB) {
+    return 1;
+  }
+
+  return textoA.localeCompare(textoB, "es", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
 function periodoActual(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -205,7 +235,31 @@ function tipoMovimiento(row: MovimientoBanco): string {
   return normalizarTexto(row.tipo_movimiento).toUpperCase();
 }
 
+function esCajaChica(row: MovimientoBanco): boolean {
+  const texto = normalizarTexto([
+    row.origen,
+    row.descripcion,
+    row.beneficiario,
+    row.numero_documento,
+    row.referencia_banco,
+  ].join(" "));
+
+  return (
+    texto.includes("caja chica") ||
+    texto.includes("caja_chica") ||
+    texto.includes("fondo de caja chica") ||
+    texto.includes("reposicion de caja chica") ||
+    texto.includes("reposición de caja chica")
+  );
+}
+
 function esCargoBanco(row: MovimientoBanco): boolean {
+  /*
+   * Caja chica es un gasto operativo, aunque el movimiento no tenga
+   * referencia_id. Nunca debe mostrarse como impuesto o cargo bancario.
+   */
+  if (esCajaChica(row)) return false;
+
   const texto = normalizarTexto([
     row.origen,
     row.descripcion,
@@ -268,29 +322,43 @@ export default function ResumenFinancieroPropietariosPage() {
   const cargosBancarios = useMemo(() => egresos.filter((m) => esCargoBanco(m)), [egresos]);
 
   const detalleGastos = useMemo<DetalleGasto[]>(() => {
-    return gastosOperativos.map((m) => {
-      const gasto = m.referencia_id ? gastosRelacionados.get(Number(m.referencia_id)) : null;
-      const concepto = limpiarTexto(
-        gasto?.concepto || gasto?.descripcion || gasto?.detalle_gasto || m.descripcion,
-        "Gasto operativo"
-      );
-      const proveedor = limpiarTexto(gasto?.proveedor || m.beneficiario, "Proveedor / beneficiario");
-      const numeroDocumento = limpiarTexto(
-        gasto?.numero_cheque || m.numero_documento || m.referencia_banco,
-        "-"
-      );
+    return gastosOperativos
+      .map((m) => {
+        const gasto = m.referencia_id ? gastosRelacionados.get(Number(m.referencia_id)) : null;
+        const concepto = limpiarTexto(
+          gasto?.concepto || gasto?.descripcion || gasto?.detalle_gasto || m.descripcion,
+          esCajaChica(m) ? "Caja chica" : "Gasto operativo"
+        );
+        const proveedor = limpiarTexto(gasto?.proveedor || m.beneficiario, "Proveedor / beneficiario");
+        const numeroDocumento = limpiarTexto(
+          gasto?.numero_cheque || m.numero_documento || m.referencia_banco,
+          "-"
+        );
 
-      return {
-        id: `gasto-${m.id}`,
-        fecha: formatDate(m.fecha_movimiento || m.fecha_banco),
-        concepto,
-        proveedor,
-        numeroDocumento,
-        factura: limpiarTexto(gasto?.no_factura, "-"),
-        ncf: limpiarTexto(gasto?.ncf, "-"),
-        monto: toNumber(m.monto),
-      };
-    });
+        return {
+          id: `gasto-${m.id}`,
+          fecha: formatDate(m.fecha_movimiento || m.fecha_banco),
+          concepto,
+          proveedor,
+          numeroDocumento,
+          factura: limpiarTexto(gasto?.no_factura, "-"),
+          ncf: limpiarTexto(gasto?.ncf, "-"),
+          monto: toNumber(m.monto),
+        };
+      })
+      .sort((a, b) => {
+        const porNumeroCheque = compararNumeroDocumento(
+          a.numeroDocumento,
+          b.numeroDocumento
+        );
+
+        if (porNumeroCheque !== 0) return porNumeroCheque;
+
+        return a.id.localeCompare(b.id, "es", {
+          numeric: true,
+          sensitivity: "base",
+        });
+      });
   }, [gastosOperativos, gastosRelacionados]);
 
   const detalleCargosBanco = useMemo<CargoBanco[]>(() => {

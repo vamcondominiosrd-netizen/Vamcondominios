@@ -53,7 +53,35 @@ type MenuItem = {
   href: string;
   label: string;
   icon: any;
+  moduloCodigo?: string;
 };
+
+type ModuloHabilitado = {
+  codigo: string | null;
+};
+
+const MODULOS_OBLIGATORIOS = [
+  "dashboard",
+  "residencial",
+  "finanzas",
+  "seguridad",
+  "configuracion",
+];
+
+function leerModulosGuardados(): string[] {
+  const valor = localStorage.getItem("modulos_habilitados");
+
+  if (!valor) return [];
+
+  try {
+    const datos = JSON.parse(valor);
+    return Array.isArray(datos)
+      ? datos.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 const submenuResidencial: MenuItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -103,17 +131,20 @@ const submenuOperativo: MenuItem[] = [
 const submenuRecursosHumanos: MenuItem[] = [
   { href: "/recursos-humanos/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/recursos-humanos/personal", label: "Empleados", icon: Users },
-  { href: "/recursos-humanos/nomina", label: "Nómina", icon: BadgeDollarSign },
+  { href: "/recursos-humanos/nomina", label: "Nómina", icon: BadgeDollarSign, moduloCodigo: "nomina" },
   { href: "/recursos-humanos/vacaciones", label: "Vacaciones", icon: CalendarDays },
   { href: "/recursos-humanos/prestaciones", label: "Prestaciones", icon: FileText },
   { href: "/recursos-humanos/asistencia", label: "Asistencia", icon: Clock },
-  { href: "/recursos-humanos/nomina/reportes", label: "Reportes", icon: BarChart3 },
+  { href: "/recursos-humanos/nomina/reportes", label: "Reportes", icon: BarChart3, moduloCodigo: "nomina" },
   { href: "/recursos-humanos/cargos", label: "Cargos", icon: Boxes },
 ];
 
 const submenuConfiguracion: MenuItem[] = [
   { href: "/configuracion", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/configuracion/cargos", label: "Cargos y Generación", icon: CircleDollarSign },
+  { href: "/configuracion/tipos-cargos", label: "Cargos y Generación", icon: CircleDollarSign },
+  { href: "/configuracion/configuracion-usuarios-sistema/modulos", label: "Módulos habilitados", icon: Package },
+  { href: "/configuracion/configuracion-usuarios-sistema/usuarios", label: "Usuarios y accesos", icon: UserCog },
+  { href: "/configuracion/configuracion-usuarios-sistema/roles", label: "Roles y permisos", icon: ShieldCheck },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -130,6 +161,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   });
 
   const [menuMovil, setMenuMovil] = useState(false);
+  const [modulosHabilitados, setModulosHabilitados] = useState<string[]>([]);
+  const [cargandoModulos, setCargandoModulos] = useState(true);
 
   useEffect(() => {
     const condominioId = localStorage.getItem("condominio_id") || "";
@@ -145,23 +178,61 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       condominioNombre: localStorage.getItem("condominio_nombre") || "",
       condominioLogoUrl: localStorage.getItem("condominio_logo_url") || "",
       usuarioNombre: localStorage.getItem("usuario_nombre") || "Usuario",
-      usuarioRol: localStorage.getItem("usuario_rol") || "Sin rol",
+      usuarioRol:
+        localStorage.getItem("rol_condominio") ||
+        localStorage.getItem("usuario_rol") ||
+        "Sin rol",
     });
+
+    void cargarModulosCondominio(Number(condominioId));
   }, [router]);
 
+  async function cargarModulosCondominio(condominioId: number) {
+    setCargandoModulos(true);
+
+    const { data, error } = await supabase.rpc(
+      "obtener_modulos_usuario_condominio",
+      { p_condominio_id: condominioId }
+    );
+
+    if (error) {
+      console.error("Error cargando módulos del condominio:", error);
+
+      const guardados = leerModulosGuardados();
+      const respaldo = guardados.length > 0 ? guardados : MODULOS_OBLIGATORIOS;
+
+      setModulosHabilitados(respaldo);
+      setCargandoModulos(false);
+      return;
+    }
+
+    const codigos = ((data || []) as ModuloHabilitado[])
+      .map((item) => String(item.codigo || "").trim().toLowerCase())
+      .filter(Boolean);
+
+    localStorage.setItem("modulos_habilitados", JSON.stringify(codigos));
+    setModulosHabilitados(codigos);
+    setCargandoModulos(false);
+  }
+
   const menuPrincipal: MenuItem[] = [
-    { href: "/dashboard", label: "Inicio", icon: Home },
-    { href: "/condominios", label: "Residencial", icon: Building2 },
-    { href: "/finanzas", label: "Financiero", icon: WalletCards },
-    { href: "/operaciones", label: "Operativo", icon: Megaphone },
-    { href: "/administracion/inventario", label: "Inventario", icon: Package },
-    { href: "/recursos-humanos/dashboard", label: "Capital Humano", icon: Users },
-    { href: "/contabilidad/dashboard", label: "Contable", icon: Calculator },
-    { href: "/reportes", label: "Reportes", icon: BarChart3 },
-    { href: "/seguridad", label: "Seguridad", icon: ShieldCheck },
-    { href: "/catalogos", label: "Catálogos", icon: Boxes },
-    { href: "/configuracion", label: "Configuración", icon: Settings },
+    { href: "/dashboard", label: "Inicio", icon: Home, moduloCodigo: "dashboard" },
+    { href: "/condominios", label: "Residencial", icon: Building2, moduloCodigo: "residencial" },
+    { href: "/finanzas", label: "Financiero", icon: WalletCards, moduloCodigo: "finanzas" },
+    { href: "/operaciones", label: "Operativo", icon: Megaphone, moduloCodigo: "operaciones" },
+    { href: "/administracion/inventario", label: "Inventario", icon: Package, moduloCodigo: "inventario" },
+    { href: "/recursos-humanos/dashboard", label: "Capital Humano", icon: Users, moduloCodigo: "recursos_humanos" },
+    { href: "/contabilidad/dashboard", label: "Contable", icon: Calculator, moduloCodigo: "contabilidad" },
+    { href: "/reportes", label: "Reportes", icon: BarChart3, moduloCodigo: "reportes" },
+    { href: "/seguridad", label: "Seguridad", icon: ShieldCheck, moduloCodigo: "seguridad" },
+    { href: "/catalogos", label: "Catálogos", icon: Boxes, moduloCodigo: "configuracion" },
+    { href: "/configuracion", label: "Configuración", icon: Settings, moduloCodigo: "configuracion" },
   ];
+
+  const menuVisible = menuPrincipal.filter(
+    (item) =>
+      !item.moduloCodigo || modulosHabilitados.includes(item.moduloCodigo)
+  );
 
 function esRutaResidencial(path: string) {
   return (
@@ -222,6 +293,62 @@ function esRutaResidencial(path: string) {
     return path === "/catalogos" || path.startsWith("/catalogos/");
   }
 
+  function obtenerModuloPorRuta(path: string) {
+    if (path === "/dashboard") return "dashboard";
+    if (path.startsWith("/administracion/inventario")) return "inventario";
+    if (path.startsWith("/recursos-humanos/nomina")) return "nomina";
+    if (path.startsWith("/recursos-humanos")) return "recursos_humanos";
+    if (path.startsWith("/contabilidad")) return "contabilidad";
+    if (path.startsWith("/reportes")) return "reportes";
+    if (
+      path.startsWith("/seguridad") ||
+      path.startsWith("/roles") ||
+      path.startsWith("/permisos") ||
+      path.startsWith("/auditoria")
+    ) return "seguridad";
+    if (path.startsWith("/configuracion") || path.startsWith("/catalogos")) return "configuracion";
+    if (
+      path.startsWith("/finanzas") ||
+      path.startsWith("/pagos-mantenimiento") ||
+      path.startsWith("/gastos") ||
+      path.startsWith("/banco") ||
+      path.startsWith("/solicitudes-pago") ||
+      path.startsWith("/presupuesto")
+    ) return "finanzas";
+    if (
+      path.startsWith("/operaciones") ||
+      path.startsWith("/incidencias") ||
+      path.startsWith("/autorizaciones") ||
+      path.startsWith("/gas") ||
+      path.startsWith("/checklist-visitas")
+    ) return "operaciones";
+    if (
+      path.startsWith("/condominios") ||
+      path.startsWith("/unidades") ||
+      path.startsWith("/propietarios") ||
+      path.startsWith("/usuarios") ||
+      path.startsWith("/areas-sociales") ||
+      path.startsWith("/reservas-areas") ||
+      path.startsWith("/consulta-estado/configuracion-cargos") ||
+      path.startsWith("/administracion/documentos") ||
+      path.startsWith("/administracion/directorio") ||
+      path.startsWith("/vehiculos") ||
+      path.startsWith("/anuncios")
+    ) return "residencial";
+
+    return null;
+  }
+
+  useEffect(() => {
+    if (cargandoModulos || !sesion.condominioId) return;
+
+    const moduloRuta = obtenerModuloPorRuta(pathname);
+
+    if (moduloRuta && !modulosHabilitados.includes(moduloRuta)) {
+      router.replace("/dashboard");
+    }
+  }, [cargandoModulos, modulosHabilitados, pathname, router, sesion.condominioId]);
+
   function estaActivo(href: string) {
     if (href === "/dashboard") return pathname === "/dashboard";
     if (href === "/administracion") return esRutaResidencial(pathname);
@@ -264,6 +391,19 @@ function esRutaResidencial(path: string) {
     return null;
   }, [pathname]);
 
+  const centroActivoVisible = useMemo(() => {
+    if (!centroActivo) return null;
+
+    return {
+      ...centroActivo,
+      submenu: centroActivo.submenu.filter(
+        (item) =>
+          !item.moduloCodigo ||
+          modulosHabilitados.includes(item.moduloCodigo)
+      ),
+    };
+  }, [centroActivo, modulosHabilitados]);
+
   async function cerrarSesion() {
     localStorage.clear();
     await supabase.auth.signOut();
@@ -274,6 +414,7 @@ function esRutaResidencial(path: string) {
     localStorage.removeItem("condominio_id");
     localStorage.removeItem("condominio_nombre");
     localStorage.removeItem("condominio_logo_url");
+    localStorage.removeItem("modulos_habilitados");
     router.push("/login");
   }
 
@@ -312,7 +453,15 @@ function esRutaResidencial(path: string) {
     return "bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700";
   }
 
-  if (!sesion.condominioId) return null;
+  if (!sesion.condominioId || cargandoModulos) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100">
+        <div className="rounded-2xl border bg-white px-6 py-5 text-sm font-bold text-slate-600 shadow-sm">
+          Cargando módulos autorizados...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -392,7 +541,7 @@ function esRutaResidencial(path: string) {
         </div>
 
         <nav className="hidden lg:flex h-11 px-4 items-center gap-1 bg-slate-950 text-white overflow-x-auto">
-          {menuPrincipal.map((item) => {
+          {menuVisible.map((item) => {
             const Icon = item.icon;
             const activo = estaActivo(item.href);
 
@@ -413,11 +562,11 @@ function esRutaResidencial(path: string) {
           })}
         </nav>
 
-        {centroActivo && (
+        {centroActivoVisible && (
           <div className="hidden lg:block border-t border-slate-200 bg-white">
             <div className="px-4 py-2">
               <nav className="flex min-w-max gap-2 overflow-x-auto">
-                {centroActivo.submenu.map((item) => {
+                {centroActivoVisible.submenu.map((item) => {
                   const Icon = item.icon;
                   const activo =
                     pathname === item.href ||
@@ -448,7 +597,7 @@ function esRutaResidencial(path: string) {
             </p>
 
             <div className="grid grid-cols-2 gap-2">
-              {menuPrincipal.map((item) => {
+              {menuVisible.map((item) => {
                 const Icon = item.icon;
                 const activo = estaActivo(item.href);
 

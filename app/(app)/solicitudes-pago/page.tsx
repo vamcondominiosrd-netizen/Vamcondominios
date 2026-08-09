@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   FileText,
+  Files,
   Plus,
   Printer,
   ShieldCheck,
@@ -617,6 +618,11 @@ export default function SolicitudesPagoPage() {
             label: "Nueva Solicitud",
             icon: Plus,
           },
+           {
+              href: "/solicitudes-pago/agrupada",
+              label: "Solicitud Agrupada",
+              icon: Files,
+            },
           {
             href: "/solicitudes-pago/tesorero",
             label: "Tesorero",

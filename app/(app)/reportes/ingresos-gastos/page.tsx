@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import RoleGuard from "../../RoleGuard";
 import { supabase } from "@/app/lib/supabaseClient";
 
 import {
@@ -245,9 +244,6 @@ export default function EstadoFinancieroPage() {
   const diferenciaPositiva = diferenciaConciliar >= 0;
 
   return (
-    <RoleGuard
-      roles={["Super Admin", "Administrador", "Tesorero", "Presidente"]}
-    >
       <div className="space-y-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
@@ -549,7 +545,6 @@ export default function EstadoFinancieroPage() {
           </>
         )}
       </div>
-    </RoleGuard>
   );
 }
 

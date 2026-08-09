@@ -7,9 +7,11 @@ import {
   CircleDollarSign,
   Database,
   KeyRound,
+  Package,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  UserCog,
 } from "lucide-react";
 
 import PageContainer from "@/components/vam/enterprise/PageContainer";
@@ -36,21 +38,39 @@ const tarjetasConfiguracion: ConfigCard[] = [
     tone: "green",
   },
   {
-    title: "Tipos Cargos",
+    title: "Tipos de Cargos",
     description:
-      "Espacio reservado para administrar usuarios, perfiles de acceso y permisos generales.",
+      "Administra los tipos de cargos ordinarios, extraordinarios, mora y otros conceptos del condominio.",
     href: "/configuracion/tipos-cargos",
     icon: KeyRound,
     status: "Activo",
     tone: "blue",
   },
   {
+    title: "Módulos Habilitados",
+    description:
+      "Consulta los módulos de VAM habilitados para el condominio según su configuración y plan contratado.",
+    href: "/configuracion/configuracion-usuarios-sistema/modulos",
+    icon: Package,
+    status: "Activo",
+    tone: "amber",
+  },
+  {
+    title: "Usuarios y Accesos",
+    description:
+      "Crea usuarios del condominio, asigna roles y activa o bloquea sus accesos al sistema VAM.",
+    href: "/configuracion/configuracion-usuarios-sistema/usuarios",
+    icon: UserCog,
+    status: "Activo",
+    tone: "blue",
+  },
+  {
     title: "Roles y Permisos",
     description:
-      "Espacio reservado para configurar roles del sistema VAM y permisos por módulo.",
-    href: "#",
+      "Crea roles del condominio y configura los permisos disponibles para cada módulo y operación.",
+    href: "/configuracion/configuracion-usuarios-sistema/roles",
     icon: ShieldCheck,
-    status: "Pendiente",
+    status: "Activo",
     tone: "purple",
   },
   {

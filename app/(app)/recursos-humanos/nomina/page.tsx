@@ -2228,29 +2228,30 @@ export default function NominaPage() {
           <div className="md:col-span-2 flex flex-col md:flex-row gap-3">
             <button
               type="submit"
-              disabled={
-                guardando ||
-                verificandoQuincenas ||
-                (!editandoId &&
-                  esTipoQuincenal(obtenerTipoNominaSeleccionado()) &&
-                  quincenasRegistradas.includes(1) &&
-                  quincenasRegistradas.includes(2))
-              }
-              className="bg-blue-700 hover:bg-blue-800 disabled:bg-slate-400 text-white px-5 py-3 rounded-xl font-bold"
+              disabled={guardando}
+              className="bg-blue-700 hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-400 text-white px-5 py-3 rounded-xl font-bold"
             >
               {guardando
                 ? "Guardando..."
-                : verificandoQuincenas
-                ? "Verificando quincenas..."
-                : !editandoId &&
-                  esTipoQuincenal(obtenerTipoNominaSeleccionado()) &&
-                  quincenasRegistradas.includes(1) &&
-                  quincenasRegistradas.includes(2)
-                ? "Quincenas completas"
                 : editandoId
                 ? "Guardar cambios"
                 : "Guardar nómina"}
             </button>
+
+            {verificandoQuincenas && (
+              <span className="inline-flex items-center rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-bold text-cyan-800">
+                Verificando quincenas registradas...
+              </span>
+            )}
+
+            {!editandoId &&
+              esTipoQuincenal(obtenerTipoNominaSeleccionado()) &&
+              quincenasRegistradas.includes(1) &&
+              quincenasRegistradas.includes(2) && (
+                <span className="inline-flex items-center rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+                  Este empleado ya tiene ambas quincenas registradas para el período seleccionado.
+                </span>
+              )}
 
             {editandoId && (
               <button

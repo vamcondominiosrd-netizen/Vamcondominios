@@ -45,10 +45,10 @@ export default function ReportesPage() {
         "Reportes principales para revisar la situación económica del condominio.",
       modulos: [
         {
-          titulo: "Centro de Reportes",
+          titulo: "Desglose de Pagos Mensual",
           descripcion:
-            "Vista general de reportes disponibles del condominio activo.",
-          href: "/reportes",
+            "Desglose de pago Mensual por cheques.",
+          href: "/reportes/gastos-mensuales-cheques",
           icono: BarChart3,
           color: "text-blue-700",
           bg: "bg-blue-50",
@@ -100,7 +100,7 @@ export default function ReportesPage() {
           titulo: "Morosidad",
           descripcion:
             "Reporte de propietarios con pagos pendientes o vencidos.",
-          href: "/morosidad",
+          href: "/finanzas/morosidad",
           icono: AlertTriangle,
           color: "text-red-700",
           bg: "bg-red-50",
@@ -131,10 +131,10 @@ export default function ReportesPage() {
         "Reportes para analizar gastos, categorías y presupuesto anual.",
       modulos: [
         {
-          titulo: "Gastos por Categoría",
+          titulo: "Gastos por Categoría Mensual",
           descripcion:
             "Analizar gastos por proveedor, categoría, período y fondo.",
-          href: "/reportes/gastos-categoria",
+          href: "/reportes/gastos-mensuales",
           icono: ReceiptText,
           color: "text-pink-700",
           bg: "bg-pink-50",

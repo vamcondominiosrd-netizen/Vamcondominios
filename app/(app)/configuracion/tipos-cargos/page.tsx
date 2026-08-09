@@ -337,12 +337,12 @@ export default function TiposCargosPage() {
             icon: BadgeDollarSign,
           },
           {
-            href: "/configuracion/usuarios",
+            href: "/configuracion/configuracion-usuarios-sistema/usuarios",
             label: "Usuarios",
             icon: Users,
           },
           {
-            href: "/configuracion/roles",
+            href: "/configuracion/configuracion-usuarios-sistema/roles",
             label: "Roles y Permisos",
             icon: ShieldCheck,
           },

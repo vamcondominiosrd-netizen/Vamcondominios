@@ -2,12 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  BarChart3,
   CalendarDays,
   CheckCircle,
   CircleDollarSign,
   Clock,
-  Percent,
   PlayCircle,
   Save,
 } from "lucide-react";
@@ -42,6 +40,9 @@ type ResumenCargo = {
   total: number;
   totalPagado: number;
   totalBalance: number;
+  unidadesEsperadas: number;
+  unidadesGeneradas: number;
+  unidadesPendientes: number;
 };
 
 function periodoActual() {
@@ -54,11 +55,6 @@ function dinero(valor: string | number | null | undefined) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-}
-
-function fechaPeriodoISO(periodo: string, dia: string | number) {
-  const diaNumero = Math.min(Math.max(Number(dia || 1), 1), 28);
-  return `${periodo}-${String(diaNumero).padStart(2, "0")}`;
 }
 
 function nombrePeriodo(periodo: string) {
@@ -129,7 +125,7 @@ export default function ConfiguracionCargosPage() {
 
   useEffect(() => {
     if (condominioId) cargarResumenPeriodo(condominioId, periodoSeleccionado);
-  }, [periodoSeleccionado, condominioId]);
+  }, [periodoSeleccionado, condominioId, tipoCargo]);
 
   async function cargarTodo(id: string) {
     setLoading(true);
@@ -193,22 +189,54 @@ export default function ConfiguracionCargosPage() {
     id: string,
     periodoConsulta = periodoSeleccionado
   ): Promise<ResumenCargo | null> {
-    const { data, error } = await supabase
-      .from("cargos_periodicos")
-      .select("monto, monto_pagado, balance")
-      .eq("condominio_id", Number(id))
-      .eq("periodo", periodoConsulta);
+    const [cargosRespuesta, unidadesRespuesta] = await Promise.all([
+      supabase
+        .from("cargos_periodicos")
+        .select("unidad_id,monto,monto_pagado,balance,tipo_cargo")
+        .eq("condominio_id", Number(id))
+        .eq("periodo", periodoConsulta),
+      supabase
+        .from("unidades")
+        .select("id", { count: "exact", head: true })
+        .eq("condominio_id", Number(id))
+        .eq("activa", true)
+        .gt("cuota_mensual_actual", 0),
+    ]);
 
-    if (error) {
-      alert("Error cargando resumen del período: " + error.message);
+    if (cargosRespuesta.error) {
+      alert(
+        "Error cargando resumen del período: " +
+          cargosRespuesta.error.message
+      );
       return null;
     }
 
-    const registros = (data || []) as {
+    if (unidadesRespuesta.error) {
+      alert(
+        "Error contando las unidades activas: " +
+          unidadesRespuesta.error.message
+      );
+      return null;
+    }
+
+    const registros = (cargosRespuesta.data || []) as {
+      unidad_id: number | null;
       monto: number | null;
       monto_pagado: number | null;
       balance: number | null;
+      tipo_cargo: string | null;
     }[];
+
+    const unidadesEsperadas = Number(unidadesRespuesta.count || 0);
+    const unidadesGeneradas = new Set(
+      registros
+        .filter(
+          (item) =>
+            item.unidad_id !== null &&
+            item.tipo_cargo === tipoCargo
+        )
+        .map((item) => Number(item.unidad_id))
+    ).size;
 
     return {
       periodo: periodoConsulta,
@@ -223,6 +251,12 @@ export default function ConfiguracionCargosPage() {
       ),
       totalBalance: registros.reduce(
         (sum, item) => sum + Number(item.balance || 0),
+        0
+      ),
+      unidadesEsperadas,
+      unidadesGeneradas,
+      unidadesPendientes: Math.max(
+        unidadesEsperadas - unidadesGeneradas,
         0
       ),
     };
@@ -386,38 +420,58 @@ export default function ConfiguracionCargosPage() {
 
     if (!validarGeneracion()) return;
 
-    const fechaGeneracion = fechaPeriodoISO(periodoSeleccionado, diaGeneracion);
+    const fechaPeriodo = `${periodoSeleccionado}-01`;
 
     const resumenAntes = await consultarResumenPeriodo(
       condominioId,
       periodoSeleccionado
     );
 
-    if (resumenAntes && resumenAntes.cantidad > 0) {
-      const continuar = confirm(
-        `El período ${periodoSeleccionado} ya tiene ${resumenAntes.cantidad} cargo(s) generado(s).\n\n` +
-          `Total facturado actual: RD$ ${dinero(resumenAntes.total)}.\n\n` +
-          "La función evita duplicados por unidad y período, por lo que solo generará cargos faltantes si aplica.\n\n" +
-          "¿Desea continuar?"
-      );
+    if (!resumenAntes) return;
 
-      if (!continuar) return;
-    } else {
-      const confirmar = confirm(
-        `Se generarán los cargos del período ${periodoSeleccionado}.\n\n` +
-          `Mes activo: ${nombrePeriodo(periodoSeleccionado)}.\n` +
-          `Fecha enviada al proceso: ${fechaGeneracion}.\n\n` +
-          "¿Desea continuar?"
-      );
+    setResumenCargo(resumenAntes);
 
-      if (!confirmar) return;
+    if (resumenAntes.unidadesEsperadas === 0) {
+      alert(
+        "No existen unidades activas con cuota mensual configurada para este condominio."
+      );
+      return;
     }
+
+    if (resumenAntes.unidadesPendientes === 0) {
+      alert(
+        `El período ${periodoSeleccionado} ya está completo.\n\n` +
+          `Unidades generadas: ${resumenAntes.unidadesGeneradas} de ${resumenAntes.unidadesEsperadas}\n` +
+          `Total facturado: RD$ ${dinero(resumenAntes.total)}`
+      );
+      return;
+    }
+
+    const accion =
+      resumenAntes.unidadesGeneradas > 0
+        ? "completarán los cargos faltantes"
+        : "generarán los cargos";
+
+    const confirmar = confirm(
+      `Se ${accion} del período ${periodoSeleccionado}.\n\n` +
+        `Condominio: ${condominioNombre || condominioId}\n` +
+        `Unidades esperadas: ${resumenAntes.unidadesEsperadas}\n` +
+        `Unidades ya generadas: ${resumenAntes.unidadesGeneradas}\n` +
+        `Unidades pendientes: ${resumenAntes.unidadesPendientes}\n\n` +
+        "La operación solo afectará el condominio activo. ¿Desea continuar?"
+    );
+
+    if (!confirmar) return;
 
     setGenerando(true);
 
-    const { error } = await supabase.rpc("generar_cargos_mensuales", {
-      p_fecha: fechaGeneracion,
-    });
+    const { data, error } = await supabase.rpc(
+      "vam_generar_cargos_condominio_mes_admin",
+      {
+        p_condominio_id: Number(condominioId),
+        p_fecha: fechaPeriodo,
+      }
+    );
 
     if (error) {
       setGenerando(false);
@@ -434,25 +488,30 @@ export default function ConfiguracionCargosPage() {
 
     setGenerando(false);
 
-    if (!resumenDespues || resumenDespues.cantidad === 0) {
+    if (!resumenDespues) return;
+
+    const resultado = data as {
+      cargos_insertados?: number;
+      descuentos_insertados?: number;
+    } | null;
+
+    if (resumenDespues.unidadesPendientes > 0) {
       alert(
-        "El proceso se ejecutó, pero no se generaron cargos para este período.\n\n" +
-          "Revise que existan unidades activas, cuotas mensuales configuradas y configuración mensual activa."
+        `El proceso terminó, pero el período continúa incompleto.\n\n` +
+          `Unidades generadas: ${resumenDespues.unidadesGeneradas} de ${resumenDespues.unidadesEsperadas}\n` +
+          `Unidades pendientes: ${resumenDespues.unidadesPendientes}\n\n` +
+          "Revise las unidades pendientes y sus cuotas mensuales."
       );
       return;
     }
 
-    const generadosAhora =
-      resumenAntes && resumenAntes.cantidad > 0
-        ? resumenDespues.cantidad - resumenAntes.cantidad
-        : resumenDespues.cantidad;
-
     alert(
       `Generación finalizada correctamente.\n\n` +
+        `Condominio: ${condominioNombre || condominioId}\n` +
         `Período: ${periodoSeleccionado}\n` +
-        `Mes activo: ${nombrePeriodo(periodoSeleccionado)}\n` +
-        `Cargos actuales del período: ${resumenDespues.cantidad}\n` +
-        `Cargos nuevos detectados: ${Math.max(generadosAhora, 0)}\n` +
+        `Unidades generadas: ${resumenDespues.unidadesGeneradas} de ${resumenDespues.unidadesEsperadas}\n` +
+        `Cargos nuevos: ${Number(resultado?.cargos_insertados || 0)}\n` +
+        `Descuentos nuevos: ${Number(resultado?.descuentos_insertados || 0)}\n` +
         `Total facturado: RD$ ${dinero(resumenDespues.total)}`
     );
   }
@@ -462,8 +521,20 @@ export default function ConfiguracionCargosPage() {
   const resumenTotal = resumenCargo?.total || 0;
   const resumenPagado = resumenCargo?.totalPagado || 0;
   const resumenBalance = resumenCargo?.totalBalance || 0;
-  const periodoGenerado = resumenCantidad > 0;
-  const estadoPeriodo = periodoGenerado ? "Generado" : "Sin generar";
+  const unidadesEsperadas = resumenCargo?.unidadesEsperadas || 0;
+  const unidadesGeneradas = resumenCargo?.unidadesGeneradas || 0;
+  const unidadesPendientes = resumenCargo?.unidadesPendientes || 0;
+  const periodoCompleto =
+    unidadesEsperadas > 0 && unidadesPendientes === 0;
+  const periodoParcial =
+    unidadesGeneradas > 0 && unidadesPendientes > 0;
+  const estadoPeriodo = periodoCompleto
+    ? "Generado"
+    : periodoParcial
+      ? "Parcial"
+      : "Sin generar";
+  const bloqueoGeneracion =
+    generando || loading || periodoCompleto || !generacionActiva;
   const proximoPeriodo = periodoSiguiente(periodoSeleccionado);
 
   const proximaLectura = useMemo(() => {
@@ -481,11 +552,21 @@ export default function ConfiguracionCargosPage() {
           <div className="flex flex-col gap-2 md:flex-row">
             <button
               onClick={generarCargosPeriodo}
-              disabled={generando || loading}
-              className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:bg-slate-100"
+              disabled={bloqueoGeneracion}
+              className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
             >
-              <PlayCircle className="h-4 w-4" />
-              {generando ? "Generando..." : "Generar cargos"}
+              {periodoCompleto ? (
+                <CheckCircle className="h-4 w-4" />
+              ) : (
+                <PlayCircle className="h-4 w-4" />
+              )}
+              {generando
+                ? "Generando..."
+                : periodoCompleto
+                  ? `Generado ${periodoSeleccionado}`
+                  : periodoParcial
+                    ? "Completar cargos"
+                    : "Generar cargos"}
             </button>
 
             <button
@@ -520,7 +601,7 @@ export default function ConfiguracionCargosPage() {
         <StatCard
           title="Mes activo"
           value={nombrePeriodo(periodo)}
-          subtitle={`${periodo} · ${resumenCantidad} cargos generados`}
+          subtitle={`${periodo} · ${unidadesGeneradas}/${unidadesEsperadas} unidades`}
           icon={CalendarDays}
           tone="blue"
         />
@@ -529,8 +610,8 @@ export default function ConfiguracionCargosPage() {
           title="Estado del período"
           value={estadoPeriodo}
           subtitle={`Facturado RD$ ${dinero(resumenTotal)}`}
-          icon={periodoGenerado ? CheckCircle : Clock}
-          tone={periodoGenerado ? "green" : "amber"}
+          icon={periodoCompleto ? CheckCircle : Clock}
+          tone={periodoCompleto ? "green" : "amber"}
         />
       </div>
 
@@ -586,7 +667,7 @@ export default function ConfiguracionCargosPage() {
 
               <span
                 className={`rounded-full px-4 py-2 ${
-                  periodoGenerado
+                  periodoCompleto
                     ? "bg-emerald-100 text-emerald-800"
                     : "bg-amber-100 text-amber-800"
                 }`}
@@ -595,7 +676,7 @@ export default function ConfiguracionCargosPage() {
               </span>
 
               <span className="rounded-full bg-white px-4 py-2 text-blue-800">
-                {resumenCantidad} cargos
+                {unidadesGeneradas}/{unidadesEsperadas} unidades
               </span>
 
               <span className="rounded-full bg-white px-4 py-2 text-blue-800">
@@ -610,18 +691,45 @@ export default function ConfiguracionCargosPage() {
             </p>
 
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              El botón generará cargos para <strong>{nombrePeriodo(periodoSeleccionado)}</strong> usando
-              el día de generación configurado: <strong>{diaGeneracion || 1}</strong>.
+              {periodoCompleto ? (
+                <>
+                  El período <strong>{periodoSeleccionado}</strong> está completo
+                  con <strong>{unidadesGeneradas} de {unidadesEsperadas} unidades</strong>
+                  y un total de <strong>RD$ {dinero(resumenTotal)}</strong>.
+                </>
+              ) : periodoParcial ? (
+                <>
+                  El período está parcialmente generado. Faltan{" "}
+                  <strong>{unidadesPendientes} unidades</strong>. El botón completará
+                  únicamente los cargos faltantes del condominio activo.
+                </>
+              ) : (
+                <>
+                  El botón generará cargos para{" "}
+                  <strong>{nombrePeriodo(periodoSeleccionado)}</strong> usando la
+                  configuración mensual del condominio activo.
+                </>
+              )}
             </p>
 
             <button
               type="button"
               onClick={generarCargosPeriodo}
-              disabled={generando || loading}
-              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:bg-slate-400"
+              disabled={bloqueoGeneracion}
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-400"
             >
-              <PlayCircle className="h-4 w-4" />
-              {generando ? "Generando..." : `Generar ${periodoSeleccionado}`}
+              {periodoCompleto ? (
+                <CheckCircle className="h-4 w-4" />
+              ) : (
+                <PlayCircle className="h-4 w-4" />
+              )}
+              {generando
+                ? "Generando..."
+                : periodoCompleto
+                  ? `Generado ${periodoSeleccionado}`
+                  : periodoParcial
+                    ? `Completar ${periodoSeleccionado}`
+                    : `Generar ${periodoSeleccionado}`}
             </button>
           </div>
         </div>
@@ -844,12 +952,22 @@ export default function ConfiguracionCargosPage() {
                 <InfoLine
                   label="Estado período"
                   value={estadoPeriodo}
-                  success={periodoGenerado}
+                  success={periodoCompleto}
                 />
                 <InfoLine
-                  label="Cargos generados"
-                  value={String(resumenCantidad)}
-                  success={resumenCantidad > 0}
+                  label="Unidades esperadas"
+                  value={String(unidadesEsperadas)}
+                  success={unidadesEsperadas > 0}
+                />
+                <InfoLine
+                  label="Unidades generadas"
+                  value={String(unidadesGeneradas)}
+                  success={periodoCompleto}
+                />
+                <InfoLine
+                  label="Unidades pendientes"
+                  value={String(unidadesPendientes)}
+                  success={unidadesPendientes === 0 && unidadesEsperadas > 0}
                 />
                 <InfoLine
                   label="Total facturado"
@@ -885,16 +1003,27 @@ export default function ConfiguracionCargosPage() {
 
                 <button
                   onClick={generarCargosPeriodo}
-                  disabled={generando}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border bg-white px-5 py-3 font-bold text-slate-700 hover:bg-slate-50 disabled:bg-slate-100"
+                  disabled={bloqueoGeneracion}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border bg-white px-5 py-3 font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                 >
-                  <PlayCircle className="h-4 w-4" />
-                  {generando ? "Generando..." : `Generar cargos ${periodoSeleccionado}`}
+                  {periodoCompleto ? (
+                    <CheckCircle className="h-4 w-4" />
+                  ) : (
+                    <PlayCircle className="h-4 w-4" />
+                  )}
+                  {generando
+                    ? "Generando..."
+                    : periodoCompleto
+                      ? `Período ${periodoSeleccionado} generado`
+                      : periodoParcial
+                        ? `Completar cargos ${periodoSeleccionado}`
+                        : `Generar cargos ${periodoSeleccionado}`}
                 </button>
 
                 <p className="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">
-                  El mes activo se selecciona en el panel superior. Esta sección solo ejecuta
-                  acciones administrativas sobre la configuración actual.
+                  El botón manual usa una función administrativa segura y afecta
+                  únicamente el condominio activo. Si el período está parcial,
+                  completa solo las unidades faltantes.
                 </p>
               </div>
             </SectionCard>

@@ -24,13 +24,21 @@ type Condominio = {
   estado?: string | null;
 };
 
-type UsuarioAdmin = {
-  id: number;
+type RepresentanteCondominio = {
+  acceso_id: number;
   user_id: string;
+  usuario_empresa_id: number | null;
+  empresa_id: number;
   condominio_id: number;
+  condominio: string;
+  condominio_estado: string | null;
+  condominio_activo: boolean;
   nombre: string;
-  rol: string;
-  estado: string;
+  correo: string | null;
+  rol_global: string | null;
+  rol_condominio: string;
+  activo: boolean;
+  created_at: string | null;
 };
 
 export default function SuperAdminPage() {
@@ -43,7 +51,7 @@ export default function SuperAdminPage() {
   const [superNombre, setSuperNombre] = useState("");
 
   const [condominios, setCondominios] = useState<Condominio[]>([]);
-  const [usuarios, setUsuarios] = useState<UsuarioAdmin[]>([]);
+  const [usuarios, setUsuarios] = useState<RepresentanteCondominio[]>([]);
 
   const [nombre, setNombre] = useState("");
   const [rnc, setRnc] = useState("");
@@ -55,7 +63,7 @@ export default function SuperAdminPage() {
   const [usuarioNombre, setUsuarioNombre] = useState("");
   const [usuarioEmail, setUsuarioEmail] = useState("");
   const [usuarioClave, setUsuarioClave] = useState("");
-  const [usuarioRol, setUsuarioRol] = useState("admin");
+  const [usuarioTelefono, setUsuarioTelefono] = useState("");
 
   useEffect(() => {
     validarAcceso();
@@ -109,18 +117,42 @@ export default function SuperAdminPage() {
     setCondominios(data || []);
   }
 
-  async function cargarUsuarios() {
-    const { data, error } = await supabase
-      .from("usuarios_admin")
-      .select("id, user_id, condominio_id, nombre, rol, estado")
-      .order("id", { ascending: false });
+  async function obtenerAccessToken() {
+    const { data, error } = await supabase.auth.getSession();
 
-    if (error) {
-      setMensaje("Error cargando usuarios: " + error.message);
-      return;
+    if (error || !data.session?.access_token) {
+      throw new Error("La sesión de Full Administrador no está disponible.");
     }
 
-    setUsuarios(data || []);
+    return data.session.access_token;
+  }
+
+  async function cargarUsuarios() {
+    try {
+      const accessToken = await obtenerAccessToken();
+      const response = await fetch("/api/super-admin/crear-usuario", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        cache: "no-store",
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        setMensaje(result.error || "No se pudieron cargar los representantes.");
+        return;
+      }
+
+      setUsuarios(result.representantes || []);
+    } catch (error) {
+      setMensaje(
+        error instanceof Error
+          ? error.message
+          : "No se pudieron cargar los representantes."
+      );
+    }
   }
 
   async function crearCondominio(e: React.FormEvent) {
@@ -164,7 +196,7 @@ export default function SuperAdminPage() {
     }
 
     alert(
-      `Condominio creado correctamente. Ahora puede crear el usuario administrador para ${nuevoCondominio?.nombre}.`
+      `Condominio creado correctamente. Ahora puede crear el representante principal para ${nuevoCondominio?.nombre}.`
     );
 
     setUsuarioCondominioId(nuevoCondominio?.id ? String(nuevoCondominio.id) : "");
@@ -184,22 +216,24 @@ export default function SuperAdminPage() {
       !usuarioCondominioId ||
       !usuarioNombre.trim() ||
       !usuarioEmail.trim() ||
-      !usuarioClave.trim() ||
-      !usuarioRol.trim()
+      !usuarioClave.trim()
     ) {
       setMensaje(
-        "Debe completar condominio, nombre, correo, clave temporal y rol."
+        "Debe completar condominio, nombre, correo y clave temporal."
       );
       return;
     }
 
-    if (usuarioClave.length < 6) {
-      setMensaje("La clave temporal debe tener al menos 6 caracteres.");
+    if (usuarioClave.length < 8) {
+      setMensaje("La clave temporal debe tener al menos 8 caracteres.");
       return;
     }
 
     const confirmar = confirm(
-      `¿Desea crear este usuario y asociarlo al condominio?\n\nNombre: ${usuarioNombre}\nCorreo: ${usuarioEmail}\nRol: ${usuarioRol}`
+      `¿Desea crear el representante principal de este condominio?
+
+Nombre: ${usuarioNombre}
+Correo: ${usuarioEmail}`
     );
 
     if (!confirmar) return;
@@ -207,39 +241,48 @@ export default function SuperAdminPage() {
     setGuardando(true);
     setMensaje("");
 
-    const response = await fetch("/api/super-admin/crear-usuario", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        condominio_id: Number(usuarioCondominioId),
-        nombre: usuarioNombre.trim(),
-        email: usuarioEmail.trim(),
-        password: usuarioClave,
-        rol: usuarioRol,
-        estado: "Activo",
-      }),
-    });
+    try {
+      const accessToken = await obtenerAccessToken();
+      const response = await fetch("/api/super-admin/crear-usuario", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          condominio_id: Number(usuarioCondominioId),
+          nombre: usuarioNombre.trim(),
+          email: usuarioEmail.trim(),
+          password: usuarioClave,
+          telefono: usuarioTelefono.trim() || null,
+        }),
+      });
 
-    const result = await response.json();
+      const result = await response.json();
 
-    setGuardando(false);
+      if (!response.ok || !result.ok) {
+        setMensaje(result.error || "No se pudo crear el representante.");
+        return;
+      }
 
-    if (!response.ok || !result.ok) {
-      setMensaje(result.error || "No se pudo crear el usuario.");
-      return;
+      alert(result.mensaje || "Representante creado correctamente.");
+
+      setUsuarioCondominioId("");
+      setUsuarioNombre("");
+      setUsuarioEmail("");
+      setUsuarioClave("");
+      setUsuarioTelefono("");
+
+      await cargarUsuarios();
+    } catch (error) {
+      setMensaje(
+        error instanceof Error
+          ? error.message
+          : "No se pudo crear el representante."
+      );
+    } finally {
+      setGuardando(false);
     }
-
-    alert("Usuario creado y asociado correctamente.");
-
-    setUsuarioCondominioId("");
-    setUsuarioNombre("");
-    setUsuarioEmail("");
-    setUsuarioClave("");
-    setUsuarioRol("admin");
-
-    cargarUsuarios();
   }
 
   function entrarAlCondominio(condominio: Condominio) {
@@ -252,39 +295,60 @@ export default function SuperAdminPage() {
     router.push("/dashboard");
   }
 
-  async function cambiarEstadoUsuario(usuario: UsuarioAdmin) {
-    const nuevoEstado = usuario.estado === "Activo" ? "Inactivo" : "Activo";
+  async function cambiarEstadoUsuario(usuario: RepresentanteCondominio) {
+    const nuevoEstado = !usuario.activo;
 
     const confirmar = confirm(
-      `¿Desea cambiar el estado del usuario ${usuario.nombre} a ${nuevoEstado}?`
+      `¿Desea ${nuevoEstado ? "activar" : "inactivar"} el acceso de ${usuario.nombre} a ${usuario.condominio}?`
     );
 
     if (!confirmar) return;
 
-    const { error } = await supabase
-      .from("usuarios_admin")
-      .update({
-        estado: nuevoEstado,
-      })
-      .eq("id", usuario.id);
+    setGuardando(true);
+    setMensaje("");
 
-    if (error) {
-      alert("Error actualizando usuario: " + error.message);
-      return;
+    try {
+      const accessToken = await obtenerAccessToken();
+      const response = await fetch("/api/super-admin/crear-usuario", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          acceso_id: usuario.acceso_id,
+          activo: nuevoEstado,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        setMensaje(result.error || "No se pudo actualizar el acceso.");
+        return;
+      }
+
+      await cargarUsuarios();
+    } catch (error) {
+      setMensaje(
+        error instanceof Error
+          ? error.message
+          : "No se pudo actualizar el acceso."
+      );
+    } finally {
+      setGuardando(false);
     }
-
-    cargarUsuarios();
   }
 
-  async function cambiarPasswordUsuario(usuario: UsuarioAdmin) {
+  async function cambiarPasswordUsuario(usuario: RepresentanteCondominio) {
     const nuevaClave = prompt(
       `Digite la nueva clave temporal para ${usuario.nombre}:`
     );
 
     if (!nuevaClave) return;
 
-    if (nuevaClave.length < 6) {
-      alert("La clave debe tener al menos 6 caracteres.");
+    if (nuevaClave.length < 8) {
+      alert("La clave debe tener al menos 8 caracteres.");
       return;
     }
 
@@ -297,27 +361,37 @@ export default function SuperAdminPage() {
     setGuardando(true);
     setMensaje("");
 
-    const response = await fetch("/api/super-admin/cambiar-password", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        user_id: usuario.user_id,
-        password: nuevaClave,
-      }),
-    });
+    try {
+      const accessToken = await obtenerAccessToken();
+      const response = await fetch("/api/super-admin/cambiar-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          user_id: usuario.user_id,
+          password: nuevaClave,
+        }),
+      });
 
-    const result = await response.json();
+      const result = await response.json();
 
-    setGuardando(false);
+      if (!response.ok || !result.ok) {
+        setMensaje(result.error || "No se pudo cambiar la clave.");
+        return;
+      }
 
-    if (!response.ok || !result.ok) {
-      setMensaje(result.error || "No se pudo cambiar la clave.");
-      return;
+      alert("Clave actualizada correctamente.");
+    } catch (error) {
+      setMensaje(
+        error instanceof Error
+          ? error.message
+          : "No se pudo cambiar la clave."
+      );
+    } finally {
+      setGuardando(false);
     }
-
-    alert("Clave actualizada correctamente.");
   }
 
   async function cerrarSesion() {
@@ -365,7 +439,7 @@ export default function SuperAdminPage() {
 
               <p className="text-sm text-slate-500 mt-2">
                 Bienvenido, {superNombre}. Desde aquí puede crear condominios,
-                crear usuarios, cambiar claves y asociarlos a cada condominio.
+                crear condominios, registrar su representante principal y administrar el acceso inicial.
               </p>
             </div>
 
@@ -500,10 +574,10 @@ export default function SuperAdminPage() {
 
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
-                  Crear usuario por condominio
+                  Crear representante principal
                 </h2>
                 <p className="text-sm text-slate-500">
-                  Crea el usuario en Auth y lo asocia al condominio.
+                  Crea el acceso inicial para que el representante configure usuarios, roles y permisos.
                 </p>
               </div>
             </div>
@@ -567,28 +641,26 @@ export default function SuperAdminPage() {
                   value={usuarioClave}
                   onChange={(e) => setUsuarioClave(e.target.value)}
                   className="w-full border rounded-xl px-4 py-3"
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder="Mínimo 8 caracteres"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-semibold mb-2">
-                  Rol
+                  Teléfono
                 </label>
 
-                <select
-                  value={usuarioRol}
-                  onChange={(e) => setUsuarioRol(e.target.value)}
-                  className="w-full border rounded-xl px-4 py-3 bg-white"
-                >
-                  <option value="admin">Admin</option>
-                  <option value="administrador">Administrador</option>
-                  <option value="presidente">Presidente</option>
-                  <option value="tesorero">Tesorero</option>
-                  <option value="secretario">Secretario</option>
-                  <option value="supervisor">Supervisor</option>
-                  <option value="tecnico">Técnico VAM</option>
-                </select>
+                <input
+                  type="text"
+                  value={usuarioTelefono}
+                  onChange={(e) => setUsuarioTelefono(e.target.value)}
+                  className="w-full border rounded-xl px-4 py-3"
+                  placeholder="Teléfono del representante"
+                />
+              </div>
+
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+                El representante recibirá el rol principal configurado para la empresa y podrá completar la configuración del condominio.
               </div>
 
               <button
@@ -596,7 +668,7 @@ export default function SuperAdminPage() {
                 disabled={guardando}
                 className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white rounded-xl px-5 py-3 font-bold"
               >
-                {guardando ? "Creando usuario..." : "Crear usuario"}
+                {guardando ? "Creando representante..." : "Crear representante"}
               </button>
             </form>
           </div>
@@ -699,10 +771,10 @@ export default function SuperAdminPage() {
 
             <div>
               <h2 className="text-xl font-bold text-slate-900">
-                Usuarios por condominio
+                Representantes principales
               </h2>
               <p className="text-sm text-slate-500">
-                Usuarios administrativos asociados a condominios.
+                Accesos iniciales creados con el modelo SaaS moderno.
               </p>
             </div>
           </div>
@@ -711,9 +783,10 @@ export default function SuperAdminPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-4 py-3 text-left">ID</th>
+                  <th className="px-4 py-3 text-left">Acceso</th>
                   <th className="px-4 py-3 text-left">Condominio</th>
-                  <th className="px-4 py-3 text-left">Nombre</th>
+                  <th className="px-4 py-3 text-left">Representante</th>
+                  <th className="px-4 py-3 text-left">Correo</th>
                   <th className="px-4 py-3 text-left">Rol</th>
                   <th className="px-4 py-3 text-left">Estado</th>
                   <th className="px-4 py-3 text-center">Acción</th>
@@ -722,26 +795,28 @@ export default function SuperAdminPage() {
 
               <tbody>
                 {usuarios.map((u) => (
-                  <tr key={u.id} className="border-t hover:bg-slate-50">
-                    <td className="px-4 py-3 font-bold">{u.id}</td>
+                  <tr key={u.acceso_id} className="border-t hover:bg-slate-50">
+                    <td className="px-4 py-3 font-bold">{u.acceso_id}</td>
 
                     <td className="px-4 py-3">
-                      {nombreCondominio(u.condominio_id)}
+                      {u.condominio || nombreCondominio(u.condominio_id)}
                     </td>
 
                     <td className="px-4 py-3 font-semibold">{u.nombre}</td>
 
-                    <td className="px-4 py-3">{u.rol}</td>
+                    <td className="px-4 py-3">{u.correo || "-"}</td>
+
+                    <td className="px-4 py-3">{u.rol_condominio}</td>
 
                     <td className="px-4 py-3">
                       <span
                         className={
-                          u.estado === "Activo"
+                          u.activo
                             ? "bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold"
                             : "bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold"
                         }
                       >
-                        {u.estado}
+                        {u.activo ? "Activo" : "Inactivo"}
                       </span>
                     </td>
 
@@ -761,7 +836,7 @@ export default function SuperAdminPage() {
                           onClick={() => cambiarEstadoUsuario(u)}
                           className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-bold"
                         >
-                          {u.estado === "Activo" ? "Desactivar" : "Activar"}
+                          {u.activo ? "Inactivar" : "Activar"}
                         </button>
                       </div>
                     </td>
@@ -771,10 +846,10 @@ export default function SuperAdminPage() {
                 {usuarios.length === 0 && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-8 text-center text-slate-500"
                     >
-                      No hay usuarios administrativos registrados.
+                      No hay representantes registrados.
                     </td>
                   </tr>
                 )}

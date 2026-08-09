@@ -787,7 +787,7 @@ export default function GastosPage() {
             label: "Mantenimiento",
             icon: WalletCards,
           },
-          { href: "/gastos", label: "Gastos", icon: ReceiptText },
+         
           {
             href: "/finanzas/caja-chica",
             label: "Caja Chica",
@@ -804,6 +804,7 @@ export default function GastosPage() {
             label: "Presupuesto",
             icon: FileSpreadsheet,
           },
+          { href: "/solicitudes-pago/agrupada", label: "Solicitud Agrupada", icon: ReceiptText },
         ]}
       />
 

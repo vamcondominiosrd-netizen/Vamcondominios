@@ -1,132 +1,72 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/app/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/app/lib/supabaseClient";
 
-export default function AuthGuard({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-
+export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-
-  const [validando, setValidando] =
-    useState(true);
+  const [validando, setValidando] = useState(true);
 
   useEffect(() => {
+    let activo = true;
 
-    async function verificarSesion() {
+    async function verificarSesionInicial() {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
 
-      try {
+      if (!activo) return;
 
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session) {
-
-          router.push("/login");
-
-          return;
-        }
-
-        const condominioId =
-          localStorage.getItem(
-            "condominio_id"
-          );
-
-        if (!condominioId) {
-
-          await supabase.auth.signOut();
-
-          router.push("/login");
-
-          return;
-        }
-
-        const { data, error } =
-          await supabase
-            .from("usuarios_admin")
-            .select(`
-              id,
-              estado,
-              condominio_id,
-              rol,
-              nombre
-            `)
-            .eq(
-              "user_id",
-              session.user.id
-            )
-            .eq(
-              "condominio_id",
-              Number(condominioId)
-            )
-            .eq(
-              "estado",
-              "Activo"
-            )
-            .maybeSingle();
-
-        if (error || !data) {
-
-          await supabase.auth.signOut();
-
-          localStorage.clear();
-
-          router.push("/login");
-
-          return;
-        }
-
-        localStorage.setItem(
-          "usuario_rol",
-          data.rol || ""
-        );
-
-        localStorage.setItem(
-          "usuario_nombre",
-          data.nombre || ""
-        );
-
-        setValidando(false);
-
-      } catch (err) {
-
-        console.error(err);
-
-        await supabase.auth.signOut();
-
-        localStorage.clear();
-
-        router.push("/login");
+      if (error) {
+        console.error("Error verificando la sesión:", error.message);
       }
+
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+
+      setValidando(false);
     }
 
-    verificarSesion();
+    void verificarSesionInicial();
 
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((evento, session) => {
+      if (!activo) return;
+
+      if (evento === "SIGNED_OUT" || !session) {
+        setValidando(true);
+        router.replace("/login");
+        return;
+      }
+
+      if (
+        evento === "INITIAL_SESSION" ||
+        evento === "SIGNED_IN" ||
+        evento === "TOKEN_REFRESHED"
+      ) {
+        setValidando(false);
+      }
+    });
+
+    return () => {
+      activo = false;
+      subscription.unsubscribe();
+    };
   }, [router]);
 
   if (validando) {
-
     return (
-
-      <div className="min-h-screen flex items-center justify-center bg-slate-100">
-
-        <div className="bg-white rounded-2xl shadow-lg px-8 py-6 text-center">
-
-          <div className="animate-pulse text-slate-600 font-medium">
-
-            Validando sesión...
-
-          </div>
-
+      <div className="flex min-h-screen items-center justify-center bg-slate-100">
+        <div className="flex items-center gap-3 rounded-2xl border bg-white px-5 py-4 text-sm font-bold text-slate-700 shadow-sm">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-700" />
+          Validando sesión...
         </div>
-
       </div>
-
     );
   }
 

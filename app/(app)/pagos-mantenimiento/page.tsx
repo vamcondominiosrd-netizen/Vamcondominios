@@ -56,6 +56,15 @@ function normalizarTexto(valor: string) {
     .toUpperCase();
 }
 
+function fechaLocalISO() {
+  const hoy = new Date();
+  const anio = hoy.getFullYear();
+  const mes = String(hoy.getMonth() + 1).padStart(2, "0");
+  const dia = String(hoy.getDate()).padStart(2, "0");
+
+  return `${anio}-${mes}-${dia}`;
+}
+
 function obtenerPermisosLocales(): string[] {
   try {
     const raw = localStorage.getItem("permisos_usuario") || "";
@@ -163,7 +172,7 @@ export default function PagosMantenimientoPage() {
 
     setPuedeGestionarHistoricos(esAdministrador || tienePermisoExplicito);
 
-    const hoy = new Date().toISOString().slice(0, 10);
+    const hoy = fechaLocalISO();
 
     setCondominioId(id);
     setCondominioNombre(nombre);
@@ -524,6 +533,34 @@ export default function PagosMantenimientoPage() {
     }
   }
 
+  function cambiarTipoRegistro(tipo: TipoRegistro) {
+    setTipoRegistro(tipo);
+    setFechaPago(fechaLocalISO());
+    setMetodoPago("");
+    setReferencia("");
+    setComprobante(null);
+    setTransaccionHistoricaId("");
+    setDescripcionHistorica("");
+    setObservacionHistorica("");
+    setUsarTransaccionImportada(true);
+    setPeriodosHistoricos([{ periodo: "", monto: "" }]);
+
+    if (tipo === "ACTIVO" && unidadSeleccionada) {
+      const cuotaConfigurada = Number(cuotaOrdinaria || 0);
+      const cuotaUnidad = Number(unidadSeleccionada.cuota_mensual_actual || 0);
+      const cuota = cuotaConfigurada > 0 ? cuotaConfigurada : cuotaUnidad;
+      setMonto(cuota > 0 ? String(cuota) : "");
+    } else {
+      setMonto("");
+    }
+
+    const inputFile = document.getElementById(
+      "comprobante",
+    ) as HTMLInputElement | null;
+
+    if (inputFile) inputFile.value = "";
+  }
+
   function seleccionarTransaccionHistorica(idSeleccionado: string) {
     setTransaccionHistoricaId(idSeleccionado);
 
@@ -693,6 +730,64 @@ export default function PagosMantenimientoPage() {
     };
   }
 
+  async function obtenerPeriodosAplicadosReales(pagoId: number) {
+    const { data, error } = await supabase
+      .from("pagos_aplicaciones")
+      .select(
+        `
+        id,
+        monto_aplicado,
+        cargos_periodicos (
+          periodo
+        )
+      `,
+      )
+      .eq("pago_id", pagoId)
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.warn(
+        "No se pudieron consultar los períodos aplicados del pago:",
+        error.message,
+      );
+
+      const { data: pagoData } = await supabase
+        .from("pagos")
+        .select("periodo")
+        .eq("id", pagoId)
+        .maybeSingle();
+
+      const periodosRespaldo = String(pagoData?.periodo || "")
+        .split(",")
+        .map((periodo) => periodo.trim())
+        .filter(Boolean);
+
+      return {
+        periodos: Array.from(new Set(periodosRespaldo)),
+        mesesTexto: Array.from(new Set(periodosRespaldo))
+          .map(nombreMesPeriodo)
+          .join(", "),
+      };
+    }
+
+    const periodos = (data || [])
+      .map((aplicacion: any) => {
+        const cargo = Array.isArray(aplicacion.cargos_periodicos)
+          ? aplicacion.cargos_periodicos[0]
+          : aplicacion.cargos_periodicos;
+
+        return String(cargo?.periodo || "").trim();
+      })
+      .filter(Boolean);
+
+    const periodosUnicos = Array.from(new Set(periodos));
+
+    return {
+      periodos: periodosUnicos,
+      mesesTexto: periodosUnicos.map(nombreMesPeriodo).join(", "),
+    };
+  }
+
   async function guardarPago(e: React.FormEvent) {
     e.preventDefault();
     setMensaje("");
@@ -840,6 +935,27 @@ export default function PagosMantenimientoPage() {
         `Paso 5 OK: Pago completo registrado. ID pago: ${pagoId}. Banco y cargos actualizados.`,
       );
 
+      agregarBitacora(
+        "Paso 5.1: Consultando los períodos realmente aplicados...",
+      );
+
+      const periodosAplicadosReales =
+        await obtenerPeriodosAplicadosReales(pagoId);
+
+      const mesesAplicadosTexto =
+        periodosAplicadosReales.mesesTexto ||
+        periodosPago.mesesTexto ||
+        nombreMesPeriodo(fechaPago.slice(0, 7));
+
+      const descripcionPagoConfirmada = `Pago mantenimiento ${mesesAplicadosTexto} - Unidad ${unidad.codigo}`;
+
+      agregarBitacora(
+        `Paso 5.1 OK: Fecha bancaria ${fechaPago}. Períodos aplicados: ${
+          periodosAplicadosReales.periodos.join(", ") ||
+          periodoPago
+        }.`,
+      );
+
       if (Number(resultadoRpc?.monto_no_aplicado || 0) > 0) {
         agregarBitacora(
           `AVISO: Quedó monto no aplicado: RD$ ${Number(
@@ -859,7 +975,7 @@ export default function PagosMantenimientoPage() {
         fecha: fechaPago,
         monto: montoNumerico,
         referencia: referenciaLimpia,
-        descripcion: descripcionPago,
+        descripcion: descripcionPagoConfirmada,
         usuario: null,
       });
 
@@ -883,12 +999,12 @@ export default function PagosMantenimientoPage() {
       agregarBitacora("Paso 7: Proceso completado correctamente.");
 
       setMensaje(
-        "Pago registrado correctamente. Cargos actualizados, Control Bancario recalculado y recibo disponible.",
+        `Pago registrado correctamente. Fecha bancaria: ${fechaPago}. Períodos aplicados: ${mesesAplicadosTexto}. Cargos actualizados, Control Bancario recalculado y recibo disponible.`,
       );
 
       setUnidadId("");
       setTipoFondo("ORDINARIO");
-      setFechaPago(new Date().toISOString().slice(0, 10));
+      setFechaPago(fechaLocalISO());
       setMonto("");
       setMetodoPago("");
       setReferencia("");
@@ -1132,7 +1248,7 @@ export default function PagosMantenimientoPage() {
         <div className="grid gap-3 md:grid-cols-2">
           <button
             type="button"
-            onClick={() => setTipoRegistro("ACTIVO")}
+            onClick={() => cambiarTipoRegistro("ACTIVO")}
             className={`rounded-xl border p-4 text-left transition ${
               tipoRegistro === "ACTIVO"
                 ? "border-blue-600 bg-blue-50 text-blue-900"
@@ -1149,7 +1265,7 @@ export default function PagosMantenimientoPage() {
           <button
             type="button"
             disabled={!puedeGestionarHistoricos}
-            onClick={() => setTipoRegistro("HISTORICO")}
+            onClick={() => cambiarTipoRegistro("HISTORICO")}
             className={`rounded-xl border p-4 text-left transition ${
               tipoRegistro === "HISTORICO"
                 ? "border-amber-600 bg-amber-50 text-amber-950"
@@ -1173,7 +1289,17 @@ export default function PagosMantenimientoPage() {
       </div>
 
       {tipoRegistro === "ACTIVO" && (
-        <PagoForm
+        <div className="space-y-4">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+            <p className="font-black">Fecha bancaria y período pagado</p>
+            <p className="mt-1">
+              La fecha del formulario es la fecha real en que entró el dinero.
+              El sistema puede aplicar ese pago a uno o varios meses anteriores
+              según los cargos pendientes de la unidad.
+            </p>
+          </div>
+
+          <PagoForm
           unidades={unidades}
           unidadId={unidadId}
           setUnidadId={setUnidadId}
@@ -1193,7 +1319,8 @@ export default function PagosMantenimientoPage() {
           cuentaAsignada={cuentaAsignada}
           guardando={guardando}
           guardarPago={guardarPago}
-        />
+          />
+        </div>
       )}
 
       {tipoRegistro === "HISTORICO" && puedeGestionarHistoricos && (

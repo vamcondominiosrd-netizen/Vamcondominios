@@ -83,6 +83,16 @@ type PagoTablaPagos = {
   } | null;
 };
 
+type PagoAnual = {
+  id: number;
+  fecha_pago: string | null;
+  monto: number | null;
+  periodo: string | null;
+  referencia: string | null;
+  descripcion: string | null;
+  origen: string | null;
+};
+
 type PagoAplicacionDetalle = {
   id: number;
   pago_id: number | null;
@@ -133,6 +143,7 @@ export default function ReciboPagoPage() {
   const [propietario, setPropietario] = useState<Propietario | null>(null);
   const [cargos, setCargos] = useState<CargoPeriodico[]>([]);
   const [aplicacionesPago, setAplicacionesPago] = useState<PagoAplicacionDetalle[]>([]);
+  const [pagosAnuales, setPagosAnuales] = useState<PagoAnual[]>([]);
 
   const anioActual = useMemo(() => {
     const fechaPago = pago?.fecha_pago || "";
@@ -232,6 +243,7 @@ export default function ReciboPagoPage() {
     setPropietario(null);
     setCargos([]);
     setAplicacionesPago([]);
+    setPagosAnuales([]);
 
     if (tipo === "pagos") {
       await cargarReciboDesdeTablaPagos();
@@ -443,6 +455,11 @@ export default function ReciboPagoPage() {
         apartamento,
         pagoTabla.fecha_pago
       ),
+      cargarPagosAnuales(
+        pagoTabla.condominio_id,
+        pagoTabla.unidad_id,
+        pagoTabla.fecha_pago
+      ),
     ]);
 
     setLoading(false);
@@ -506,6 +523,7 @@ export default function ReciboPagoPage() {
     await Promise.all([
       cargarPropietario(nombreCondominio, apartamento, condominioId),
       cargarCargosPeriodicos(condominioId, unidadId, apartamento, data.fecha_pago),
+      cargarPagosAnuales(condominioId, unidadId, data.fecha_pago),
     ]);
 
     setLoading(false);
@@ -568,6 +586,7 @@ export default function ReciboPagoPage() {
     await Promise.all([
       cargarPropietario(nombreCondominio, apartamento, condominioId),
       cargarCargosPeriodicos(condominioId, unidadId, apartamento, data.fecha_pago),
+      cargarPagosAnuales(condominioId, unidadId, data.fecha_pago),
     ]);
 
     setLoading(false);
@@ -605,6 +624,47 @@ export default function ReciboPagoPage() {
     }
 
     setPropietario((data || null) as Propietario | null);
+  }
+
+  async function cargarPagosAnuales(
+    condominioId: number | null,
+    unidadId: number | null,
+    fechaPago: string | null
+  ) {
+    if (!condominioId || !unidadId) {
+      setPagosAnuales([]);
+      return;
+    }
+
+    const anioTexto =
+      String(fechaPago || "").split("-")[0] || String(new Date().getFullYear());
+    const anio = Number(anioTexto);
+
+    if (!anio || anio < 2000 || anio > 2100) {
+      setPagosAnuales([]);
+      return;
+    }
+
+    const desde = `${anio}-01-01`;
+    const hasta = `${anio}-12-31`;
+
+    const { data, error } = await supabase
+      .from("pagos")
+      .select("id, fecha_pago, monto, periodo, referencia, descripcion, origen")
+      .eq("condominio_id", Number(condominioId))
+      .eq("unidad_id", Number(unidadId))
+      .gte("fecha_pago", desde)
+      .lte("fecha_pago", hasta)
+      .order("fecha_pago", { ascending: true })
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.error("Error cargando pagos reales del año:", error.message);
+      setPagosAnuales([]);
+      return;
+    }
+
+    setPagosAnuales((data || []) as PagoAnual[]);
   }
 
   async function cargarCargosPeriodicos(
@@ -711,8 +771,20 @@ export default function ReciboPagoPage() {
     0
   );
 
-  const totalPagado = detalleMensual.reduce(
+  // Este total representa lo aplicado/registrado en los cargos periódicos.
+  // No debe confundirse con el dinero realmente registrado como pagos del año.
+  const totalAplicadoCargos = detalleMensual.reduce(
     (sum, item) => sum + item.montoPagado,
+    0
+  );
+
+  // Fuente correcta para "Pagos del año": tabla `pagos`.
+  // Un pago convertido a histórico deja de formar parte de `pagos`,
+  // por lo que no debe inflar el total corriente del año.
+  const cantidadPagosAnio = pagosAnuales.length;
+
+  const totalPagosAnio = pagosAnuales.reduce(
+    (sum, item) => sum + Number(item.monto || 0),
     0
   );
 
@@ -724,7 +796,7 @@ export default function ReciboPagoPage() {
   const estadoGeneral =
     balancePendiente <= 0 && totalCargos > 0
       ? "Al día"
-      : totalPagado > 0
+      : totalAplicadoCargos > 0
       ? "Con balance pendiente"
       : "Pendiente";
 
@@ -1038,9 +1110,12 @@ Tel. 829-792-9292`;
             </div>
 
             <div className="border-r p-2 bg-slate-50">
-              <p className="font-bold text-slate-600">Total pagado año</p>
+              <p className="font-bold text-slate-600">Pagos reales del año</p>
               <p className="text-[15px] font-black text-slate-700">
-                RD$ {dinero(totalPagado)}
+                RD$ {dinero(totalPagosAnio)}
+              </p>
+              <p className="mt-0.5 text-[9px] font-bold text-slate-500">
+                {cantidadPagosAnio} pago{cantidadPagosAnio === 1 ? "" : "s"} registrado{cantidadPagosAnio === 1 ? "" : "s"}
               </p>
             </div>
 
@@ -1165,9 +1240,73 @@ Tel. 829-792-9292`;
           </div>
         )}
 
+        <div className="mt-5 page-break-inside-avoid">
+          <h3 className="font-black uppercase border-b pb-1 mb-2">
+            Pagos registrados del año {anioActual}
+          </h3>
+
+          <div className="overflow-auto border rounded-lg">
+            <table className="min-w-full text-sm print-table">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="p-2 border">Pago</th>
+                  <th className="p-2 border">Fecha</th>
+                  <th className="p-2 border">Período</th>
+                  <th className="p-2 border">Referencia</th>
+                  <th className="p-2 border text-right">Monto</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {pagosAnuales.map((item) => (
+                  <tr key={item.id}>
+                    <td className="p-2 border font-bold">#{item.id}</td>
+                    <td className="p-2 border">{formatoFecha(item.fecha_pago)}</td>
+                    <td className="p-2 border">
+                      {formatearPeriodos(item.periodo) ||
+                        extraerMesDesdeDescripcion(item.descripcion) ||
+                        "-"}
+                    </td>
+                    <td className="p-2 border">{item.referencia || "-"}</td>
+                    <td className="p-2 border text-right font-black text-green-700">
+                      RD$ {dinero(item.monto)}
+                    </td>
+                  </tr>
+                ))}
+
+                {pagosAnuales.length === 0 && (
+                  <tr>
+                    <td className="p-3 border text-center" colSpan={5}>
+                      No hay pagos corrientes registrados para esta unidad en {anioActual}.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+
+              {pagosAnuales.length > 0 && (
+                <tfoot className="bg-slate-100 font-black">
+                  <tr>
+                    <td className="p-2 border text-right" colSpan={3}>
+                      {cantidadPagosAnio} PAGO{cantidadPagosAnio === 1 ? "" : "S"} REGISTRADO{cantidadPagosAnio === 1 ? "" : "S"}
+                    </td>
+                    <td className="p-2 border text-right">TOTAL</td>
+                    <td className="p-2 border text-right">
+                      RD$ {dinero(totalPagosAnio)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+
+          <p className="mt-1 text-[10px] text-slate-500">
+            Este resumen se calcula desde la tabla de pagos vigentes. Los pagos convertidos a históricos no se contabilizan como pagos corrientes del año.
+          </p>
+        </div>
+
         <div className="mt-5">
           <h3 className="font-black uppercase border-b pb-1 mb-2">
-            Estado mensual del año {anioActual}
+            Estado mensual de cargos del año {anioActual}
           </h3>
 
           <div className="overflow-auto border rounded-lg">
@@ -1220,12 +1359,12 @@ Tel. 829-792-9292`;
               {detalleMensual.length > 0 && (
                 <tfoot className="bg-slate-100 font-black">
                   <tr>
-                    <td className="p-2 border text-right">TOTALES</td>
+                    <td className="p-2 border text-right">TOTALES DE CARGOS</td>
                     <td className="p-2 border text-right">
                       RD$ {dinero(totalCargos)}
                     </td>
                     <td className="p-2 border text-right">
-                      RD$ {dinero(totalPagado)}
+                      RD$ {dinero(totalAplicadoCargos)}
                     </td>
                     <td className="p-2 border text-right">
                       RD$ {dinero(balancePendiente)}
