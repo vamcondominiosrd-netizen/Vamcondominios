@@ -125,7 +125,7 @@ const submenuOperativo: MenuItem[] = [
   { href: "/incidencias", label: "Incidencias", icon: Megaphone },
   { href: "/autorizaciones", label: "Autorizaciones", icon: ShieldCheck },
   { href: "/gas", label: "Gas", icon: BadgeDollarSign },
-  { href: "/checklist-visitas", label: "Checklist", icon: ClipboardList },
+  { href: "/movil/tecnico/checklist-visita", label: "Checklist", icon: ClipboardList },
 ];
 
 const submenuRecursosHumanos: MenuItem[] = [

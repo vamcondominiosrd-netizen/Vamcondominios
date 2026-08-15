@@ -61,8 +61,6 @@ type RespuestaPropietario = {
   token?: string;
   expira_en?: string;
   propiedades?: PropietarioSesion[];
-  debe_cambiar_clave?: boolean;
-  clave_temporal_hasta?: string | null;
 };
 
 type RespuestaDirectiva = {
@@ -289,16 +287,6 @@ export default function LoginMovilVAMPage() {
   const [tokenPropietario, setTokenPropietario] = useState("");
   const [tokenExpiraEn, setTokenExpiraEn] = useState("");
   const [mostrarSelectorPropiedad, setMostrarSelectorPropiedad] =
-    useState(false);
-
-  const [mostrarCambioClaveTemporal, setMostrarCambioClaveTemporal] =
-    useState(false);
-  const [nuevaClavePersonal, setNuevaClavePersonal] = useState("");
-  const [confirmarNuevaClavePersonal, setConfirmarNuevaClavePersonal] =
-    useState("");
-  const [mostrarNuevaClavePersonal, setMostrarNuevaClavePersonal] =
-    useState(false);
-  const [mostrarConfirmarNuevaClavePersonal, setMostrarConfirmarNuevaClavePersonal] =
     useState(false);
 
   useEffect(() => {
@@ -557,19 +545,6 @@ export default function LoginMovilVAMPage() {
     setTokenPropietario(token);
     setTokenExpiraEn(String(respuesta.expira_en || ""));
 
-    if (respuesta.debe_cambiar_clave === true) {
-      setPropiedadesDisponibles([]);
-      setMostrarSelectorPropiedad(false);
-      setNuevaClavePersonal("");
-      setConfirmarNuevaClavePersonal("");
-      setMostrarCambioClaveTemporal(true);
-      mostrarExito(
-        respuesta.mensaje ||
-          "Debe crear su contraseña personal para continuar."
-      );
-      return;
-    }
-
     if (propiedades.length > 1) {
       limpiarSesionesLocales();
       localStorage.setItem("propietario_token", token);
@@ -680,92 +655,6 @@ export default function LoginMovilVAMPage() {
         error instanceof Error
           ? error.message
           : "No fue posible activar la cuenta del propietario."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function guardarClavePersonal(event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-
-    if (!tokenPropietario) {
-      mostrarError(
-        "La sesión temporal no está disponible. Inicie sesión nuevamente."
-      );
-      setMostrarCambioClaveTemporal(false);
-      return;
-    }
-
-    if (nuevaClavePersonal.length < 8) {
-      mostrarError("La nueva contraseña debe tener al menos 8 caracteres.");
-      return;
-    }
-
-    if (nuevaClavePersonal !== confirmarNuevaClavePersonal) {
-      mostrarError("Las contraseñas no coinciden.");
-      return;
-    }
-
-    if (nuevaClavePersonal === clavePropietario) {
-      mostrarError(
-        "La nueva contraseña debe ser diferente de la clave temporal."
-      );
-      return;
-    }
-
-    setLoading(true);
-    limpiarMensaje();
-
-    try {
-      const { data, error } = await supabase.rpc(
-        "propietario_cambiar_clave_temporal",
-        {
-          p_token: tokenPropietario,
-          p_nueva_clave: nuevaClavePersonal,
-        }
-      );
-
-      if (error) {
-        mostrarError(error.message);
-        return;
-      }
-
-      const respuesta = extraerRespuesta<{
-        ok?: boolean;
-        mensaje?: string;
-        message?: string;
-      }>(data);
-
-      if (!respuesta.ok) {
-        mostrarError(
-          respuesta.mensaje ||
-            respuesta.message ||
-            "No fue posible guardar la nueva contraseña."
-        );
-        return;
-      }
-
-      limpiarSesionesLocales();
-
-      setMostrarCambioClaveTemporal(false);
-      setTokenPropietario("");
-      setTokenExpiraEn("");
-      setClavePropietario("");
-      setNuevaClavePersonal("");
-      setConfirmarNuevaClavePersonal("");
-      setMostrarNuevaClavePersonal(false);
-      setMostrarConfirmarNuevaClavePersonal(false);
-
-      mostrarExito(
-        respuesta.mensaje ||
-          "Contraseña personal creada correctamente. Inicie sesión nuevamente."
-      );
-    } catch (error: unknown) {
-      mostrarError(
-        error instanceof Error
-          ? error.message
-          : "No fue posible guardar la nueva contraseña."
       );
     } finally {
       setLoading(false);
@@ -1585,149 +1474,6 @@ export default function LoginMovilVAMPage() {
           </section>
         </div>
       </main>
-
-      {mostrarCambioClaveTemporal && (
-        <div className="fixed inset-0 z-[195] flex items-center justify-center bg-slate-950/80 p-3 backdrop-blur-sm">
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="titulo-cambiar-clave-temporal"
-            className="w-full max-w-md overflow-hidden rounded-[1.75rem] bg-white shadow-2xl"
-          >
-            <header className="bg-gradient-to-r from-blue-800 to-slate-950 px-5 py-5 text-white">
-              <div className="flex items-start gap-3">
-                <div className="rounded-2xl bg-white/15 p-3">
-                  <KeyRound className="h-6 w-6" />
-                </div>
-
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/70">
-                    Seguridad de su cuenta
-                  </p>
-
-                  <h2
-                    id="titulo-cambiar-clave-temporal"
-                    className="mt-1 text-xl font-black"
-                  >
-                    Cree su contraseña personal
-                  </h2>
-
-                  <p className="mt-1 text-xs leading-5 text-blue-100">
-                    La clave entregada por VAM es temporal. Debe crear una
-                    contraseña personal antes de continuar.
-                  </p>
-                </div>
-              </div>
-            </header>
-
-            <form onSubmit={guardarClavePersonal} className="space-y-4 p-5">
-              <div>
-                <label className="mb-1 block text-xs font-bold text-slate-700">
-                  Nueva contraseña
-                </label>
-
-                <div className="relative">
-                  <input
-                    type={mostrarNuevaClavePersonal ? "text" : "password"}
-                    autoComplete="new-password"
-                    value={nuevaClavePersonal}
-                    onChange={(event) =>
-                      setNuevaClavePersonal(event.target.value)
-                    }
-                    placeholder="Mínimo 8 caracteres"
-                    disabled={loading}
-                    className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMostrarNuevaClavePersonal((actual) => !actual)
-                    }
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    aria-label="Mostrar u ocultar nueva contraseña"
-                  >
-                    {mostrarNuevaClavePersonal ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-bold text-slate-700">
-                  Confirmar contraseña
-                </label>
-
-                <div className="relative">
-                  <input
-                    type={
-                      mostrarConfirmarNuevaClavePersonal ? "text" : "password"
-                    }
-                    autoComplete="new-password"
-                    value={confirmarNuevaClavePersonal}
-                    onChange={(event) =>
-                      setConfirmarNuevaClavePersonal(event.target.value)
-                    }
-                    placeholder="Repita su nueva contraseña"
-                    disabled={loading}
-                    className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMostrarConfirmarNuevaClavePersonal(
-                        (actual) => !actual
-                      )
-                    }
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    aria-label="Mostrar u ocultar confirmación"
-                  >
-                    {mostrarConfirmarNuevaClavePersonal ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-xs leading-5 text-blue-800">
-                Use una contraseña que pueda recordar. Debe ser diferente de
-                la clave temporal entregada por VAM.
-              </div>
-
-              {mensaje && (
-                <div
-                  role="alert"
-                  className={`rounded-xl border px-3 py-2.5 text-xs leading-5 ${claseMensaje}`}
-                >
-                  {mensaje}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-800 px-4 text-sm font-black text-white transition hover:bg-blue-900 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ShieldCheck className="h-4 w-4" />
-                )}
-
-                {loading
-                  ? "Guardando contraseña..."
-                  : "Guardar mi contraseña"}
-              </button>
-            </form>
-          </section>
-        </div>
-      )}
 
       {mostrarSelectorPropiedad && propiedadesDisponibles.length > 0 && (
         <div className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/80 p-3 backdrop-blur-sm">

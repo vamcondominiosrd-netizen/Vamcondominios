@@ -43,7 +43,6 @@ type ResumenCargo = {
   unidadesEsperadas: number;
   unidadesGeneradas: number;
   unidadesPendientes: number;
-  cargosDuplicados: number;
 };
 
 function periodoActual() {
@@ -81,44 +80,6 @@ function moverPeriodo(periodo: string, meses: number) {
 
 function periodoSiguiente(periodo: string) {
   return moverPeriodo(periodo, 1);
-}
-
-/**
- * Normaliza nombres históricos del mismo concepto de cargo.
- *
- * VAM ha usado en distintos momentos etiquetas como MANT, MANTENIMIENTO
- * y ORDINARIO para la cuota mensual regular. Para efectos de control de
- * duplicidad deben considerarse el mismo tipo de cargo.
- */
-function normalizarTipoCargo(tipo: string | null | undefined) {
-  const valor = String(tipo || "")
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, " ");
-
-  if (
-    [
-      "ORDINARIO",
-      "MANT",
-      "MANTENIMIENTO",
-      "MANTENIMIENTO ORDINARIO",
-      "CUOTA ORDINARIA",
-      "CUOTA MANTENIMIENTO",
-      "CUOTA DE MANTENIMIENTO",
-    ].includes(valor)
-  ) {
-    return "ORDINARIO";
-  }
-
-  if (["EXTRA", "EXTRAORDINARIO", "CUOTA EXTRAORDINARIA"].includes(valor)) {
-    return "EXTRAORDINARIO";
-  }
-
-  if (["RESERVA", "FONDO RESERVA", "FONDO DE RESERVA"].includes(valor)) {
-    return "RESERVA";
-  }
-
-  return valor;
 }
 
 export default function ConfiguracionCargosPage() {
@@ -267,38 +228,28 @@ export default function ConfiguracionCargosPage() {
     }[];
 
     const unidadesEsperadas = Number(unidadesRespuesta.count || 0);
-    const tipoSeleccionadoNormalizado = normalizarTipoCargo(tipoCargo);
-
-    // IMPORTANTE: el resumen y el bloqueo deben usar el mismo concepto de cargo.
-    // Un cargo histórico MANT/MANTENIMIENTO equivale a ORDINARIO y no debe
-    // habilitar nuevamente la generación mensual para esa unidad.
-    const registrosTipo = registros.filter(
-      (item) =>
-        item.unidad_id !== null &&
-        normalizarTipoCargo(item.tipo_cargo) === tipoSeleccionadoNormalizado
-    );
-
     const unidadesGeneradas = new Set(
-      registrosTipo.map((item) => Number(item.unidad_id))
+      registros
+        .filter(
+          (item) =>
+            item.unidad_id !== null &&
+            item.tipo_cargo === tipoCargo
+        )
+        .map((item) => Number(item.unidad_id))
     ).size;
-
-    const cargosDuplicados = Math.max(
-      registrosTipo.length - unidadesGeneradas,
-      0
-    );
 
     return {
       periodo: periodoConsulta,
-      cantidad: registrosTipo.length,
-      total: registrosTipo.reduce(
+      cantidad: registros.length,
+      total: registros.reduce(
         (sum, item) => sum + Number(item.monto || 0),
         0
       ),
-      totalPagado: registrosTipo.reduce(
+      totalPagado: registros.reduce(
         (sum, item) => sum + Number(item.monto_pagado || 0),
         0
       ),
-      totalBalance: registrosTipo.reduce(
+      totalBalance: registros.reduce(
         (sum, item) => sum + Number(item.balance || 0),
         0
       ),
@@ -308,7 +259,6 @@ export default function ConfiguracionCargosPage() {
         unidadesEsperadas - unidadesGeneradas,
         0
       ),
-      cargosDuplicados,
     };
   }
 
@@ -502,16 +452,6 @@ export default function ConfiguracionCargosPage() {
         ? "completarán los cargos faltantes"
         : "generarán los cargos";
 
-    if (resumenAntes.cargosDuplicados > 0) {
-      alert(
-        `ATENCIÓN: el período ${periodoSeleccionado} ya contiene cargos duplicados.\n\n` +
-          `Cargos duplicados detectados: ${resumenAntes.cargosDuplicados}\n` +
-          `Unidades reconocidas: ${resumenAntes.unidadesGeneradas} de ${resumenAntes.unidadesEsperadas}\n\n` +
-          "Por seguridad, VAM ha bloqueado una nueva generación para este período. Debe corregirse la duplicidad antes de continuar."
-      );
-      return;
-    }
-
     const confirmar = confirm(
       `Se ${accion} del período ${periodoSeleccionado}.\n\n` +
         `Condominio: ${condominioNombre || condominioId}\n` +
@@ -524,39 +464,6 @@ export default function ConfiguracionCargosPage() {
     if (!confirmar) return;
 
     setGenerando(true);
-
-    // Segunda validación inmediatamente antes de llamar al RPC.
-    // Evita duplicar cargos si otro proceso/usuario generó el período mientras
-    // estaba abierto el mensaje de confirmación.
-    const resumenRevalidado = await consultarResumenPeriodo(
-      condominioId,
-      periodoSeleccionado
-    );
-
-    if (!resumenRevalidado) {
-      setGenerando(false);
-      return;
-    }
-
-    setResumenCargo(resumenRevalidado);
-
-    if (resumenRevalidado.cargosDuplicados > 0) {
-      setGenerando(false);
-      alert(
-        `Operación cancelada. El período ${periodoSeleccionado} contiene ${resumenRevalidado.cargosDuplicados} cargo(s) duplicado(s).`
-      );
-      return;
-    }
-
-    if (resumenRevalidado.unidadesPendientes === 0) {
-      setGenerando(false);
-      alert(
-        `Operación cancelada. El período ${periodoSeleccionado} ya está completo.\n\n` +
-          `Unidades generadas: ${resumenRevalidado.unidadesGeneradas} de ${resumenRevalidado.unidadesEsperadas}\n` +
-          `Total facturado: RD$ ${dinero(resumenRevalidado.total)}`
-      );
-      return;
-    }
 
     const { data, error } = await supabase.rpc(
       "vam_generar_cargos_condominio_mes_admin",
@@ -617,7 +524,6 @@ export default function ConfiguracionCargosPage() {
   const unidadesEsperadas = resumenCargo?.unidadesEsperadas || 0;
   const unidadesGeneradas = resumenCargo?.unidadesGeneradas || 0;
   const unidadesPendientes = resumenCargo?.unidadesPendientes || 0;
-  const cargosDuplicados = resumenCargo?.cargosDuplicados || 0;
   const periodoCompleto =
     unidadesEsperadas > 0 && unidadesPendientes === 0;
   const periodoParcial =
@@ -628,11 +534,7 @@ export default function ConfiguracionCargosPage() {
       ? "Parcial"
       : "Sin generar";
   const bloqueoGeneracion =
-    generando ||
-    loading ||
-    periodoCompleto ||
-    cargosDuplicados > 0 ||
-    !generacionActiva;
+    generando || loading || periodoCompleto || !generacionActiva;
   const proximoPeriodo = periodoSiguiente(periodoSeleccionado);
 
   const proximaLectura = useMemo(() => {
@@ -660,13 +562,11 @@ export default function ConfiguracionCargosPage() {
               )}
               {generando
                 ? "Generando..."
-                : cargosDuplicados > 0
-                  ? "Bloqueado: cargos duplicados"
-                  : periodoCompleto
-                    ? `Generado ${periodoSeleccionado}`
-                    : periodoParcial
-                      ? "Completar cargos"
-                      : "Generar cargos"}
+                : periodoCompleto
+                  ? `Generado ${periodoSeleccionado}`
+                  : periodoParcial
+                    ? "Completar cargos"
+                    : "Generar cargos"}
             </button>
 
             <button
@@ -791,13 +691,7 @@ export default function ConfiguracionCargosPage() {
             </p>
 
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              {cargosDuplicados > 0 ? (
-                <>
-                  El período <strong>{periodoSeleccionado}</strong> contiene
-                  <strong> {cargosDuplicados} cargo(s) duplicado(s)</strong>. La
-                  generación está bloqueada por seguridad hasta corregirlos.
-                </>
-              ) : periodoCompleto ? (
+              {periodoCompleto ? (
                 <>
                   El período <strong>{periodoSeleccionado}</strong> está completo
                   con <strong>{unidadesGeneradas} de {unidadesEsperadas} unidades</strong>
@@ -831,13 +725,11 @@ export default function ConfiguracionCargosPage() {
               )}
               {generando
                 ? "Generando..."
-                : cargosDuplicados > 0
-                  ? "Bloqueado: cargos duplicados"
-                  : periodoCompleto
-                    ? `Generado ${periodoSeleccionado}`
-                    : periodoParcial
-                      ? `Completar ${periodoSeleccionado}`
-                      : `Generar ${periodoSeleccionado}`}
+                : periodoCompleto
+                  ? `Generado ${periodoSeleccionado}`
+                  : periodoParcial
+                    ? `Completar ${periodoSeleccionado}`
+                    : `Generar ${periodoSeleccionado}`}
             </button>
           </div>
         </div>
@@ -1078,11 +970,6 @@ export default function ConfiguracionCargosPage() {
                   success={unidadesPendientes === 0 && unidadesEsperadas > 0}
                 />
                 <InfoLine
-                  label="Cargos duplicados"
-                  value={String(cargosDuplicados)}
-                  success={cargosDuplicados === 0 && resumenCantidad > 0}
-                />
-                <InfoLine
                   label="Total facturado"
                   value={`RD$ ${dinero(resumenTotal)}`}
                   success={resumenTotal > 0}
@@ -1126,13 +1013,11 @@ export default function ConfiguracionCargosPage() {
                   )}
                   {generando
                     ? "Generando..."
-                    : cargosDuplicados > 0
-                      ? "Bloqueado: cargos duplicados"
-                      : periodoCompleto
-                        ? `Período ${periodoSeleccionado} generado`
-                        : periodoParcial
-                          ? `Completar cargos ${periodoSeleccionado}`
-                          : `Generar cargos ${periodoSeleccionado}`}
+                    : periodoCompleto
+                      ? `Período ${periodoSeleccionado} generado`
+                      : periodoParcial
+                        ? `Completar cargos ${periodoSeleccionado}`
+                        : `Generar cargos ${periodoSeleccionado}`}
                 </button>
 
                 <p className="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">

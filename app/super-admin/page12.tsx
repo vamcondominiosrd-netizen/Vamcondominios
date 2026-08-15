@@ -11,7 +11,7 @@ import {
   RefreshCcw,
   UserPlus,
   KeyRound,
-  Settings2,
+  Smartphone,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -737,29 +737,14 @@ Correo: ${usuarioEmail}`
                     </td>
 
                     <td className="px-4 py-3 text-center">
-                      <div className="flex flex-wrap items-center justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            router.push(
-                              `/super-admin/modulos?condominio_id=${c.id}`
-                            )
-                          }
-                          className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-900"
-                        >
-                          <Settings2 className="h-4 w-4" />
-                          Módulos
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => entrarAlCondominio(c)}
-                          className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800"
-                        >
-                          Entrar
-                          <ArrowRight className="h-4 w-4" />
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => entrarAlCondominio(c)}
+                        className="inline-flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white px-3 py-2 rounded-xl text-xs font-bold"
+                      >
+                        Entrar
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
                     </td>
                   </tr>
                 ))}

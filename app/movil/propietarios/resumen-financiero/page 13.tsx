@@ -57,14 +57,7 @@ export default function TransparenciaFinancieraPage(){
   const cierreValidado=(cierreResp.data as CierreBancario)||null;
   if(!cierreValidado||!esPeriodoCerrado(cierreValidado.estado)){setError("Este periodo todavía no está cerrado y no está disponible para propietarios.");setCierre(null);setGastos([]);setConsultando(false);return;}
   const {from,to}=range(p);
-  const gastosResp=await supabase
-   .from("gastos")
-   .select("id,condominio_id,fecha,categoria,descripcion,proveedor,monto,concepto,detalle_gasto,total,no_factura,factura_url,cheque_url,numero_cheque,fecha_pago")
-   .eq("condominio_id",s.condominio_id)
-   .or(`and(fecha_pago.gte.${from},fecha_pago.lt.${to}),and(fecha_pago.is.null,fecha.gte.${from},fecha.lt.${to})`)
-   .order("fecha_pago",{ascending:false,nullsFirst:false})
-   .order("fecha",{ascending:false})
-   .order("id",{ascending:false});
+  const gastosResp=await supabase.from("gastos").select("id,condominio_id,fecha,categoria,descripcion,proveedor,monto,concepto,detalle_gasto,total,no_factura,factura_url,cheque_url,numero_cheque,fecha_pago").eq("condominio_id",s.condominio_id).gte("fecha",from).lt("fecha",to).order("fecha",{ascending:false}).order("id",{ascending:false});
   if(gastosResp.error){setError(`No se pudieron cargar los gastos: ${gastosResp.error.message}`);setGastos([])}else setGastos((gastosResp.data||[]) as Gasto[]);
   setCierre(cierreValidado);setConsultando(false);
  }

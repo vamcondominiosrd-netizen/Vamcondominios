@@ -83,12 +83,12 @@ const tarjetasConfiguracion: ConfigCard[] = [
     tone: "amber",
   },
   {
-    title: "Parámetros del Sistema",
+    title: "Crear usuarios a Propietarios",
     description:
-      "Espacio reservado para ajustes generales de VAM, numeraciones y reglas globales.",
-    href: "#",
+      "Crear usuarios a los propietarios.",
+    href: "/super-admin/accesos-propietarios",
     icon: SlidersHorizontal,
-    status: "Pendiente",
+    status: "Activo",
     tone: "slate",
   },
   {

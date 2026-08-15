@@ -11,6 +11,7 @@ import {
   RefreshCcw,
   UserPlus,
   KeyRound,
+  Smartphone,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -439,11 +440,22 @@ Correo: ${usuarioEmail}`
 
               <p className="text-sm text-slate-500 mt-2">
                 Bienvenido, {superNombre}. Desde aquí puede crear condominios,
-                crear condominios, registrar su representante principal y administrar el acceso inicial.
+                registrar su representante principal y administrar el acceso inicial.
               </p>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  router.push("/super-admin/accesos-propietarios")
+                }
+                className="bg-blue-700 hover:bg-blue-800 text-white px-4 py-3 rounded-xl font-bold flex items-center gap-2"
+              >
+                <Smartphone className="h-5 w-5" />
+                Accesos propietarios
+              </button>
+
               <button
                 type="button"
                 onClick={cargarTodo}
