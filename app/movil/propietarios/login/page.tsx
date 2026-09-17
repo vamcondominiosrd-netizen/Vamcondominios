@@ -38,6 +38,7 @@ type Unidad = {
 
 type ModoPortal = "propietario" | "directiva";
 type VistaPropietario = "entrar" | "activar";
+type VistaDirectiva = "entrar" | "activar";
 type TipoMensaje = "error" | "exito" | "info";
 
 type PropietarioSesion = {
@@ -73,6 +74,14 @@ type RespuestaDirectiva = {
   rol_general?: string;
   empresa_id?: number;
   condominio_id?: number;
+};
+
+type CondominioDirectiva = {
+  condominio_id: number;
+  condominio_nombre: string;
+  condominio_logo_url?: string | null;
+  rol_condominio?: string | null;
+  empresa_id?: number | null;
 };
 
 type ModoVisualizacion = "Normal" | "Destacado" | "Obligatorio";
@@ -253,6 +262,8 @@ export default function LoginMovilVAMPage() {
   const [modoPortal, setModoPortal] = useState<ModoPortal>("propietario");
   const [vistaPropietario, setVistaPropietario] =
     useState<VistaPropietario>("entrar");
+  const [vistaDirectiva, setVistaDirectiva] =
+    useState<VistaDirectiva>("entrar");
 
   const [condominios, setCondominios] = useState<Condominio[]>([]);
   const [unidades, setUnidades] = useState<Unidad[]>([]);
@@ -268,8 +279,16 @@ export default function LoginMovilVAMPage() {
   const [mostrarConfirmacion, setMostrarConfirmacion] = useState(false);
 
   const [correoDirectiva, setCorreoDirectiva] = useState("");
+  const [cedulaDirectiva, setCedulaDirectiva] = useState("");
+  const [codigoActivacionDirectiva, setCodigoActivacionDirectiva] = useState("");
   const [claveDirectiva, setClaveDirectiva] = useState("");
+  const [confirmarClaveDirectiva, setConfirmarClaveDirectiva] = useState("");
   const [mostrarClaveDirectiva, setMostrarClaveDirectiva] = useState(false);
+  const [mostrarConfirmarClaveDirectiva, setMostrarConfirmarClaveDirectiva] = useState(false);
+  const [condominiosDirectiva, setCondominiosDirectiva] = useState<
+    CondominioDirectiva[]
+  >([]);
+  const [mostrarSelectorDirectiva, setMostrarSelectorDirectiva] = useState(false);
 
   const [mensaje, setMensaje] = useState("");
   const [tipoMensaje, setTipoMensaje] = useState<TipoMensaje>("info");
@@ -394,6 +413,7 @@ export default function LoginMovilVAMPage() {
 
     setModoPortal(nuevoModo);
     setVistaPropietario("entrar");
+    setVistaDirectiva("entrar");
     setCondominioId("");
     setUnidadId("");
     setUnidades([]);
@@ -403,6 +423,8 @@ export default function LoginMovilVAMPage() {
     setCodigoActivacion("");
     setCorreoDirectiva("");
     setClaveDirectiva("");
+    setCondominiosDirectiva([]);
+    setMostrarSelectorDirectiva(false);
     limpiarMensaje();
   }
 
@@ -801,13 +823,281 @@ export default function LoginMovilVAMPage() {
     limpiarMensaje();
   }
 
-  async function entrarDirectiva(event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
+  async function completarIngresoDirectiva(condominio: CondominioDirectiva) {
+    const { data: usuarioData, error: usuarioError } = await supabase.auth.getUser();
 
-    if (!condominioId) {
-      mostrarError("Debe seleccionar el condominio.");
+    if (usuarioError || !usuarioData.user) {
+      await supabase.auth.signOut();
+      mostrarError("La sesión de la directiva no está disponible. Inicie sesión nuevamente.");
+      setMostrarSelectorDirectiva(false);
       return;
     }
+
+    const usuario = usuarioData.user;
+    const rol =
+      condominio.rol_condominio ||
+      usuario.user_metadata?.role ||
+      usuario.app_metadata?.role ||
+      "Usuario";
+
+    if (!rolDirectivaPermitido(rol)) {
+      await supabase.auth.signOut();
+      mostrarError(
+        "Este usuario no tiene permiso para entrar al módulo móvil de directiva."
+      );
+      setMostrarSelectorDirectiva(false);
+      return;
+    }
+
+    const nombreUsuario =
+      usuario.user_metadata?.full_name ||
+      usuario.user_metadata?.name ||
+      usuario.email ||
+      "Miembro de la directiva";
+
+    const sesionDirectiva = {
+      tipo_usuario: "DIRECTIVA",
+      usuario_id: usuario.id,
+      usuario_nombre: nombreUsuario,
+      nombre: nombreUsuario,
+      correo: usuario.email || correoDirectiva.trim().toLowerCase(),
+      rol,
+      empresa_id: condominio.empresa_id || null,
+      condominio_id: Number(condominio.condominio_id),
+      condominio_nombre: condominio.condominio_nombre || "Condominio",
+      condominio_logo_url: condominio.condominio_logo_url || "",
+    };
+
+    limpiarSesionesLocales();
+
+    localStorage.setItem("directiva_actual", JSON.stringify(sesionDirectiva));
+    localStorage.setItem(
+      "condominio_id",
+      String(sesionDirectiva.condominio_id)
+    );
+    localStorage.setItem(
+      "condominio_nombre",
+      sesionDirectiva.condominio_nombre
+    );
+    localStorage.setItem(
+      "condominio_logo_url",
+      sesionDirectiva.condominio_logo_url
+    );
+    localStorage.setItem("usuario_admin_id", usuario.id);
+    localStorage.setItem("usuario_nombre", nombreUsuario);
+    localStorage.setItem("usuario_rol", String(rol));
+
+    setMostrarSelectorDirectiva(false);
+    setCondominiosDirectiva([]);
+    router.replace("/movil/directiva");
+  }
+
+  function cambiarVistaDirectiva(nuevaVista: VistaDirectiva) {
+    if (loading) return;
+
+    setVistaDirectiva(nuevaVista);
+    setCedulaDirectiva("");
+    setCodigoActivacionDirectiva("");
+    setClaveDirectiva("");
+    setConfirmarClaveDirectiva("");
+    setMostrarClaveDirectiva(false);
+    setMostrarConfirmarClaveDirectiva(false);
+    limpiarMensaje();
+  }
+
+  async function activarCuentaDirectiva(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+
+    const cedulaLimpia = limpiarCedula(cedulaDirectiva);
+    const correo = correoDirectiva.trim().toLowerCase();
+    const codigo = codigoActivacionDirectiva.trim().toUpperCase();
+
+    if (cedulaLimpia.length !== 11) {
+      mostrarError("La cédula debe contener 11 dígitos.");
+      return;
+    }
+
+    if (!correo) {
+      mostrarError("Debe indicar el correo registrado en la Directiva.");
+      return;
+    }
+
+    if (!codigo) {
+      mostrarError("Debe indicar el código de activación entregado por VAM.");
+      return;
+    }
+
+    if (claveDirectiva.length < 6) {
+      mostrarError("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+
+    if (claveDirectiva !== confirmarClaveDirectiva) {
+      mostrarError("Las contraseñas no coinciden.");
+      return;
+    }
+
+    setLoading(true);
+    limpiarMensaje();
+
+    try {
+      const { data: validacionData, error: validacionError } = await supabase.rpc(
+        "validar_activacion_directiva",
+        {
+          p_cedula: cedulaLimpia,
+          p_correo: correo,
+          p_codigo_activacion: codigo,
+        }
+      );
+
+      if (validacionError) {
+        mostrarError(validacionError.message);
+        return;
+      }
+
+      const validacion = extraerRespuesta<{
+        ok?: boolean;
+        mensaje?: string;
+        message?: string;
+        nombre?: string;
+      }>(validacionData);
+
+      if (!validacion.ok) {
+        mostrarError(
+          validacion.mensaje ||
+            validacion.message ||
+            "No fue posible validar los datos de activación."
+        );
+        return;
+      }
+
+      const { data: registroData, error: registroError } = await supabase.auth.signUp({
+        email: correo,
+        password: claveDirectiva,
+        options: {
+          data: {
+            full_name: validacion.nombre || "Miembro de la directiva",
+          },
+        },
+      });
+
+      if (registroError) {
+        const texto = registroError.message.toLowerCase();
+        if (texto.includes("already") || texto.includes("registered")) {
+          mostrarError(
+            "Este correo ya tiene una cuenta. Use la opción Entrar como directiva."
+          );
+        } else {
+          mostrarError(registroError.message);
+        }
+        return;
+      }
+
+      let usuario = registroData.user;
+      let sesion = registroData.session;
+
+      if (!sesion || !usuario) {
+        const { data: ingresoData, error: ingresoError } =
+          await supabase.auth.signInWithPassword({
+            email: correo,
+            password: claveDirectiva,
+          });
+
+        if (ingresoError || !ingresoData.user) {
+          mostrarExito(
+            "La cuenta fue creada. Si Supabase requiere confirmar el correo, confirme el mensaje recibido y luego entre como Directiva."
+          );
+          setVistaDirectiva("entrar");
+          setCedulaDirectiva("");
+          setCodigoActivacionDirectiva("");
+          setConfirmarClaveDirectiva("");
+          return;
+        }
+
+        usuario = ingresoData.user;
+        sesion = ingresoData.session;
+      }
+
+      const { data: finalizarData, error: finalizarError } = await supabase.rpc(
+        "finalizar_activacion_directiva",
+        {
+          p_cedula: cedulaLimpia,
+          p_correo: correo,
+          p_codigo_activacion: codigo,
+        }
+      );
+
+      if (finalizarError) {
+        await supabase.auth.signOut();
+        mostrarError(finalizarError.message);
+        return;
+      }
+
+      const finalizacion = extraerRespuesta<{
+        ok?: boolean;
+        mensaje?: string;
+        message?: string;
+      }>(finalizarData);
+
+      if (!finalizacion.ok) {
+        await supabase.auth.signOut();
+        mostrarError(
+          finalizacion.mensaje ||
+            finalizacion.message ||
+            "No fue posible completar la activación de la cuenta."
+        );
+        return;
+      }
+
+      const { data: condominiosData, error: condominiosError } = await supabase.rpc(
+        "listar_condominios_directiva"
+      );
+
+      if (condominiosError) {
+        await supabase.auth.signOut();
+        mostrarError(condominiosError.message);
+        return;
+      }
+
+      const autorizados = ((condominiosData || []) as CondominioDirectiva[]).filter(
+        (item) => Number(item.condominio_id) > 0
+      );
+
+      if (!autorizados.length) {
+        await supabase.auth.signOut();
+        mostrarError(
+          "La cuenta fue activada, pero no se encontró un condominio autorizado. Contacte a la administración."
+        );
+        return;
+      }
+
+      setCedulaDirectiva("");
+      setCodigoActivacionDirectiva("");
+      setConfirmarClaveDirectiva("");
+
+      if (autorizados.length === 1) {
+        await completarIngresoDirectiva(autorizados[0]);
+        return;
+      }
+
+      setVistaDirectiva("entrar");
+      setCondominiosDirectiva(autorizados);
+      setMostrarSelectorDirectiva(true);
+      mostrarExito("Cuenta activada. Seleccione el condominio que desea consultar.");
+    } catch (error: unknown) {
+      await supabase.auth.signOut();
+      mostrarError(
+        error instanceof Error
+          ? error.message
+          : "No fue posible activar la cuenta de Directiva."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function entrarDirectiva(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
 
     if (!correoDirectiva.trim() || !claveDirectiva) {
       mostrarError("Debe indicar correo y contraseña.");
@@ -829,82 +1119,36 @@ export default function LoginMovilVAMPage() {
         return;
       }
 
-      const { data: validacionData, error: validacionError } =
-        await supabase.rpc("validar_acceso_directiva", {
-          p_condominio_id: Number(condominioId),
-        });
+      const { data, error } = await supabase.rpc(
+        "listar_condominios_directiva"
+      );
 
-      if (validacionError) {
+      if (error) {
         await supabase.auth.signOut();
-        mostrarError(validacionError.message);
+        mostrarError(error.message);
         return;
       }
 
-      const validacion = extraerRespuesta<RespuestaDirectiva>(validacionData);
+      const autorizados = ((data || []) as CondominioDirectiva[]).filter(
+        (item) => Number(item.condominio_id) > 0
+      );
 
-      if (!validacion.ok) {
+      if (!autorizados.length) {
         await supabase.auth.signOut();
         mostrarError(
-          validacion.mensaje ||
-            validacion.message ||
-            "Este usuario no está autorizado para el condominio seleccionado."
+          "Este usuario no tiene condominios activos autorizados para el portal de directiva."
         );
         return;
       }
 
-      const rol =
-        validacion.rol ||
-        validacion.rol_general ||
-        authData.user.user_metadata?.role ||
-        authData.user.app_metadata?.role ||
-        "Usuario";
-
-      if (!rolDirectivaPermitido(rol)) {
-        await supabase.auth.signOut();
-        mostrarError(
-          "Este usuario no tiene permiso para entrar al módulo móvil de directiva."
-        );
+      if (autorizados.length === 1) {
+        await completarIngresoDirectiva(autorizados[0]);
         return;
       }
 
-      const nombreUsuario =
-        authData.user.user_metadata?.full_name ||
-        authData.user.user_metadata?.name ||
-        authData.user.email ||
-        "Miembro de la directiva";
-
-      const sesionDirectiva = {
-        tipo_usuario: "DIRECTIVA",
-        usuario_id: authData.user.id,
-        usuario_nombre: nombreUsuario,
-        nombre: nombreUsuario,
-        correo:
-          authData.user.email || correoDirectiva.trim().toLowerCase(),
-        rol,
-        empresa_id: validacion.empresa_id || null,
-        condominio_id: Number(condominioId),
-        condominio_nombre:
-          condominioSeleccionado?.nombre || "Condominio seleccionado",
-        condominio_logo_url: condominioSeleccionado?.logo_url || "",
-      };
-
-      limpiarSesionesLocales();
-
-      localStorage.setItem("directiva_actual", JSON.stringify(sesionDirectiva));
-      localStorage.setItem("condominio_id", String(condominioId));
-      localStorage.setItem(
-        "condominio_nombre",
-        sesionDirectiva.condominio_nombre
-      );
-      localStorage.setItem(
-        "condominio_logo_url",
-        sesionDirectiva.condominio_logo_url
-      );
-      localStorage.setItem("usuario_admin_id", authData.user.id);
-      localStorage.setItem("usuario_nombre", nombreUsuario);
-      localStorage.setItem("usuario_rol", String(rol));
-
-      router.replace("/movil/directiva");
+      setCondominiosDirectiva(autorizados);
+      setMostrarSelectorDirectiva(true);
+      mostrarExito("Seleccione el condominio que desea consultar.");
     } catch (error: unknown) {
       await supabase.auth.signOut();
       mostrarError(
@@ -915,6 +1159,25 @@ export default function LoginMovilVAMPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function seleccionarCondominioDirectiva(condominio: CondominioDirectiva) {
+    setLoading(true);
+    limpiarMensaje();
+
+    try {
+      await completarIngresoDirectiva(condominio);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function cancelarSeleccionDirectiva() {
+    await supabase.auth.signOut();
+    setMostrarSelectorDirectiva(false);
+    setCondominiosDirectiva([]);
+    setClaveDirectiva("");
+    limpiarMensaje();
   }
 
   function debeMostrarAnuncio(
@@ -1152,8 +1415,8 @@ export default function LoginMovilVAMPage() {
                 </button>
               </div>
 
-              {(modoPortal === "directiva" ||
-                vistaPropietario === "activar") && (
+              {modoPortal === "propietario" &&
+                vistaPropietario === "activar" && (
                 <div className="mt-4">
                   <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-600">
                     Condominio
@@ -1481,100 +1744,241 @@ export default function LoginMovilVAMPage() {
                   )}
                 </div>
               ) : (
-                <form onSubmit={entrarDirectiva} className="mt-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h1 className="text-xl font-black tracking-tight text-slate-900">
-                        Acceso de directiva
-                      </h1>
-                      <p className="mt-1 text-xs leading-5 text-slate-500">
-                        Acceso exclusivo para usuarios autorizados del
-                        condominio seleccionado.
-                      </p>
-                    </div>
-                    <div className="rounded-xl bg-slate-100 p-2.5 text-slate-700">
-                      <UsersRound className="h-5 w-5" />
-                    </div>
-                  </div>
+                <div className="mt-4">
+                  {vistaDirectiva === "entrar" ? (
+                    <form onSubmit={entrarDirectiva} className="space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h1 className="text-xl font-black tracking-tight text-slate-900">
+                            Acceso de directiva
+                          </h1>
+                          <p className="mt-1 text-xs leading-5 text-slate-500">
+                            Ingrese con su correo y contraseña. El sistema identificará
+                            automáticamente los condominios que tiene autorizados.
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-slate-100 p-2.5 text-slate-700">
+                          <UsersRound className="h-5 w-5" />
+                        </div>
+                      </div>
 
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Correo electrónico
-                    </label>
-                    <input
-                      type="email"
-                      autoComplete="email"
-                      value={correoDirectiva}
-                      onChange={(event) =>
-                        setCorreoDirectiva(event.target.value)
-                      }
-                      placeholder="usuario@correo.com"
-                      disabled={loading}
-                      className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-100"
-                    />
-                  </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">
+                          Correo electrónico
+                        </label>
+                        <input
+                          type="email"
+                          autoComplete="email"
+                          value={correoDirectiva}
+                          onChange={(event) => setCorreoDirectiva(event.target.value)}
+                          placeholder="usuario@correo.com"
+                          disabled={loading}
+                          className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-100"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Contraseña
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={mostrarClaveDirectiva ? "text" : "password"}
-                        autoComplete="current-password"
-                        value={claveDirectiva}
-                        onChange={(event) =>
-                          setClaveDirectiva(event.target.value)
-                        }
-                        placeholder="Digite su contraseña"
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">
+                          Contraseña
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={mostrarClaveDirectiva ? "text" : "password"}
+                            autoComplete="current-password"
+                            value={claveDirectiva}
+                            onChange={(event) => setClaveDirectiva(event.target.value)}
+                            placeholder="Digite su contraseña"
+                            disabled={loading}
+                            className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setMostrarClaveDirectiva((actual) => !actual)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            aria-label="Mostrar u ocultar contraseña"
+                          >
+                            {mostrarClaveDirectiva ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11px] leading-5 text-slate-600">
+                        El sistema validará el usuario y mostrará únicamente los
+                        condominios donde tenga autorización activa.
+                      </div>
+
+                      {mensaje && (
+                        <div role="alert" className={`rounded-xl border px-3 py-2.5 text-xs leading-5 ${claseMensaje}`}>
+                          {mensaje}
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
                         disabled={loading}
-                        className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-100"
-                      />
+                        className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-black text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {loading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="h-4 w-4" />
+                        )}
+                        {loading ? "Validando usuario..." : "Entrar como directiva"}
+                      </button>
+
                       <button
                         type="button"
-                        onClick={() =>
-                          setMostrarClaveDirectiva((actual) => !actual)
-                        }
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                        aria-label="Mostrar u ocultar contraseña"
+                        onClick={() => cambiarVistaDirectiva("activar")}
+                        disabled={loading}
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-4 text-sm font-black text-slate-800 transition hover:bg-slate-100 disabled:opacity-60"
                       >
-                        {mostrarClaveDirectiva ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
+                        <UserPlus className="h-4 w-4" />
+                        Activar mi cuenta por primera vez
                       </button>
-                    </div>
-                  </div>
+                    </form>
+                  ) : (
+                    <form onSubmit={activarCuentaDirectiva} className="space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h1 className="text-xl font-black tracking-tight text-slate-900">
+                            Activar cuenta de directiva
+                          </h1>
+                          <p className="mt-1 text-xs leading-5 text-slate-500">
+                            Sus datos deben coincidir con el registro realizado por la administración.
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-blue-50 p-2.5 text-blue-700">
+                          <Sparkles className="h-5 w-5" />
+                        </div>
+                      </div>
 
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11px] leading-5 text-slate-600">
-                    El sistema validará el usuario, su estado y su autorización
-                    para el condominio seleccionado.
-                  </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">Cédula</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={cedulaDirectiva}
+                          onChange={(event) => setCedulaDirectiva(formatearCedula(event.target.value))}
+                          placeholder="000-0000000-0"
+                          disabled={loading}
+                          className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                        />
+                      </div>
 
-                  {mensaje && (
-                    <div
-                      role="alert"
-                      className={`rounded-xl border px-3 py-2.5 text-xs leading-5 ${claseMensaje}`}
-                    >
-                      {mensaje}
-                    </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">Correo electrónico</label>
+                        <input
+                          type="email"
+                          autoComplete="email"
+                          value={correoDirectiva}
+                          onChange={(event) => setCorreoDirectiva(event.target.value)}
+                          placeholder="correo registrado en la Directiva"
+                          disabled={loading}
+                          className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">Código de activación</label>
+                        <input
+                          type="text"
+                          autoCapitalize="characters"
+                          autoComplete="one-time-code"
+                          value={codigoActivacionDirectiva}
+                          onChange={(event) =>
+                            setCodigoActivacionDirectiva(
+                              event.target.value.replace(/\s/g, "").toUpperCase().slice(0, 12)
+                            )
+                          }
+                          placeholder="Código entregado por VAM"
+                          disabled={loading}
+                          className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-center text-sm font-black uppercase tracking-[0.18em] text-slate-800 outline-none transition placeholder:normal-case placeholder:tracking-normal placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">Crear contraseña</label>
+                        <div className="relative">
+                          <input
+                            type={mostrarClaveDirectiva ? "text" : "password"}
+                            autoComplete="new-password"
+                            value={claveDirectiva}
+                            onChange={(event) => setClaveDirectiva(event.target.value)}
+                            placeholder="Mínimo 6 caracteres"
+                            disabled={loading}
+                            className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setMostrarClaveDirectiva((actual) => !actual)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            aria-label="Mostrar u ocultar contraseña"
+                          >
+                            {mostrarClaveDirectiva ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">Confirmar contraseña</label>
+                        <div className="relative">
+                          <input
+                            type={mostrarConfirmarClaveDirectiva ? "text" : "password"}
+                            autoComplete="new-password"
+                            value={confirmarClaveDirectiva}
+                            onChange={(event) => setConfirmarClaveDirectiva(event.target.value)}
+                            placeholder="Repita su contraseña"
+                            disabled={loading}
+                            className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setMostrarConfirmarClaveDirectiva((actual) => !actual)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            aria-label="Mostrar u ocultar confirmación"
+                          >
+                            {mostrarConfirmarClaveDirectiva ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 text-[11px] leading-5 text-blue-800">
+                        La cédula, el correo y el código deben coincidir con un miembro activo registrado en la Directiva.
+                      </div>
+
+                      {mensaje && (
+                        <div role="alert" className={`rounded-xl border px-3 py-2.5 text-xs leading-5 ${claseMensaje}`}>
+                          {mensaje}
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-800 px-4 text-sm font-black text-white transition hover:bg-blue-900 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                        {loading ? "Activando cuenta..." : "Activar mi cuenta"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => cambiarVistaDirectiva("entrar")}
+                        disabled={loading}
+                        className="flex h-10 w-full items-center justify-center gap-2 rounded-xl text-xs font-black text-slate-600 transition hover:bg-slate-100 disabled:opacity-60"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        Volver a iniciar sesión
+                      </button>
+                    </form>
                   )}
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-black text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {loading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ShieldCheck className="h-4 w-4" />
-                    )}
-                    {loading ? "Validando usuario..." : "Entrar como directiva"}
-                  </button>
-                </form>
+                </div>
               )}
+
 
               <div className="mt-4 border-t border-slate-100 pt-3 text-center">
                 <p className="text-[10px] font-semibold text-slate-400">
@@ -1787,6 +2191,82 @@ export default function LoginMovilVAMPage() {
               <button
                 type="button"
                 onClick={cancelarSeleccionPropiedad}
+                disabled={loading}
+                className="flex h-11 w-full items-center justify-center rounded-xl text-xs font-black text-slate-600 transition hover:bg-slate-100 disabled:opacity-60"
+              >
+                Cancelar y volver al login
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {mostrarSelectorDirectiva && (
+        <div className="fixed inset-0 z-[198] flex items-center justify-center bg-slate-950/80 p-3 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="titulo-seleccionar-condominio-directiva"
+            className="w-full max-w-md overflow-hidden rounded-[1.75rem] bg-white shadow-2xl"
+          >
+            <header className="bg-gradient-to-r from-slate-900 to-blue-950 px-5 py-5 text-white">
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl bg-white/15 p-3">
+                  <Building2 className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/70">
+                    Acceso de directiva
+                  </p>
+                  <h2
+                    id="titulo-seleccionar-condominio-directiva"
+                    className="mt-1 text-xl font-black"
+                  >
+                    Seleccione el condominio
+                  </h2>
+                  <p className="mt-1 text-xs leading-5 text-blue-100">
+                    Solo aparecen los condominios donde este usuario tiene autorización activa.
+                  </p>
+                </div>
+              </div>
+            </header>
+
+            <div className="space-y-3 p-5">
+              {condominiosDirectiva.map((condominio) => (
+                <button
+                  key={condominio.condominio_id}
+                  type="button"
+                  onClick={() => void seleccionarCondominioDirectiva(condominio)}
+                  disabled={loading}
+                  className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-blue-300 hover:bg-blue-50 disabled:opacity-60"
+                >
+                  <div className="flex items-center gap-3">
+                    {condominio.condominio_logo_url ? (
+                      <img
+                        src={condominio.condominio_logo_url}
+                        alt={condominio.condominio_nombre}
+                        className="h-11 w-11 shrink-0 rounded-xl bg-white object-contain p-1 ring-1 ring-slate-200"
+                      />
+                    ) : (
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-800">
+                        <Building2 className="h-5 w-5" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-black text-slate-900">
+                        {condominio.condominio_nombre}
+                      </p>
+                      <p className="mt-1 text-xs font-bold text-blue-700">
+                        {condominio.rol_condominio || "Directiva"}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => void cancelarSeleccionDirectiva()}
                 disabled={loading}
                 className="flex h-11 w-full items-center justify-center rounded-xl text-xs font-black text-slate-600 transition hover:bg-slate-100 disabled:opacity-60"
               >

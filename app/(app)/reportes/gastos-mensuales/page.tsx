@@ -25,10 +25,20 @@ type GastoDB = {
   id: number;
   condominio_id: number | null;
   proveedor?: string | null;
+  proveedor_id?: number | null;
+  catalogo_proveedores?:
+    | { nombre_proveedor?: string | null }
+    | { nombre_proveedor?: string | null }[]
+    | null;
   concepto?: string | null;
   descripcion?: string | null;
   detalle_gasto?: string | null;
   categoria?: string | null;
+  categoria_id?: number | null;
+  catalogo_categoria_gastos?:
+    | { nombre_categoria?: string | null }
+    | { nombre_categoria?: string | null }[]
+    | null;
   total?: number | string | null;
   monto?: number | string | null;
   itbis?: number | string | null;
@@ -36,6 +46,7 @@ type GastoDB = {
   ncf?: string | null;
   metodo_pago?: string | null;
   numero_cheque?: string | null;
+  fecha?: string | null;
   fecha_pago?: string | null;
   created_at?: string | null;
 };
@@ -247,18 +258,30 @@ export default function ReporteGastosMensualesPage() {
   const totalMes = totalGastosGenerales + totalCajaChica;
 
   const resumenCategorias = useMemo(() => {
-    const mapa = new Map<string, number>();
+    const mapa = new Map<
+      string,
+      { categoria: string; total: number }
+    >();
 
     gastos.forEach((item) => {
       const categoria = limpiarTexto(item.categoria, "Sin categoría");
-      mapa.set(categoria, (mapa.get(categoria) || 0) + item.monto);
+      const clave = normalizarTexto(categoria) || "sin categoria";
+      const actual = mapa.get(clave);
+
+      if (actual) {
+        actual.total += item.monto;
+      } else {
+        mapa.set(clave, {
+          categoria,
+          total: item.monto,
+        });
+      }
     });
 
-    return Array.from(mapa.entries())
-      .map(([categoria, total]) => ({
-        categoria,
-        total,
-        porcentaje: totalMes > 0 ? (total / totalMes) * 100 : 0,
+    return Array.from(mapa.values())
+      .map((item) => ({
+        ...item,
+        porcentaje: totalMes > 0 ? (item.total / totalMes) * 100 : 0,
       }))
       .sort((a, b) => b.total - a.total);
   }, [gastos, totalMes]);
@@ -478,10 +501,14 @@ export default function ReporteGastosMensualesPage() {
         id,
         condominio_id,
         proveedor,
+        proveedor_id,
+        catalogo_proveedores(nombre_proveedor),
         concepto,
         descripcion,
         detalle_gasto,
         categoria,
+        categoria_id,
+        catalogo_categoria_gastos(nombre_categoria),
         total,
         monto,
         itbis,
@@ -489,6 +516,7 @@ export default function ReporteGastosMensualesPage() {
         ncf,
         metodo_pago,
         numero_cheque,
+        fecha,
         fecha_pago,
         created_at
       `)
@@ -562,9 +590,37 @@ export default function ReporteGastosMensualesPage() {
     return resultados;
   }
 
+  function obtenerCategoriaGasto(row: GastoDB): string {
+    const relacion = row.catalogo_categoria_gastos;
+
+    const nombreCatalogo = Array.isArray(relacion)
+      ? relacion[0]?.nombre_categoria
+      : relacion?.nombre_categoria;
+
+    return limpiarTexto(
+      nombreCatalogo || row.categoria,
+      "Sin categoría"
+    );
+  }
+
+  function obtenerProveedorGasto(row: GastoDB): string {
+    const relacion = row.catalogo_proveedores;
+
+    const nombreCatalogo = Array.isArray(relacion)
+      ? relacion[0]?.nombre_proveedor
+      : relacion?.nombre_proveedor;
+
+    return limpiarTexto(
+      nombreCatalogo || row.proveedor,
+      "Proveedor / beneficiario"
+    );
+  }
+
   function mapearGastoGeneral(row: GastoDB): DetalleGasto {
     const numeroDocumento = limpiarTexto(row.numero_cheque, "-");
-    const fechaISO = String(row.fecha_pago || row.created_at || "").slice(0, 10);
+    const fechaISO = String(
+      row.fecha_pago || row.fecha || row.created_at || ""
+    ).slice(0, 10);
 
     return {
       id: `gasto-${row.id}`,
@@ -577,8 +633,8 @@ export default function ReporteGastosMensualesPage() {
         row.concepto || row.descripcion || row.detalle_gasto,
         "Gasto operativo"
       ),
-      proveedor: limpiarTexto(row.proveedor, "Proveedor / beneficiario"),
-      categoria: limpiarTexto(row.categoria, "Gasto operativo"),
+      proveedor: obtenerProveedorGasto(row),
+      categoria: obtenerCategoriaGasto(row),
       factura: limpiarTexto(row.no_factura, "-"),
       ncf: limpiarTexto(row.ncf, "-"),
       metodoPago: limpiarTexto(row.metodo_pago, "-"),

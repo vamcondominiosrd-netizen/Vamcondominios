@@ -88,6 +88,15 @@ export default function FinanzasPage() {
           color: "text-amber-700",
           bg: "bg-amber-50",
         },
+        {
+          titulo: "Reporte de Cheques",
+          descripcion:
+            "Verificar los Cheques Impreso.",
+          href: "/reportes/cheques",
+          icono: ReceiptText,
+          color: "text-amber-700",
+          bg: "bg-amber-50",
+        },
       ],
     },
     {

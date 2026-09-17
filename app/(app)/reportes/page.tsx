@@ -182,6 +182,15 @@ export default function ReportesPage() {
           color: "text-slate-700",
           bg: "bg-slate-100",
         },
+       {
+          titulo: "Reporte de Cheques",
+          descripcion:
+            "Generar Reporte de Cheques impresos.",
+          href: "/reportes/cheques",
+          icono: WalletCards,
+          color: "text-slate-700",
+          bg: "bg-slate-100",
+        },
       ],
     },
   ];

@@ -71,6 +71,7 @@ type Gasto = {
   cantidad_documentos?: number;
   cantidad_constancias_pago?: number;
   estado_documentacion?: EstadoDocumentacion;
+  recibo_documento?: DocumentoGasto | null;
   catalogo_proveedores?: { nombre_proveedor: string | null } | null;
   catalogo_categoria_gastos?: { nombre_categoria: string | null } | null;
 };
@@ -329,7 +330,7 @@ export default function GastosPage() {
       query = query.eq("condominio", nombreCondominio);
     }
 
-    const [gastosResponse, controlResponse] = await Promise.all([
+    const [gastosResponse, controlResponse, recibosResponse] = await Promise.all([
       query,
       supabase
         .from("vw_gastos_control_documental")
@@ -337,6 +338,22 @@ export default function GastosPage() {
           "gasto_id, requiere_recibo_suplidor, motivo_recibo_no_requerido, cantidad_documentos, cantidad_constancias_pago, estado_documentacion",
         )
         .eq("condominio_id", Number(id)),
+      supabase
+        .from("gastos_documentos")
+        .select(
+          "id, gasto_id, tipo_documento, numero_documento, fecha_documento, monto, nombre_archivo, archivo_url, mime_type, tamano_bytes, observaciones, estado, created_at",
+        )
+        .eq("condominio_id", Number(id))
+        .eq("estado", "ACTIVO")
+        .in("tipo_documento", [
+          "RECIBO_SUPLIDOR",
+          "RECIBO",
+          "RECIBO_PAGO",
+          "CONSTANCIA_PAGO",
+          "FACTURA_PAGADA",
+          "CERTIFICACION_PAGO",
+        ])
+        .order("created_at", { ascending: false }),
     ]);
 
     setLoading(false);
@@ -357,6 +374,21 @@ export default function GastosPage() {
 
     for (const control of (controlResponse.data || []) as ControlDocumental[]) {
       controlPorGasto.set(Number(control.gasto_id), control);
+    }
+
+    if (recibosResponse.error) {
+      console.warn(
+        "No se pudieron cargar los recibos para el resumen:",
+        recibosResponse.error.message,
+      );
+    }
+
+    const reciboPorGasto = new Map<number, DocumentoGasto>();
+    for (const documento of (recibosResponse.data || []) as DocumentoGasto[]) {
+      const gastoId = Number(documento.gasto_id);
+      if (!reciboPorGasto.has(gastoId)) {
+        reciboPorGasto.set(gastoId, documento);
+      }
     }
 
     const gastosCompletos = ((gastosResponse.data || []) as Gasto[]).map(
@@ -380,6 +412,7 @@ export default function GastosPage() {
           estado_documentacion:
             control?.estado_documentacion ||
             (gasto.pagado ? "NO_REQUERIDO" : "NO_APLICA"),
+          recibo_documento: reciboPorGasto.get(gasto.id) || null,
         };
       },
     );
@@ -939,163 +972,152 @@ export default function GastosPage() {
           <DataTable>
             <thead className="bg-slate-100 text-slate-600">
               <tr>
-                <th className="px-4 py-3 text-left">Fecha</th>
-                <th className="px-4 py-3 text-left">Proveedor</th>
-                <th className="px-4 py-3 text-left">Categoría</th>
-                <th className="px-4 py-3 text-left">Concepto</th>
-                <th className="px-4 py-3 text-right">Total</th>
-                <th className="px-4 py-3 text-center">Estado</th>
-                <th className="px-4 py-3 text-center">Factura</th>
-                <th className="px-4 py-3 text-center">Cheque</th>
-                <th className="px-4 py-3 text-center">Pago</th>
-                <th className="px-4 py-3 text-center">Documentación</th>
-                <th className="px-4 py-3 text-center">Acciones</th>
+                <th className="w-[90px] px-3 py-3 text-left">Fecha</th>
+                <th className="px-3 py-3 text-left">Detalle del gasto</th>
+                <th className="w-[120px] px-3 py-3 text-right">Total</th>
+                <th className="w-[150px] px-3 py-3 text-center">Estado</th>
+                <th className="w-[260px] px-3 py-3 text-center">Soportes</th>
+                <th className="w-[130px] px-3 py-3 text-center">Expediente</th>
               </tr>
             </thead>
 
             <tbody className="divide-y divide-slate-200">
               {gastosFiltrados.map((g) => (
-                <tr key={g.id} className="bg-white hover:bg-slate-50">
-                  <td className="px-4 py-3 whitespace-nowrap">
+                <tr key={g.id} className="bg-white align-middle hover:bg-slate-50">
+                  <td className="px-3 py-3 text-sm whitespace-nowrap">
                     {formatoFecha(g.fecha)}
                   </td>
 
-                  <td className="px-4 py-3">{nombreProveedor(g)}</td>
+                  <td className="px-3 py-3">
+                    <div className="min-w-0">
+                      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                          {g.catalogo_categoria_gastos?.nombre_categoria || "Sin categoría"}
+                        </span>
+                        <span className="text-[11px] font-semibold text-slate-500">
+                          {nombreProveedor(g)}
+                        </span>
+                      </div>
 
-                  <td className="px-4 py-3">
-                    {g.catalogo_categoria_gastos?.nombre_categoria || "-"}
-                  </td>
-
-                  <td className="px-4 py-3">
-                    <p className="font-semibold">{g.concepto || "-"}</p>
-
-                    {g.detalle_gasto && (
-                      <p className="mt-1 max-w-md text-xs text-slate-500">
-                        {g.detalle_gasto}
+                      <p className="font-bold leading-5 text-slate-900">
+                        {g.concepto || "-"}
                       </p>
-                    )}
 
-                    <div className="mt-1 space-y-0.5 text-xs text-slate-500">
-                      <p>Gasto ID: {g.id}</p>
-                      {g.no_factura && <p>Factura: {g.no_factura}</p>}
-                      {g.ncf && <p>NCF: {g.ncf}</p>}
+                      {g.detalle_gasto && (
+                        <p className="mt-1 line-clamp-2 text-xs leading-4 text-slate-500">
+                          {g.detalle_gasto}
+                        </p>
+                      )}
+
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
+                        <span>ID {g.id}</span>
+                        {g.no_factura && <span>Factura {g.no_factura}</span>}
+                        {g.ncf && <span>NCF {g.ncf}</span>}
+                      </div>
                     </div>
                   </td>
 
-                  <td className="px-4 py-3 text-right font-bold whitespace-nowrap">
+                  <td className="px-3 py-3 text-right font-black whitespace-nowrap text-slate-900">
                     RD$ {dinero(g.total)}
                   </td>
 
-                  <td className="px-4 py-3 text-center">
-                    <span
-                      className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${estadoColor(
-                        g,
-                      )}`}
-                    >
-                      {etiquetaEstado(g)}
-                    </span>
-                  </td>
-
-                  <td className="px-4 py-3 text-center">
-                    {g.factura_url ? (
-                      <a
-                        href={g.factura_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-block rounded-lg bg-slate-900 px-3 py-1 text-xs font-bold text-white"
-                      >
-                        Ver factura
-                      </a>
-                    ) : (
-                      <span className="text-xs text-slate-400">Sin factura</span>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-3 text-center">
-                    {g.cheque_url ? (
-                      <a
-                        href={g.cheque_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-block rounded-lg bg-green-700 px-3 py-1 text-xs font-bold text-white"
-                      >
-                        Ver cheque
-                      </a>
-                    ) : (
-                      <span className="text-xs text-slate-400">Sin cheque</span>
-                    )}
-
-                    {g.numero_cheque && (
-                      <p className="mt-1 text-xs text-slate-500">
-                        No. {g.numero_cheque}
-                      </p>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-3 text-center">
-                    {g.pagado ? (
-                      <div>
-                        <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">
-                          Pagado
-                        </span>
-
-                        {g.fecha_pago && (
-                          <p className="mt-1 text-xs text-slate-500">
-                            {formatoFecha(g.fecha_pago)}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-700">
-                        Pendiente
-                      </span>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex flex-col items-center gap-1">
+                  <td className="px-3 py-3 text-center">
+                    <div className="flex flex-col items-center gap-1.5">
                       <span
-                        className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${colorEstadoDocumental(
+                        className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${estadoColor(
+                          g,
+                        )}`}
+                      >
+                        {etiquetaEstado(g)}
+                      </span>
+
+                      {g.fecha_pago && (
+                        <span className="text-[10px] text-slate-500">
+                          {formatoFecha(g.fecha_pago)}
+                        </span>
+                      )}
+
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${colorEstadoDocumental(
                           g,
                         )}`}
                       >
                         {etiquetaEstadoDocumental(g)}
                       </span>
-
-                      {Number(g.cantidad_documentos || 0) > 0 && (
-                        <span className="text-[11px] text-slate-500">
-                          {g.cantidad_documentos} documento(s)
-                        </span>
-                      )}
-
-                      {g.motivo_recibo_no_requerido &&
-                        !g.requiere_recibo_suplidor && (
-                          <span
-                            className="max-w-40 truncate text-[11px] text-slate-500"
-                            title={g.motivo_recibo_no_requerido}
-                          >
-                            {g.motivo_recibo_no_requerido}
-                          </span>
-                        )}
                     </div>
                   </td>
 
-                  <td className="px-4 py-3 text-center">
+                  <td className="px-3 py-3">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {g.factura_url ? (
+                        <a
+                          href={g.factura_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-900 px-2 text-[11px] font-bold text-white hover:bg-slate-800"
+                          title="Abrir factura"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          Factura
+                        </a>
+                      ) : (
+                        <span className="inline-flex min-h-10 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 text-[10px] font-semibold text-slate-400">
+                          Sin factura
+                        </span>
+                      )}
+
+                      {g.cheque_url ? (
+                        <a
+                          href={g.cheque_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-700 px-2 text-[11px] font-bold text-white hover:bg-emerald-800"
+                          title={g.numero_cheque ? `Cheque No. ${g.numero_cheque}` : "Abrir cheque"}
+                        >
+                          <FileCheck2 className="h-3.5 w-3.5" />
+                          Cheque
+                        </a>
+                      ) : (
+                        <span className="inline-flex min-h-10 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 text-[10px] font-semibold text-slate-400">
+                          Sin cheque
+                        </span>
+                      )}
+
+                      {g.recibo_documento ? (
+                        <button
+                          type="button"
+                          onClick={() => abrirDocumento(g.recibo_documento!)}
+                          className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-blue-200 bg-blue-700 px-2 text-[11px] font-bold text-white hover:bg-blue-800"
+                          title="Abrir recibo de pago"
+                        >
+                          <ReceiptText className="h-3.5 w-3.5" />
+                          Recibo
+                        </button>
+                      ) : (
+                        <span className="inline-flex min-h-10 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 text-[10px] font-semibold text-slate-400">
+                          Sin recibo
+                        </span>
+                      )}
+                    </div>
+
+                    {(g.numero_cheque || Number(g.cantidad_documentos || 0) > 0) && (
+                      <div className="mt-1.5 flex items-center justify-center gap-2 text-[10px] text-slate-500">
+                        {g.numero_cheque && <span>Cheque No. {g.numero_cheque}</span>}
+                        {Number(g.cantidad_documentos || 0) > 0 && (
+                          <span>{g.cantidad_documentos} doc.</span>
+                        )}
+                      </div>
+                    )}
+                  </td>
+
+                  <td className="px-3 py-3 text-center">
                     <button
                       type="button"
                       onClick={() => abrirExpediente(g)}
-                      className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold text-white ${
-                        g.pagado
-                          ? "bg-blue-700 hover:bg-blue-800"
-                          : "bg-slate-600 hover:bg-slate-700"
-                      }`}
+                      className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-blue-50 px-3 text-[11px] font-bold text-blue-800 ring-1 ring-inset ring-blue-200 hover:bg-blue-100"
                     >
-                      {g.pagado ? (
-                        <ReceiptText className="h-3.5 w-3.5" />
-                      ) : (
-                        <FolderOpen className="h-3.5 w-3.5" />
-                      )}
-                      {g.pagado ? "Recibo / documentos" : "Ver documentos"}
+                      <FolderOpen className="h-3.5 w-3.5" />
+                      Expediente
                     </button>
                   </td>
                 </tr>

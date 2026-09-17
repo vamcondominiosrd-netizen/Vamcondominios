@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
 import {
   Bell,
+  BellRing,
   Building2,
   CalendarDays,
   Car,
@@ -17,6 +18,7 @@ import {
   FolderOpen,
   ListChecks,
   LogOut,
+  MessageSquareText,
   Phone,
   ReceiptText,
   ShieldCheck,
@@ -44,6 +46,18 @@ type Acceso = {
   href: string;
   icono: ComponentType<{ size?: number; className?: string }>;
   destacado?: boolean;
+  badge?: number;
+};
+
+type ComunicacionPendiente = {
+  id: number;
+  titulo: string;
+  tipo?: string | null;
+  periodo?: string | null;
+  prioridad?: string | null;
+  estado?: string | null;
+  enviada_at?: string | null;
+  leida_at?: string | null;
 };
 
 function formatoMoneda(valor: number) {
@@ -54,6 +68,25 @@ function formatoMoneda(valor: number) {
   }).format(valor || 0);
 }
 
+function normalizarComunicaciones(data: unknown): ComunicacionPendiente[] {
+  if (Array.isArray(data)) {
+    return data as ComunicacionPendiente[];
+  }
+
+  if (data && typeof data === "object") {
+    const objeto = data as Record<string, unknown>;
+
+    if (Array.isArray(objeto.comunicaciones)) {
+      return objeto.comunicaciones as ComunicacionPendiente[];
+    }
+
+    if (Array.isArray(objeto.data)) {
+      return objeto.data as ComunicacionPendiente[];
+    }
+  }
+
+  return [];
+}
 
 export default function DashboardPropietariosPage() {
   const router = useRouter();
@@ -63,6 +96,11 @@ export default function DashboardPropietariosPage() {
   const [balanceActual, setBalanceActual] = useState(0);
   const [cargandoBalance, setCargandoBalance] = useState(true);
   const [mensajeBalance, setMensajeBalance] = useState("");
+
+  const [comunicacionesPendientes, setComunicacionesPendientes] = useState(0);
+  const [ultimaComunicacion, setUltimaComunicacion] =
+    useState<ComunicacionPendiente | null>(null);
+  const [cargandoComunicaciones, setCargandoComunicaciones] = useState(true);
 
   useEffect(() => {
     try {
@@ -87,6 +125,7 @@ export default function DashboardPropietariosPage() {
       setPropietario(sesion);
 
       void cargarBalance(sesion);
+      void cargarComunicaciones(sesion);
     } catch {
       cerrarSesion();
     }
@@ -119,8 +158,63 @@ export default function DashboardPropietariosPage() {
     setCargandoBalance(false);
   }
 
+  async function cargarComunicaciones(prop: PropietarioActual) {
+    setCargandoComunicaciones(true);
+
+    try {
+      const token = localStorage.getItem("propietario_token");
+
+      if (!token) {
+        setComunicacionesPendientes(0);
+        setUltimaComunicacion(null);
+        return;
+      }
+
+      /*
+       * IMPORTANTE:
+       * El portal de propietarios utiliza propietario_token y no una sesión
+       * auth.uid() de Supabase. Por seguridad, las comunicaciones deben
+       * consultarse mediante una RPC que valide ese token.
+       *
+       * Si en tu SQL la función tiene otro nombre, cambia solamente
+       * "listar_comunicaciones_propietario" y/o los nombres de parámetros.
+       */
+      const { data, error } = await supabase.rpc(
+        "listar_comunicaciones_propietario",
+        {
+          p_token: token,
+          p_condominio_id: prop.condominio_id,
+          p_unidad_id: prop.unidad_id,
+        }
+      );
+
+      if (error) {
+        console.warn("Comunicaciones no disponibles:", error.message);
+        setComunicacionesPendientes(0);
+        setUltimaComunicacion(null);
+        return;
+      }
+
+      const comunicaciones = normalizarComunicaciones(data)
+        .filter((item) => {
+          const estado = String(item.estado || "").toUpperCase();
+          return estado !== "ANULADA" && !item.leida_at;
+        })
+        .sort((a, b) =>
+          String(b.enviada_at || "").localeCompare(String(a.enviada_at || ""))
+        );
+
+      setComunicacionesPendientes(comunicaciones.length);
+      setUltimaComunicacion(comunicaciones[0] || null);
+    } finally {
+      setCargandoComunicaciones(false);
+    }
+  }
+
   function cerrarSesion() {
     localStorage.removeItem("propietario_actual");
+    localStorage.removeItem("propietario_token");
+    localStorage.removeItem("propietario_token_expira");
     localStorage.removeItem("condominio_id");
     localStorage.removeItem("condominio_nombre");
     localStorage.removeItem("condominio_logo_url");
@@ -147,6 +241,13 @@ export default function DashboardPropietariosPage() {
         icono: FileBarChart2,
         href: "/movil/propietarios/resumen-financiero",
         destacado: true,
+      },
+      {
+        titulo: "Comunicaciones",
+        descripcion: "Mensajes para usted",
+        icono: MessageSquareText,
+        href: "/movil/propietarios/comunicaciones",
+        badge: comunicacionesPendientes,
       },
       {
         titulo: "Autorizar trabajo",
@@ -203,7 +304,7 @@ export default function DashboardPropietariosPage() {
         href: "/movil/propietarios/perfil",
       },
     ],
-    []
+    [comunicacionesPendientes]
   );
 
   if (!propietario) {
@@ -335,9 +436,7 @@ export default function DashboardPropietariosPage() {
             <button
               type="button"
               onClick={() =>
-                router.push(
-                  "/movil/propietarios/resumen-financiero"
-                )
+                router.push("/movil/propietarios/resumen-financiero")
               }
               className="flex items-center justify-center gap-2 px-3 py-3.5 text-sm font-extrabold text-slate-700 transition hover:bg-slate-50"
             >
@@ -346,6 +445,54 @@ export default function DashboardPropietariosPage() {
             </button>
           </div>
         </section>
+
+        {!cargandoComunicaciones && ultimaComunicacion && (
+          <button
+            type="button"
+            onClick={() =>
+              router.push(
+                `/movil/propietarios/comunicaciones/${ultimaComunicacion.id}`
+              )
+            }
+            className="group relative w-full overflow-hidden rounded-[1.6rem] border border-red-200 bg-gradient-to-r from-red-50 to-white p-4 text-left shadow-sm transition hover:border-red-300 hover:shadow-md active:scale-[0.99]"
+          >
+            <div className="flex items-center gap-3">
+              <div className="relative flex h-12 w-12 shrink-0 items-center justify-center">
+                <span className="absolute h-11 w-11 animate-ping rounded-full bg-red-400 opacity-25" />
+                <span className="relative flex h-10 w-10 items-center justify-center rounded-full bg-red-600 text-white shadow-sm">
+                  <BellRing size={20} />
+                </span>
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-black text-red-900">
+                    Nueva comunicación
+                  </p>
+
+                  {comunicacionesPendientes > 1 && (
+                    <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-black text-white">
+                      {comunicacionesPendientes}
+                    </span>
+                  )}
+                </div>
+
+                <p className="mt-1 text-xs leading-5 text-red-800">
+                  Tiene una comunicación pendiente de leer.
+                </p>
+
+                <p className="mt-1.5 text-xs font-black uppercase tracking-wide text-red-700">
+                  Abrir comunicación
+                </p>
+              </div>
+
+              <ChevronRight
+                size={21}
+                className="shrink-0 text-red-500 transition group-hover:translate-x-0.5"
+              />
+            </div>
+          </button>
+        )}
 
         <section>
           <div className="mb-3 flex items-center justify-between px-1">
@@ -368,31 +515,41 @@ export default function DashboardPropietariosPage() {
                   key={item.titulo}
                   type="button"
                   onClick={() => router.push(item.href)}
-                  className={`group flex min-h-[112px] flex-col justify-between rounded-2xl border p-4 text-left shadow-sm transition active:scale-[0.98] ${
+                  className={`group relative flex min-h-[112px] flex-col justify-between rounded-2xl border p-4 text-left shadow-sm transition active:scale-[0.98] ${
                     item.destacado
                       ? "border-blue-700 bg-gradient-to-br from-blue-800 to-blue-950 text-white shadow-blue-900/20"
                       : "border-slate-200 bg-white text-slate-900 hover:border-blue-200 hover:shadow-md"
                   }`}
                 >
+                  {Boolean(item.badge) && item.badge! > 0 && (
+                    <span className="absolute right-3 top-3 flex min-h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-black text-white shadow-sm ring-2 ring-white">
+                      {item.badge! > 99 ? "99+" : item.badge}
+                    </span>
+                  )}
+
                   <div className="flex items-start justify-between">
                     <span
                       className={`flex h-10 w-10 items-center justify-center rounded-xl ${
                         item.destacado
                           ? "bg-white/15 text-white"
+                          : item.badge && item.badge > 0
+                          ? "bg-red-50 text-red-600"
                           : "bg-blue-50 text-blue-700"
                       }`}
                     >
                       <Icono size={21} />
                     </span>
 
-                    <ChevronRight
-                      size={17}
-                      className={
-                        item.destacado
-                          ? "text-blue-100"
-                          : "text-slate-300 transition group-hover:text-blue-600"
-                      }
-                    />
+                    {!(item.badge && item.badge > 0) && (
+                      <ChevronRight
+                        size={17}
+                        className={
+                          item.destacado
+                            ? "text-blue-100"
+                            : "text-slate-300 transition group-hover:text-blue-600"
+                        }
+                      />
+                    )}
                   </div>
 
                   <div className="mt-4">
@@ -431,22 +588,6 @@ export default function DashboardPropietariosPage() {
           </div>
 
           <div className="space-y-2.5">
-            <button
-              type="button"
-              onClick={() => router.push("/movil/propietarios/anuncios")}
-              className="flex w-full items-center justify-between rounded-2xl bg-slate-50 p-3 text-left transition hover:bg-slate-100"
-            >
-              <div>
-                <p className="text-xs font-extrabold text-slate-800">
-                  Recordatorio de pago
-                </p>
-                <p className="mt-0.5 text-[11px] text-slate-500">
-                  Los pagos deben realizarse del 1 al 5 de cada mes.
-                </p>
-              </div>
-              <ChevronRight size={17} className="shrink-0 text-slate-400" />
-            </button>
-
             <button
               type="button"
               onClick={() => router.push("/movil/propietarios/anuncios")}

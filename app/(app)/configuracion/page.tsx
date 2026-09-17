@@ -74,12 +74,12 @@ const tarjetasConfiguracion: ConfigCard[] = [
     tone: "purple",
   },
   {
-    title: "Empresa y Sucursales",
+    title: "Edificios",
     description:
-      "Espacio reservado para datos de empresa, sucursales y parámetros administrativos.",
-    href: "#",
+      "Creacion de los Edificios.",
+    href: "/configuracion/edificios",
     icon: Building2,
-    status: "Pendiente",
+    status: "Activo",
     tone: "amber",
   },
   {

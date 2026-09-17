@@ -22,6 +22,16 @@ import ModuleActions from "@/components/vam/enterprise/ModuleActions";
 import SectionCard from "@/components/vam/enterprise/SectionCard";
 import EmptyState from "@/components/vam/enterprise/EmptyState";
 
+type DistribucionEdificio = {
+  id: number;
+  monto_asignado: number;
+  porcentaje_asignado: number | null;
+  edificios?: {
+    codigo: string | null;
+    nombre: string | null;
+  } | null;
+};
+
 type SolicitudPago = {
   id: number;
   condominio_id: number | null;
@@ -41,6 +51,8 @@ type SolicitudPago = {
   estado: string | null;
   comentario_tesorero: string | null;
   comentario_presidente: string | null;
+  alcance_gasto: string | null;
+  solicitudes_pago_edificios?: DistribucionEdificio[] | null;
   catalogo_proveedores?: {
     nombre_proveedor: string | null;
   } | null;
@@ -129,6 +141,13 @@ export default function AprobacionPresidentePage() {
         estado,
         comentario_tesorero,
         comentario_presidente,
+        alcance_gasto,
+        solicitudes_pago_edificios(
+          id,
+          monto_asignado,
+          porcentaje_asignado,
+          edificios(codigo,nombre)
+        ),
         catalogo_proveedores(nombre_proveedor),
         catalogo_categoria_gastos(nombre_categoria)
       `,
@@ -404,6 +423,147 @@ export default function AprobacionPresidentePage() {
                       </p>
                     </div>
                   )}
+
+                  <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-wide text-blue-700">
+                          Aplicación del gasto
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-700">
+                          Información registrada en la solicitud y revisada por
+                          tesorería. Presidencia la visualiza solo para fines de
+                          aprobación.
+                        </p>
+                      </div>
+
+                      <span
+                        className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-black ${
+                          s.alcance_gasto === "EDIFICIOS"
+                            ? "border-blue-200 bg-blue-100 text-blue-800"
+                            : s.alcance_gasto === "COMUN"
+                              ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                              : "border-slate-200 bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {s.alcance_gasto === "EDIFICIOS"
+                          ? "Uno o varios edificios"
+                          : s.alcance_gasto === "COMUN"
+                            ? "Gasto común del condominio"
+                            : "Sin clasificación"}
+                      </span>
+                    </div>
+
+                    {s.alcance_gasto === "COMUN" && (
+                      <div className="mt-4 rounded-xl border border-emerald-100 bg-white px-4 py-3 text-sm font-semibold text-emerald-800">
+                        Este gasto corresponde al condominio en general y no
+                        tiene distribución por edificios.
+                      </div>
+                    )}
+
+                    {s.alcance_gasto === "EDIFICIOS" && (
+                      <div className="mt-4">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-black text-slate-800">
+                            Edificios afectados:{" "}
+                            {s.solicitudes_pago_edificios?.length || 0}
+                          </p>
+                          <p className="text-sm font-black text-blue-800">
+                            Distribuido: RD${" "}
+                            {dinero(
+                              (s.solicitudes_pago_edificios || []).reduce(
+                                (sum, item) =>
+                                  sum + Number(item.monto_asignado || 0),
+                                0,
+                              ),
+                            )}
+                          </p>
+                        </div>
+
+                        {s.solicitudes_pago_edificios &&
+                        s.solicitudes_pago_edificios.length > 0 ? (
+                          <div className="max-h-72 overflow-y-auto rounded-xl border bg-white">
+                            <div className="grid grid-cols-[1fr_130px_90px] gap-3 border-b bg-slate-50 px-4 py-2 text-xs font-black uppercase text-slate-500">
+                              <span>Edificio</span>
+                              <span className="text-right">Monto</span>
+                              <span className="text-right">%</span>
+                            </div>
+
+                            {s.solicitudes_pago_edificios.map((item) => (
+                              <div
+                                key={item.id}
+                                className="grid grid-cols-[1fr_130px_90px] gap-3 border-b px-4 py-3 text-sm last:border-b-0"
+                              >
+                                <div>
+                                  <p className="font-black text-slate-900">
+                                    {item.edificios?.nombre ||
+                                      `Edificio ${item.edificios?.codigo || "-"}`}
+                                  </p>
+                                  {item.edificios?.codigo && (
+                                    <p className="text-xs font-semibold text-slate-500">
+                                      Código: {item.edificios.codigo}
+                                    </p>
+                                  )}
+                                </div>
+                                <p className="text-right font-black text-slate-900">
+                                  RD$ {dinero(item.monto_asignado)}
+                                </p>
+                                <p className="text-right font-black text-slate-700">
+                                  {Number(
+                                    item.porcentaje_asignado || 0,
+                                  ).toFixed(2)}
+                                  %
+                                </p>
+                              </div>
+                            ))}
+
+                            <div className="grid grid-cols-[1fr_130px_90px] gap-3 border-t bg-blue-50 px-4 py-3 text-sm">
+                              <p className="font-black text-blue-900">
+                                Total distribuido
+                              </p>
+                              <p className="text-right font-black text-blue-900">
+                                RD${" "}
+                                {dinero(
+                                  (s.solicitudes_pago_edificios || []).reduce(
+                                    (sum, item) =>
+                                      sum + Number(item.monto_asignado || 0),
+                                    0,
+                                  ),
+                                )}
+                              </p>
+                              <p className="text-right font-black text-blue-900">
+                                {(
+                                  s.solicitudes_pago_edificios || []
+                                )
+                                  .reduce(
+                                    (sum, item) =>
+                                      sum +
+                                      Number(
+                                        item.porcentaje_asignado || 0,
+                                      ),
+                                    0,
+                                  )
+                                  .toFixed(2)}
+                                %
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                            La solicitud está marcada por edificios, pero no se
+                            encontró una distribución registrada.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {!s.alcance_gasto && (
+                      <div className="mt-4 rounded-xl border bg-white px-4 py-3 text-sm font-semibold text-slate-600">
+                        Solicitud histórica creada antes de habilitar la
+                        clasificación por edificios.
+                      </div>
+                    )}
+                  </div>
 
                   <div className="mt-5 flex flex-wrap items-center gap-3">
                     {s.soporte_url ? (

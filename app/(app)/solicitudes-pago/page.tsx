@@ -66,6 +66,17 @@ type SolicitudPagoOperativa = {
   estado_operativo: string | null;
   proveedor_nombre?: string | null;
   categoria_nombre?: string | null;
+
+  // Control de emisión / impresión del cheque.
+  estado_cheque?: string | null;
+  numero_cheque_emitido?: string | null;
+  fecha_emision_cheque?: string | null;
+  cuenta_bancaria_cheque_id?: number | null;
+  beneficiario_cheque?: string | null;
+  comentario_cheque?: string | null;
+  cheque_impreso_at?: string | null;
+  cheque_impreso_por?: string | null;
+  cheque_impresiones?: number | null;
 };
 
 type CuentaBancaria = {
@@ -93,6 +104,7 @@ const ESTADOS_OPERATIVOS = [
   "Pendiente presidente",
   "Aprobada sin gasto",
   "Lista para pagar",
+  "Cheque impreso",
   "Pagada",
   "Revisar: pagado sin banco",
   "Revisar: gasto no existe",
@@ -144,6 +156,10 @@ function estadoColor(estado?: string | null) {
     return "bg-purple-100 text-purple-800 border-purple-200";
   }
 
+  if (e === "Cheque impreso") {
+    return "bg-cyan-100 text-cyan-800 border-cyan-200";
+  }
+
   if (e === "Pagada") {
     return "bg-emerald-100 text-emerald-800 border-emerald-200";
   }
@@ -170,7 +186,50 @@ function esSolicitudNomina(s: SolicitudPagoOperativa) {
     normalizar(s.no_factura).startsWith("nom-");
 }
 
+type TipoOperacionCajaChica = "fondo_inicial" | "reposicion" | null;
+
+function tipoOperacionCajaChica(
+  s: SolicitudPagoOperativa,
+): TipoOperacionCajaChica {
+  const proveedor = normalizar(s.proveedor_nombre);
+  const categoria = normalizar(s.categoria_nombre);
+
+  if (!proveedor.includes("caja chica") || !categoria.includes("caja chica")) {
+    return null;
+  }
+
+  if (categoria.includes("fondo inicial")) {
+    return "fondo_inicial";
+  }
+
+  if (categoria.includes("reposicion")) {
+    return "reposicion";
+  }
+
+  return null;
+}
+
+function esSolicitudCajaChica(s: SolicitudPagoOperativa) {
+  return tipoOperacionCajaChica(s) !== null;
+}
+
+function esCajaChicaAprobadaParaPago(s: SolicitudPagoOperativa) {
+  if (!esSolicitudCajaChica(s)) return false;
+
+  const estadoSolicitud = normalizar(s.estado_solicitud);
+  const estadoOperativo = normalizar(s.estado_operativo);
+
+  return (
+    estadoSolicitud === "aprobado por presidente" ||
+    estadoSolicitud === "aprobada por presidente" ||
+    estadoSolicitud === "aprobado" ||
+    estadoSolicitud === "aprobada" ||
+    estadoOperativo === "aprobada sin gasto"
+  );
+}
+
 function puedeGenerarGastoSolicitud(s: SolicitudPagoOperativa) {
+  if (esSolicitudCajaChica(s)) return false;
   if (s.gasto_generado_id || s.gasto_id) return false;
 
   if (s.estado_operativo === "Aprobada sin gasto") return true;
@@ -186,8 +245,23 @@ function puedeGenerarGastoSolicitud(s: SolicitudPagoOperativa) {
 }
 
 function hoyISO() {
-  return new Date().toISOString().split("T")[0];
+  // Usar la fecha LOCAL del equipo, no UTC.
+  // new Date().toISOString() puede adelantar el día en RD por la noche.
+  const hoy = new Date();
+  const year = hoy.getFullYear();
+  const month = String(hoy.getMonth() + 1).padStart(2, "0");
+  const day = String(hoy.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }
+
+type ChequeEmisionForm = {
+  fecha_emision: string;
+  cuenta_bancaria_id: string;
+  numero_cheque: string;
+};
+
+const DATOS_CHEQUE_STORAGE_KEY = "vam_cheque_impresion_actual";
 
 export default function SolicitudesPagoPage() {
   const [solicitudes, setSolicitudes] = useState<SolicitudPagoOperativa[]>([]);
@@ -201,6 +275,14 @@ export default function SolicitudesPagoPage() {
   const [modalPago, setModalPago] = useState<SolicitudPagoOperativa | null>(
     null,
   );
+  const [modalCheque, setModalCheque] =
+    useState<SolicitudPagoOperativa | null>(null);
+  const [chequeEmisionForm, setChequeEmisionForm] =
+    useState<ChequeEmisionForm>({
+      fecha_emision: hoyISO(),
+      cuenta_bancaria_id: "",
+      numero_cheque: "",
+    });
   const [pagoForm, setPagoForm] = useState<PagoForm>({
     fecha_pago: hoyISO(),
     cuenta_bancaria_id: "",
@@ -221,6 +303,24 @@ export default function SolicitudesPagoPage() {
       cargarSolicitudes(idGuardado, nombreGuardado);
       cargarCuentasBancarias(idGuardado);
     }
+  }, []);
+
+  useEffect(() => {
+    function refrescarAlVolver() {
+      const idGuardado = localStorage.getItem("condominio_id") || "";
+      const nombreGuardado =
+        localStorage.getItem("condominio_nombre") || "";
+
+      if (idGuardado || nombreGuardado) {
+        cargarSolicitudes(idGuardado, nombreGuardado);
+      }
+    }
+
+    window.addEventListener("focus", refrescarAlVolver);
+
+    return () => {
+      window.removeEventListener("focus", refrescarAlVolver);
+    };
   }, []);
 
   async function cargarCuentasBancarias(idActual = condominioId) {
@@ -273,7 +373,211 @@ export default function SolicitudesPagoPage() {
       return;
     }
 
-    setSolicitudes((data as SolicitudPagoOperativa[]) || []);
+    const solicitudesBase = (data as SolicitudPagoOperativa[]) || [];
+
+    // La vista operativa no siempre trae proveedor_nombre / categoria_nombre.
+    // Enriquecemos los nombres desde los catálogos antes de usar la solicitud
+    // para Caja Chica, listado e impresión de cheques.
+    const proveedorIds = Array.from(
+      new Set(
+        solicitudesBase
+          .map((item) => Number(item.proveedor_id || 0))
+          .filter((id) => id > 0),
+      ),
+    );
+
+    const categoriaIds = Array.from(
+      new Set(
+        solicitudesBase
+          .map((item) => Number(item.categoria_id || 0))
+          .filter((id) => id > 0),
+      ),
+    );
+
+    const proveedorMap = new Map<number, string>();
+    const categoriaMap = new Map<number, string>();
+
+    const condominioConsulta = Number(
+      idActual || solicitudesBase[0]?.condominio_id || 0,
+    );
+
+    const [proveedoresResponse, categoriasResponse] = await Promise.all([
+      proveedorIds.length > 0
+        ? supabase
+            .from("catalogo_proveedores")
+            .select("id, nombre_proveedor")
+            .eq("condominio_id", condominioConsulta)
+            .in("id", proveedorIds)
+        : Promise.resolve({ data: [], error: null }),
+
+      categoriaIds.length > 0
+        ? supabase
+            .from("catalogo_categoria_gastos")
+            .select("id, nombre_categoria")
+            .eq("condominio_id", condominioConsulta)
+            .in("id", categoriaIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (proveedoresResponse.error) {
+      console.warn(
+        "No se pudieron cargar los nombres de proveedores:",
+        proveedoresResponse.error.message,
+      );
+    } else {
+      (proveedoresResponse.data || []).forEach((item: any) => {
+        proveedorMap.set(
+          Number(item.id),
+          String(item.nombre_proveedor || "").trim(),
+        );
+      });
+    }
+
+    if (categoriasResponse.error) {
+      console.warn(
+        "No se pudieron cargar los nombres de categorías:",
+        categoriasResponse.error.message,
+      );
+    } else {
+      (categoriasResponse.data || []).forEach((item: any) => {
+        categoriaMap.set(
+          Number(item.id),
+          String(item.nombre_categoria || "").trim(),
+        );
+      });
+    }
+
+    const solicitudesCompletas = solicitudesBase.map((solicitud) => ({
+      ...solicitud,
+      proveedor_nombre:
+        solicitud.proveedor_nombre ||
+        (solicitud.proveedor_id
+          ? proveedorMap.get(Number(solicitud.proveedor_id)) || null
+          : null),
+      categoria_nombre:
+        solicitud.categoria_nombre ||
+        (solicitud.categoria_id
+          ? categoriaMap.get(Number(solicitud.categoria_id)) || null
+          : null),
+    }));
+
+    const idsSolicitudes = solicitudesCompletas.map(
+      (item) => item.solicitud_id,
+    );
+
+    let solicitudesConCheque = solicitudesCompletas;
+
+    if (idsSolicitudes.length > 0) {
+      const { data: datosCheque, error: chequeMetaError } = await supabase
+        .from("v_cheques_emitidos_operativos")
+        .select(
+          "cheque_id, solicitud_pago_id, cuenta_bancaria_id, numero_cheque, fecha_emision, beneficiario, comentario, estado, emitido_por, cantidad_impresiones, primera_impresion_at, ultima_impresion_at",
+        )
+        .in("solicitud_pago_id", idsSolicitudes);
+
+      if (chequeMetaError) {
+        console.warn(
+          "No fue posible cargar el control de cheques emitidos:",
+          chequeMetaError.message,
+        );
+      } else {
+        const chequeMap = new Map<number, any>();
+
+        for (const item of datosCheque || []) {
+          chequeMap.set(Number(item.solicitud_pago_id), item);
+        }
+
+        solicitudesConCheque = solicitudesCompletas.map((solicitud) => {
+          const cheque = chequeMap.get(solicitud.solicitud_id);
+
+          return cheque
+            ? {
+                ...solicitud,
+                // Mantenemos estos nombres internos para no alterar el resto
+                // de la pantalla, pero los datos provienen de las tablas
+                // normalizadas cheques_emitidos / cheques_impresiones.
+                estado_cheque: cheque.estado,
+                numero_cheque_emitido: cheque.numero_cheque,
+                fecha_emision_cheque: cheque.fecha_emision,
+                cuenta_bancaria_cheque_id: cheque.cuenta_bancaria_id,
+                beneficiario_cheque: cheque.beneficiario,
+                comentario_cheque: cheque.comentario,
+                cheque_impreso_at: cheque.ultima_impresion_at,
+                cheque_impreso_por: cheque.emitido_por,
+                cheque_impresiones: cheque.cantidad_impresiones,
+              }
+            : solicitud;
+        });
+      }
+    }
+
+    const solicitudesCajaChica =
+      solicitudesConCheque.filter(esSolicitudCajaChica);
+    const idsCajaChica = solicitudesCajaChica.map((s) => s.solicitud_id);
+
+    if (idsCajaChica.length === 0) {
+      setSolicitudes(solicitudesConCheque);
+      return;
+    }
+
+    const { data: fondosCajaChica, error: fondosError } = await supabase
+      .from("caja_chica_fondos")
+      .select(
+        "solicitud_pago_id, movimiento_banco_id, monto, fecha, cheque_url, cuenta_bancaria_id, estado",
+      )
+      .in("solicitud_pago_id", idsCajaChica)
+      .neq("estado", "Anulado");
+
+    if (fondosError) {
+      console.warn(
+        "No fue posible enriquecer solicitudes de Caja Chica:",
+        fondosError.message,
+      );
+      setSolicitudes(solicitudesConCheque);
+      return;
+    }
+
+    const fondoPorSolicitud = new Map<number, any>();
+
+    for (const fondo of fondosCajaChica || []) {
+      const solicitudId = Number(fondo.solicitud_pago_id || 0);
+      if (solicitudId > 0) {
+        fondoPorSolicitud.set(solicitudId, fondo);
+      }
+    }
+
+    const solicitudesFinales = solicitudesConCheque.map((solicitud) => {
+      if (!esSolicitudCajaChica(solicitud)) return solicitud;
+
+      const fondo = fondoPorSolicitud.get(solicitud.solicitud_id);
+      if (!fondo?.movimiento_banco_id) {
+        if (normalizar(solicitud.estado_solicitud) === "pagada") {
+          return {
+            ...solicitud,
+            estado_operativo: "Pagada",
+            pagado: true,
+          };
+        }
+
+        return solicitud;
+      }
+
+      return {
+        ...solicitud,
+        estado_operativo: "Pagada",
+        pagado: true,
+        fecha_pago: fondo.fecha || solicitud.fecha_pago,
+        cuenta_bancaria_id:
+          fondo.cuenta_bancaria_id || solicitud.cuenta_bancaria_id,
+        movimientos_banco: 1,
+        total_banco: Number(fondo.monto || solicitud.total_solicitud || 0),
+        ultimo_movimiento_banco_id: fondo.movimiento_banco_id,
+        ultima_fecha_banco: fondo.fecha || solicitud.ultima_fecha_banco,
+        cheque_url: fondo.cheque_url || solicitud.cheque_url,
+      };
+    });
+
+    setSolicitudes(solicitudesFinales);
   }
 
   async function generarGasto(s: SolicitudPagoOperativa) {
@@ -425,8 +729,208 @@ export default function SolicitudesPagoPage() {
     return data.publicUrl;
   }
 
+  function solicitudUsaCheque(s: SolicitudPagoOperativa) {
+    const metodo = normalizar(s.metodo_pago);
+
+    // Si la solicitud no tiene método definido, VAM permite emitir cheque.
+    if (!metodo) return true;
+
+    return metodo.includes("cheque");
+  }
+
+  function tieneChequeImpreso(s: SolicitudPagoOperativa) {
+    return normalizar(s.estado_cheque) === "impreso";
+  }
+
+  function estadoVisibleSolicitud(s: SolicitudPagoOperativa) {
+    if (s.estado_operativo === "Pagada" || s.pagado) return "Pagada";
+    if (tieneChequeImpreso(s)) return "Cheque impreso";
+    return s.estado_operativo || "Revisar";
+  }
+
+  function puedeEmitirChequeSolicitud(s: SolicitudPagoOperativa) {
+    if (s.estado_operativo === "Pagada" || s.pagado) return false;
+
+    const estadoSolicitud = normalizar(s.estado_solicitud);
+    const estadoOperativo = normalizar(s.estado_operativo);
+
+    const aprobadaPorTesorero =
+      Boolean(s.fecha_revision_tesorero) ||
+      estadoSolicitud === "aprobado por tesorero" ||
+      estadoSolicitud === "aprobada por tesorero" ||
+      estadoOperativo === "pendiente presidente" ||
+      estadoOperativo === "aprobada sin gasto" ||
+      estadoOperativo === "lista para pagar";
+
+    const aprobadaPorPresidente =
+      Boolean(s.fecha_revision_presidente) ||
+      estadoSolicitud === "aprobado por presidente" ||
+      estadoSolicitud === "aprobada por presidente" ||
+      estadoSolicitud === "aprobado" ||
+      estadoSolicitud === "aprobada" ||
+      estadoOperativo === "aprobada sin gasto" ||
+      estadoOperativo === "lista para pagar";
+
+    const aprobacionesCompletas =
+      aprobadaPorTesorero && aprobadaPorPresidente;
+
+    const cajaChicaLista =
+      esSolicitudCajaChica(s) && esCajaChicaAprobadaParaPago(s);
+
+    // Regla VAM:
+    // Cuando la solicitud queda "Aprobada sin gasto", ya terminó el circuito
+    // Tesorero + Presidente y se puede emitir el cheque ANTES de generar el gasto.
+    // Aquí no bloqueamos por metodo_pago porque la emisión del cheque define
+    // precisamente que esta operación se manejará por cheque.
+    if (
+      estadoOperativo === "aprobada sin gasto" &&
+      (aprobacionesCompletas || estadoSolicitud.includes("presidente"))
+    ) {
+      return true;
+    }
+
+    // Para solicitudes que ya están listas para pagar conservamos la regla
+    // de método Cheque (o método todavía no definido).
+    if (estadoOperativo === "lista para pagar") {
+      return solicitudUsaCheque(s);
+    }
+
+    return cajaChicaLista && solicitudUsaCheque(s);
+  }
+
+  function beneficiarioSugeridoCheque(s: SolicitudPagoOperativa) {
+    const proveedor = String(s.proveedor_nombre || "").trim();
+    if (proveedor) return proveedor;
+
+    if (esSolicitudNomina(s)) {
+      const texto = `${s.detalle || ""} ${s.concepto || ""}`;
+
+      const matchEmpleado = texto.match(
+        /Empleado:\s*([^\\n]+?)(?=\s+(?:No\.?\s*empleado|Cargo|Departamento|Tipo nómina|Tipo nomina|Período|Periodo|Quincena|Segunda|Primera|Total|$))/i,
+      );
+
+      if (matchEmpleado?.[1]) {
+        return matchEmpleado[1].trim();
+      }
+    }
+
+    return "";
+  }
+
+  function abrirModalEmisionCheque(s: SolicitudPagoOperativa) {
+    if (!puedeEmitirChequeSolicitud(s)) {
+      alert(
+        "El cheque solo puede emitirse después de las aprobaciones de Tesorero y Presidente, y cuando el método de pago sea Cheque.",
+      );
+      return;
+    }
+
+    const cuentaDefault =
+      s.cuenta_bancaria_id || (cuentas.length === 1 ? cuentas[0].id : null);
+
+    setChequeEmisionForm({
+      fecha_emision:
+        s.fecha_emision_cheque || hoyISO(),
+      cuenta_bancaria_id:
+        s.cuenta_bancaria_cheque_id
+          ? String(s.cuenta_bancaria_cheque_id)
+          : cuentaDefault
+            ? String(cuentaDefault)
+            : "",
+      numero_cheque: s.numero_cheque_emitido || "",
+    });
+
+    setModalCheque(s);
+  }
+
+  function imprimirChequeSolicitud() {
+    if (!modalCheque) return;
+
+    if (!chequeEmisionForm.fecha_emision) {
+      alert("Debe indicar la fecha de emisión del cheque.");
+      return;
+    }
+
+    if (!chequeEmisionForm.cuenta_bancaria_id) {
+      alert("Debe seleccionar la cuenta bancaria del cheque.");
+      return;
+    }
+
+    if (!chequeEmisionForm.numero_cheque.trim()) {
+      alert("Debe indicar el número de cheque.");
+      return;
+    }
+
+    const cuenta =
+      cuentas.find(
+        (item) =>
+          String(item.id) === String(chequeEmisionForm.cuenta_bancaria_id),
+      ) || null;
+
+    if (!cuenta) {
+      alert("No fue posible identificar la cuenta bancaria seleccionada.");
+      return;
+    }
+
+    if (!normalizar(cuenta.nombre_banco).includes("popular")) {
+      alert(
+        `La plantilla calibrada actualmente corresponde a Banco Popular.\n\nCuenta seleccionada: ${cuenta.nombre_banco}`,
+      );
+      return;
+    }
+
+    const beneficiario = beneficiarioSugeridoCheque(modalCheque);
+
+    if (!beneficiario) {
+      alert("La solicitud no tiene un proveedor/beneficiario identificado.");
+      return;
+    }
+
+    const monto = Number(modalCheque.total_solicitud || 0);
+
+    if (!(monto > 0)) {
+      alert("El monto del cheque debe ser mayor que cero.");
+      return;
+    }
+
+    const datosCheque = {
+      solicitud_id: modalCheque.solicitud_id,
+      numero_solicitud: numeroSolicitud(modalCheque),
+      beneficiario,
+      beneficiario_manual:
+        modalCheque.beneficiario_cheque &&
+        normalizar(modalCheque.beneficiario_cheque) !== normalizar(beneficiario)
+          ? modalCheque.beneficiario_cheque
+          : "",
+      comentario: modalCheque.comentario_cheque || "",
+      monto,
+      fecha: chequeEmisionForm.fecha_emision,
+      numero_cheque: chequeEmisionForm.numero_cheque.trim(),
+      concepto: modalCheque.concepto || "",
+      es_reimpresion: tieneChequeImpreso(modalCheque),
+      banco: cuenta.nombre_banco,
+      cuenta_bancaria_id: cuenta.id,
+      numero_cuenta: cuenta.numero_cuenta,
+      condominio: modalCheque.condominio || condominioNombre,
+    };
+
+    localStorage.setItem(
+      DATOS_CHEQUE_STORAGE_KEY,
+      JSON.stringify(datosCheque),
+    );
+
+    window.open(
+      "/administracion/cheques/imprimir",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
   function abrirModalPago(s: SolicitudPagoOperativa) {
-    if (s.estado_operativo !== "Lista para pagar") {
+    const cajaChicaLista =
+      esSolicitudCajaChica(s) && esCajaChicaAprobadaParaPago(s);
+
+    if (s.estado_operativo !== "Lista para pagar" && !cajaChicaLista) {
       alert("Esta solicitud no está lista para pagar.");
       return;
     }
@@ -448,12 +952,23 @@ export default function SolicitudesPagoPage() {
   async function completarPago() {
     if (!modalPago) return;
 
-    if (!modalPago.gasto_generado_id && !modalPago.gasto_id) {
+    const esCajaChica = esSolicitudCajaChica(modalPago);
+    const cajaChicaLista =
+      esCajaChica && esCajaChicaAprobadaParaPago(modalPago);
+
+    if (
+      !esCajaChica &&
+      !modalPago.gasto_generado_id &&
+      !modalPago.gasto_id
+    ) {
       alert("Primero debe generar el gasto.");
       return;
     }
 
-    if (modalPago.estado_operativo !== "Lista para pagar") {
+    if (
+      modalPago.estado_operativo !== "Lista para pagar" &&
+      !cajaChicaLista
+    ) {
       alert("Esta solicitud no está lista para pagar.");
       return;
     }
@@ -478,15 +993,37 @@ export default function SolicitudesPagoPage() {
       return;
     }
 
+    if (
+      esCajaChica &&
+      normalizar(pagoForm.metodo_pago).includes("cheque") &&
+      !chequeArchivo &&
+      !modalPago.cheque_url
+    ) {
+      alert("Para Caja Chica debe adjuntar el archivo del cheque emitido.");
+      return;
+    }
+
     const referenciaBanco =
       pagoForm.referencia_banco || pagoForm.numero_documento;
 
+    const tipoCajaChica = tipoOperacionCajaChica(modalPago);
+    const nombreOperacionCajaChica =
+      tipoCajaChica === "fondo_inicial"
+        ? "Fondo Inicial de Caja Chica"
+        : "Reposición de Caja Chica";
+
     const confirmar = confirm(
-      `¿Desea procesar este pago y registrar el EGRESO bancario?\n\nSolicitud: ${numeroSolicitud(
-        modalPago,
-      )}\nConcepto: ${modalPago.concepto || ""}\nTotal: RD$ ${dinero(
-        modalPago.total_solicitud,
-      )}`,
+      esCajaChica
+        ? `¿Desea ejecutar ${nombreOperacionCajaChica} y registrar el EGRESO bancario?\n\nSolicitud: ${numeroSolicitud(
+            modalPago,
+          )}\nTotal: RD$ ${dinero(
+            modalPago.total_solicitud,
+          )}\n\nEfecto: Banco disminuye y Caja Chica aumenta. No se crea gasto operativo.`
+        : `¿Desea procesar este pago y registrar el EGRESO bancario?\n\nSolicitud: ${numeroSolicitud(
+            modalPago,
+          )}\nConcepto: ${modalPago.concepto || ""}\nTotal: RD$ ${dinero(
+            modalPago.total_solicitud,
+          )}`,
     );
 
     if (!confirmar) return;
@@ -533,7 +1070,7 @@ export default function SolicitudesPagoPage() {
     const busqueda = normalizar(buscar);
 
     return solicitudes.filter((s) => {
-      const estadoOperativo = s.estado_operativo || "";
+      const estadoOperativo = estadoVisibleSolicitud(s);
       const cumpleEstado =
         filtroEstado === "" || estadoOperativo === filtroEstado;
 
@@ -761,13 +1298,21 @@ export default function SolicitudesPagoPage() {
 
               <tbody>
                 {solicitudesFiltradas.map((s) => {
-                  const estadoOperativo = s.estado_operativo || "Revisar";
+                  const estadoOperativoReal =
+                    s.estado_operativo || "Revisar";
+                  const estadoOperativo = estadoVisibleSolicitud(s);
+                  const chequeImpreso = tieneChequeImpreso(s);
+                  const esCajaChica = esSolicitudCajaChica(s);
                   const puedeGenerarGasto =
                     puedeGenerarGastoSolicitud(s);
-                  const puedePagar = estadoOperativo === "Lista para pagar";
-                  const esPagada = estadoOperativo === "Pagada";
+                  const puedePagar =
+                    estadoOperativoReal === "Lista para pagar" ||
+                    (esCajaChica && esCajaChicaAprobadaParaPago(s));
+                  const puedeEmitirCheque =
+                    puedeEmitirChequeSolicitud(s);
+                  const esPagada = estadoOperativoReal === "Pagada";
                   const requiereRevision =
-                    estadoOperativo.startsWith("Revisar");
+                    estadoOperativoReal.startsWith("Revisar");
 
                   return (
                     <tr key={s.solicitud_id} className="hover:bg-slate-50">
@@ -882,6 +1427,20 @@ export default function SolicitudesPagoPage() {
                           >
                             Ver cheque
                           </a>
+                        ) : chequeImpreso ? (
+                          <div className="text-xs">
+                            <div className="font-black text-cyan-700">
+                              Cheque impreso
+                            </div>
+                            {s.numero_cheque_emitido && (
+                              <div className="mt-1 text-slate-500">
+                                No. {s.numero_cheque_emitido}
+                              </div>
+                            )}
+                            <div className="mt-1 text-[11px] text-slate-400">
+                              {Number(s.cheque_impresiones || 0)} impresión(es)
+                            </div>
+                          </div>
                         ) : (
                           <span className="text-xs text-slate-400">
                             Sin cheque
@@ -914,6 +1473,26 @@ export default function SolicitudesPagoPage() {
                             </button>
                           )}
 
+                          {puedeEmitirCheque && (
+                            <button
+                              type="button"
+                              disabled={procesandoId === s.solicitud_id}
+                              onClick={() => abrirModalEmisionCheque(s)}
+                              className={`w-full rounded-lg px-3 py-2 text-xs font-bold text-white disabled:opacity-50 ${
+                                chequeImpreso
+                                  ? "bg-amber-600 hover:bg-amber-700"
+                                  : "bg-blue-700 hover:bg-blue-800"
+                              }`}
+                            >
+                              <span className="inline-flex items-center justify-center gap-1">
+                                <Printer className="h-3 w-3" />
+                                {chequeImpreso
+                                  ? "Reimprimir cheque"
+                                  : "Emitir cheque"}
+                              </span>
+                            </button>
+                          )}
+
                           {puedePagar && (
                             <button
                               type="button"
@@ -921,7 +1500,11 @@ export default function SolicitudesPagoPage() {
                               onClick={() => abrirModalPago(s)}
                               className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
                             >
-                              Procesar pago
+                              {esCajaChica
+                                ? tipoOperacionCajaChica(s) === "fondo_inicial"
+                                  ? "Procesar fondo inicial"
+                                  : "Procesar reposición"
+                                : "Procesar pago"}
                             </button>
                           )}
 
@@ -969,13 +1552,163 @@ export default function SolicitudesPagoPage() {
         )}
       </SectionCard>
 
+      {modalCheque && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">
+                  {tieneChequeImpreso(modalCheque)
+                    ? "Reimpresión de cheque"
+                    : "Emitir cheque"}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Solicitud {numeroSolicitud(modalCheque)} · RD${" "}
+                  {dinero(modalCheque.total_solicitud)}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setModalCheque(null)}
+                className="rounded-full bg-slate-100 p-2 text-slate-600 hover:bg-slate-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+              <div className="text-xs font-black uppercase tracking-wide text-blue-700">
+                Beneficiario
+              </div>
+              <div className="mt-1 text-base font-black text-slate-900">
+                {beneficiarioSugeridoCheque(modalCheque) ||
+                  "Beneficiario no identificado"}
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-white p-3">
+                  <div className="text-xs font-semibold text-slate-500">
+                    Concepto
+                  </div>
+                  <div className="mt-1 text-sm font-bold text-slate-800">
+                    {modalCheque.concepto || "-"}
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-white p-3">
+                  <div className="text-xs font-semibold text-slate-500">
+                    Monto del cheque
+                  </div>
+                  <div className="mt-1 text-lg font-black text-emerald-700">
+                    RD$ {dinero(modalCheque.total_solicitud)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Cuenta bancaria
+                </label>
+                <select
+                  value={chequeEmisionForm.cuenta_bancaria_id}
+                  onChange={(e) =>
+                    setChequeEmisionForm((prev) => ({
+                      ...prev,
+                      cuenta_bancaria_id: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                >
+                  <option value="">Seleccione cuenta</option>
+                  {cuentas.map((cuenta) => (
+                    <option key={cuenta.id} value={cuenta.id}>
+                      {cuenta.nombre_banco} · {cuenta.numero_cuenta} · RD${" "}
+                      {dinero(cuenta.balance_actual)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Fecha del cheque
+                  </label>
+                  <input
+                    type="date"
+                    value={chequeEmisionForm.fecha_emision}
+                    onChange={(e) =>
+                      setChequeEmisionForm((prev) => ({
+                        ...prev,
+                        fecha_emision: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border px-4 py-3"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Número de cheque
+                  </label>
+                  <input
+                    type="text"
+                    value={chequeEmisionForm.numero_cheque}
+                    onChange={(e) =>
+                      setChequeEmisionForm((prev) => ({
+                        ...prev,
+                        numero_cheque: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border px-4 py-3"
+                    placeholder="Ej.: 000386"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-800">
+              Emitir o imprimir el cheque no registra ningún pago ni movimiento
+              bancario. El cheque debe ser firmado por Tesorero y Presidente.
+              Después de firmado se procesa el pago y se adjunta el cheque al sistema.
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setModalCheque(null)}
+                className="rounded-xl border px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={imprimirChequeSolicitud}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800"
+              >
+                <Printer className="h-4 w-4" />
+                Vista previa / Imprimir cheque
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {modalPago && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-xl font-black text-slate-900">
-                  Procesar pago
+                  {esSolicitudCajaChica(modalPago)
+                    ? tipoOperacionCajaChica(modalPago) === "fondo_inicial"
+                      ? "Procesar Fondo Inicial de Caja Chica"
+                      : "Procesar Reposición de Caja Chica"
+                    : "Procesar pago"}
                 </h2>
                 <p className="text-sm text-slate-500">
                   Solicitud {numeroSolicitud(modalPago)} · RD${" "}
@@ -1135,7 +1868,9 @@ export default function SolicitudesPagoPage() {
 
               <div className="md:col-span-2">
                 <label className="mb-1 block text-sm font-semibold">
-                  Cheque / comprobante de pago
+                  {normalizar(pagoForm.metodo_pago).includes("cheque")
+                    ? "Cheque firmado / comprobante de pago"
+                    : "Comprobante de pago"}
                 </label>
                 <input
                   type="file"
@@ -1146,7 +1881,11 @@ export default function SolicitudesPagoPage() {
                   className="w-full rounded-xl border bg-white px-4 py-3"
                 />
                 <p className="mt-1 text-xs text-slate-500">
-                  Este archivo se guardará en el gasto como cheque_url y quedará disponible para consulta.
+                  {esSolicitudCajaChica(modalPago)
+                    ? "Adjunte aquí el cheque firmado. Este comprobante quedará vinculado a la operación de Caja Chica y a la solicitud."
+                    : normalizar(pagoForm.metodo_pago).includes("cheque")
+                      ? "Adjunte aquí el cheque ya firmado por Tesorero y Presidente. Luego se registrará el egreso bancario."
+                      : "Este archivo se guardará en el gasto como cheque_url y quedará disponible para consulta."}
                 </p>
               </div>
             </div>
@@ -1170,7 +1909,11 @@ export default function SolicitudesPagoPage() {
               >
                 {procesandoId === modalPago.solicitud_id
                   ? "Procesando..."
-                  : "Registrar egreso bancario"}
+                  : esSolicitudCajaChica(modalPago)
+                    ? tipoOperacionCajaChica(modalPago) === "fondo_inicial"
+                      ? "Registrar fondo inicial"
+                      : "Registrar reposición"
+                    : "Registrar egreso bancario"}
               </button>
             </div>
           </div>

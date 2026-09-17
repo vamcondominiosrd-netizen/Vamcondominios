@@ -26,6 +26,12 @@ type SolicitudPago = {
   gasto_generado_id: number | null;
   created_at: string | null;
 
+  // Control de cheques emitidos/impresos antes del pago.
+  estado_cheque?: string | null;
+  numero_cheque_emitido?: string | null;
+  fecha_emision_cheque?: string | null;
+  beneficiario_cheque?: string | null;
+
   catalogo_proveedores?: {
     nombre_proveedor: string | null;
   } | null;
@@ -213,7 +219,53 @@ export default function ResumenSolicitudesPagoPage() {
       return;
     }
 
-    setSolicitudes((data as SolicitudPago[]) || []);
+    const solicitudesBase = (data as SolicitudPago[]) || [];
+    const idsSolicitudes = solicitudesBase.map((s) => s.id);
+
+    if (idsSolicitudes.length === 0) {
+      setSolicitudes([]);
+      return;
+    }
+
+    const { data: chequesData, error: chequesError } = await supabase
+      .from("v_cheques_emitidos_operativos")
+      .select(
+        "solicitud_pago_id, numero_cheque, fecha_emision, beneficiario, estado",
+      )
+      .in("solicitud_pago_id", idsSolicitudes);
+
+    if (chequesError) {
+      setMensaje(
+        "Error cargando cheques emitidos: " + chequesError.message,
+      );
+      setSolicitudes(solicitudesBase);
+      return;
+    }
+
+    const chequePorSolicitud = new Map<number, any>();
+
+    for (const cheque of chequesData || []) {
+      chequePorSolicitud.set(
+        Number(cheque.solicitud_pago_id),
+        cheque,
+      );
+    }
+
+    const solicitudesConCheque = solicitudesBase.map((solicitud) => {
+      const cheque = chequePorSolicitud.get(solicitud.id);
+
+      return cheque
+        ? {
+            ...solicitud,
+            estado_cheque: cheque.estado,
+            numero_cheque_emitido: cheque.numero_cheque,
+            fecha_emision_cheque: cheque.fecha_emision,
+            beneficiario_cheque: cheque.beneficiario,
+          }
+        : solicitud;
+    });
+
+    setSolicitudes(solicitudesConCheque);
   }
 
   async function cargarGastos(id: string) {
@@ -289,17 +341,49 @@ export default function ResumenSolicitudesPagoPage() {
     return valor ? valor.toUpperCase() : "SIN_ESTADO";
   }
 
-  function etiquetaEstadoSolicitud(estado: string | null | undefined) {
-    const valor = normalizarEstado(estado);
 
-    if (valor === "PENDIENTE_TESORERO") return "Pendiente tesorero";
-    if (valor === "PENDIENTE_PRESIDENTE") return "Pendiente presidente";
-    if (valor === "APROBADO_PRESIDENTE") return "Aprobado presidente";
-    if (valor === "GASTO_GENERADO") return "Gasto generado";
-    if (valor === "RECHAZADO") return "Rechazado";
-    if (valor === "CANCELADO") return "Cancelado";
+  function esSolicitudNomina(s: SolicitudPago) {
+    const texto = normalizarTexto(
+      `${s.concepto || ""} ${s.detalle || ""} ${s.no_factura || ""}`,
+    );
 
-    return estado || "Sin estado";
+    return (
+      texto.includes("nomina") ||
+      normalizarTexto(s.no_factura).startsWith("nom-")
+    );
+  }
+
+  function nombreCondominioParaNomina(s: SolicitudPago) {
+    const nombreBase = String(
+      s.condominio || condominio?.nombre || condominioNombre || "",
+    ).trim();
+
+    const lote = nombreBase.match(/lote\s*[-#]?\s*(\d+)/i);
+
+    if (lote?.[1]) {
+      return `Condominio Lote ${lote[1]}`;
+    }
+
+    if (normalizarTexto(nombreBase).startsWith("condominio")) {
+      return nombreBase;
+    }
+
+    return nombreBase ? `Condominio ${nombreBase}` : "Condominio";
+  }
+
+  function proveedorResumen(s: SolicitudPago) {
+    const proveedorCatalogo =
+      s.catalogo_proveedores?.nombre_proveedor?.trim();
+
+    if (proveedorCatalogo) {
+      return proveedorCatalogo;
+    }
+
+    if (esSolicitudNomina(s)) {
+      return nombreCondominioParaNomina(s);
+    }
+
+    return "-";
   }
 
   function obtenerFechaSolicitud(s: SolicitudPago) {
@@ -330,11 +414,14 @@ export default function ResumenSolicitudesPagoPage() {
 
       return {
         ...s,
-        proveedor: s.catalogo_proveedores?.nombre_proveedor || "-",
+        proveedor: proveedorResumen(s),
         categoria: s.catalogo_categoria_gastos?.nombre_categoria || "-",
         gasto_estado: gasto?.estado || "",
         pagado: Boolean(gasto?.pagado),
-        numero_cheque: gasto?.numero_cheque || "-",
+        numero_cheque:
+          s.numero_cheque_emitido ||
+          gasto?.numero_cheque ||
+          "-",
         fecha_pago: gasto?.fecha_pago || null,
         cheque_url: gasto?.cheque_url || null,
         cuenta_banco_final: gasto?.cuenta_banco || s.cuenta_banco || "-",
@@ -497,8 +584,8 @@ export default function ResumenSolicitudesPagoPage() {
               </h1>
 
               <p className="text-slate-500 text-sm mt-1">
-                Reporte mensual simple de solicitudes, cheques y montos para
-                impresión.
+                Reporte mensual de solicitudes, cheques emitidos/impresos y
+                montos para impresión.
               </p>
 
               <p className="text-sm text-blue-700 font-bold mt-2">
@@ -714,7 +801,6 @@ export default function ResumenSolicitudesPagoPage() {
                     <th className="p-2 border text-left">Concepto</th>
                     <th className="p-2 border text-left">No. cheque</th>
                     <th className="p-2 border text-right">Monto</th>
-                    <th className="p-2 border text-center">Estado</th>
                   </tr>
                 </thead>
 
@@ -748,18 +834,13 @@ export default function ResumenSolicitudesPagoPage() {
                         RD$ {dinero(fila.total)}
                       </td>
 
-                      <td className="p-2 border text-center">
-                        {fila.pagado
-                          ? "Pagado"
-                          : etiquetaEstadoSolicitud(fila.estado)}
-                      </td>
                     </tr>
                   ))}
 
                   {filasFiltradas.length === 0 && (
                     <tr>
                       <td
-                        colSpan={7}
+                        colSpan={6}
                         className="p-6 border text-center text-slate-500"
                       >
                         No hay solicitudes para mostrar en este período.
@@ -777,7 +858,6 @@ export default function ResumenSolicitudesPagoPage() {
                       <td className="p-2 border text-right">
                         RD$ {dinero(totalSolicitado)}
                       </td>
-                      <td className="p-2 border" />
                     </tr>
                   </tfoot>
                 )}

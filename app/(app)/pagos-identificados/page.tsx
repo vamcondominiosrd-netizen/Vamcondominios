@@ -21,15 +21,21 @@ import ModuleActions from "@/components/vam/enterprise/ModuleActions";
 import SectionCard from "@/components/vam/enterprise/SectionCard";
 import EmptyState from "@/components/vam/enterprise/EmptyState";
 
+type TipoPeriodo = "TODOS" | "MES" | "RANGO";
+
 type BancoRow = {
   id: number;
   condominio_id: number;
   condominio: string | null;
   fecha_posteo: string;
   monto_transaccion: number;
-  no_serial: string;
+  no_serial: string | null;
   descripcion: string;
   estado?: string | null;
+  unidad_id: number | null;
+  apartamento: string | null;
+  propietario: string | null;
+  periodo: string | null;
 };
 
 type AliasRow = {
@@ -88,9 +94,15 @@ type ResultadoRow = BancoRow & {
   metodo_identificacion: string;
   puntos_coincidencia: number;
   estado_identificacion: "Identificado" | "Revisar";
+  guardado_en_pagos_identificados: boolean;
 };
 
-function limpiarTexto(texto: string) {
+function obtenerMesActual() {
+  const hoy = new Date();
+  return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function limpiarTexto(texto: string | null | undefined) {
   return String(texto || "")
     .toLowerCase()
     .normalize("NFD")
@@ -100,73 +112,26 @@ function limpiarTexto(texto: string) {
     .trim();
 }
 
+function normalizarCodigo(valor: string | null | undefined) {
+  return limpiarTexto(valor).replace(/\s+/g, "").replace(/-/g, "");
+}
+
 function escaparRegex(texto: string) {
   return texto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function obtenerPalabrasClave(texto: string) {
   const palabrasIgnoradas = [
-    "pago",
-    "pgo",
-    "pag",
-    "pagos",
-    "transferencia",
-    "transf",
-    "deposito",
-    "depositos",
-    "depósito",
-    "depósitos",
-    "mantenimiento",
-    "mant",
-    "mto",
-    "condominio",
-    "residencial",
-    "colinas",
-    "oeste",
-    "lote",
-    "rd",
-    "rd$",
-    "dop",
-    "del",
-    "de",
-    "la",
-    "el",
-    "los",
-    "las",
-    "por",
-    "para",
-    "desde",
-    "cta",
-    "cuenta",
-    "banco",
-    "popular",
-    "bpd",
-    "ach",
-    "lbtr",
-    "internet",
-    "movil",
-    "mobile",
-    "canal",
-    "servicio",
-    "servicios",
-    "concepto",
-    "referencia",
-    "debito",
-    "credito",
-    "crédito",
-    "enero",
-    "febrero",
-    "marzo",
-    "abril",
-    "mayo",
-    "junio",
-    "julio",
-    "agosto",
-    "septiembre",
-    "setiembre",
-    "octubre",
-    "noviembre",
-    "diciembre",
+    "pago", "pgo", "pag", "pagos", "transferencia", "transf",
+    "deposito", "depositos", "depósito", "depósitos", "mantenimiento",
+    "mant", "mto", "condominio", "residencial", "colinas", "oeste",
+    "lote", "rd", "rd$", "dop", "del", "de", "la", "el", "los",
+    "las", "por", "para", "desde", "cta", "cuenta", "banco",
+    "popular", "bpd", "ach", "lbtr", "internet", "movil", "mobile",
+    "canal", "servicio", "servicios", "concepto", "referencia", "debito",
+    "credito", "crédito", "enero", "febrero", "marzo", "abril", "mayo",
+    "junio", "julio", "agosto", "septiembre", "setiembre", "octubre",
+    "noviembre", "diciembre",
   ];
 
   return limpiarTexto(texto)
@@ -177,12 +142,31 @@ function obtenerPalabrasClave(texto: string) {
     .filter((p) => !/^\d{4}$/.test(p));
 }
 
+function buscarUnidadPorCodigo(
+  codigoOriginal: string | null | undefined,
+  unidades: UnidadRow[],
+) {
+  const codigo = normalizarCodigo(codigoOriginal);
+  if (!codigo) return null;
+
+  const exacta = unidades.find(
+    (unidad) => normalizarCodigo(unidad.codigo) === codigo,
+  );
+  if (exacta) return exacta;
+
+  const candidatas = unidades.filter((unidad) => {
+    const codigoUnidad = normalizarCodigo(unidad.codigo);
+    return codigoUnidad.includes(codigo) || codigo.includes(codigoUnidad);
+  });
+
+  return candidatas.length === 1 ? candidatas[0] : null;
+}
+
 function buscarUnidadEnDescripcion(
   descripcionOriginal: string,
   unidades: UnidadRow[],
 ) {
   const descripcion = limpiarTexto(descripcionOriginal || "");
-
   if (!descripcion) return null;
 
   const unidadesOrdenadas = [...unidades].sort((a, b) => {
@@ -212,78 +196,58 @@ function calcularCoincidenciaAlias(
   const propietario = limpiarTexto(alias.propietario || "");
 
   if (!descripcionBanco || !aliasTexto) return 0;
-
   if (descripcionBanco.includes(aliasTexto)) return 100;
-
-  if (descripcionBanco.length >= 8 && aliasTexto.includes(descripcionBanco)) {
-    return 95;
-  }
+  if (descripcionBanco.length >= 8 && aliasTexto.includes(descripcionBanco)) return 95;
 
   let puntos = 0;
-
   const palabrasAlias = obtenerPalabrasClave(aliasTexto);
   const palabrasPropietario = obtenerPalabrasClave(propietario);
 
   if (palabrasAlias.length > 0) {
-    const encontradasAlias = palabrasAlias.filter((palabra) =>
+    const encontradas = palabrasAlias.filter((palabra) =>
       descripcionBanco.includes(palabra),
     );
-
-    const porcentajeAlias = encontradasAlias.length / palabrasAlias.length;
-
-    puntos += Math.round(porcentajeAlias * 75);
-
-    if (porcentajeAlias === 1) {
-      puntos += 10;
-    }
+    const porcentaje = encontradas.length / palabrasAlias.length;
+    puntos += Math.round(porcentaje * 75);
+    if (porcentaje === 1) puntos += 10;
   }
 
   if (palabrasPropietario.length > 0) {
-    const encontradasPropietario = palabrasPropietario.filter((palabra) =>
+    const encontradas = palabrasPropietario.filter((palabra) =>
       descripcionBanco.includes(palabra),
     );
-
-    const porcentajePropietario =
-      encontradasPropietario.length / palabrasPropietario.length;
-
-    puntos += Math.round(porcentajePropietario * 20);
-
-    if (porcentajePropietario === 1) {
-      puntos += 10;
-    }
+    const porcentaje = encontradas.length / palabrasPropietario.length;
+    puntos += Math.round(porcentaje * 20);
+    if (porcentaje === 1) puntos += 10;
   }
 
   if (apartamento) {
-    const patronApto = new RegExp(
+    const patron = new RegExp(
       `(^|\\s)${escaparRegex(apartamento)}(\\s|$)`,
       "i",
     );
-
-    if (patronApto.test(descripcionBanco)) {
-      puntos += 20;
-    }
+    if (patron.test(descripcionBanco)) puntos += 20;
   }
 
-  return puntos > 100 ? 100 : puntos;
+  return Math.min(puntos, 100);
 }
 
 function buscarMejorAlias(descripcionBanco: string, aliasRows: AliasRow[]) {
-  const evaluados = aliasRows
-    .map((alias) => ({
-      alias,
-      puntos: calcularCoincidenciaAlias(descripcionBanco, alias),
-    }))
-    .filter((item) => item.puntos >= 60)
-    .sort((a, b) => {
-      if (b.puntos !== a.puntos) return b.puntos - a.puntos;
-
-      const largoB = limpiarTexto(b.alias.descripcion_banco || "").length;
-      const largoA = limpiarTexto(a.alias.descripcion_banco || "").length;
-
-      return largoB - largoA;
-    });
-
-  return evaluados[0] || null;
+  return (
+    aliasRows
+      .map((alias) => ({
+        alias,
+        puntos: calcularCoincidenciaAlias(descripcionBanco, alias),
+      }))
+      .filter((item) => item.puntos >= 60)
+      .sort((a, b) => {
+        if (b.puntos !== a.puntos) return b.puntos - a.puntos;
+        return (
+          limpiarTexto(b.alias.descripcion_banco || "").length -
+          limpiarTexto(a.alias.descripcion_banco || "").length
+        );
+      })[0] || null
+  );
 }
 
 function formatearMoneda(valor: number | null | undefined) {
@@ -299,19 +263,18 @@ function obtenerPeriodo(fecha: string | null | undefined) {
   return String(fecha).slice(0, 7);
 }
 
+function fechaISO(fecha: string | null | undefined) {
+  if (!fecha) return "";
+  return String(fecha).slice(0, 10);
+}
+
 function montoIgual(a: number | null, b: number | null) {
   return Number(a || 0).toFixed(2) === Number(b || 0).toFixed(2);
 }
 
 function estadoPendienteMovil(estado: string | null) {
   const e = limpiarTexto(estado || "Pendiente");
-
-  return (
-    e === "pendiente" ||
-    e === "reportado" ||
-    e === "en revision" ||
-    e === "en revisión"
-  );
+  return e === "pendiente" || e === "reportado" || e === "en revision";
 }
 
 function fechaCorta(valor?: string | null) {
@@ -332,6 +295,10 @@ export default function IdentificarPagosPage() {
 
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("Todos");
+  const [tipoPeriodo, setTipoPeriodo] = useState<TipoPeriodo>("TODOS");
+  const [mesFiltro, setMesFiltro] = useState(obtenerMesActual());
+  const [fechaDesde, setFechaDesde] = useState("");
+  const [fechaHasta, setFechaHasta] = useState("");
 
   const [editando, setEditando] = useState<ResultadoRow | null>(null);
   const [editUnidadId, setEditUnidadId] = useState("");
@@ -360,68 +327,69 @@ export default function IdentificarPagosPage() {
   async function cargarDatos(id: string) {
     setLoading(true);
 
-    const { data: bancoData, error: bancoError } = await supabase
-      .from("archivo_banco")
-      .select(
-        "id, condominio_id, condominio, fecha_posteo, monto_transaccion, no_serial, descripcion, estado",
-      )
-      .eq("condominio_id", Number(id))
-      .order("fecha_posteo", { ascending: false });
+    const [bancoResultado, unidadesResultado, aliasResultado, pagosResultado] =
+      await Promise.all([
+        supabase
+          .from("archivo_banco")
+          .select(
+            "id, condominio_id, condominio, fecha_posteo, monto_transaccion, no_serial, descripcion, estado, unidad_id, apartamento, propietario, periodo",
+          )
+          .eq("condominio_id", Number(id))
+          .order("fecha_posteo", { ascending: false }),
+        supabase
+          .from("unidades")
+          .select("id, condominio_id, codigo, propietario_nombre, activa")
+          .eq("condominio_id", Number(id))
+          .eq("activa", true)
+          .order("codigo", { ascending: true }),
+        supabase
+          .from("apartamento_banco_alias")
+          .select(
+            "id, condominio_id, unidad_id, no_apartamento, propietario, descripcion_banco, estado",
+          )
+          .eq("condominio_id", Number(id))
+          .eq("estado", "Activo")
+          .order("no_apartamento", { ascending: true }),
+        supabase
+          .from("pagos_identificados")
+          .select(
+            "id, archivo_banco_id, condominio_id, unidad_id, apartamento, no_apartamento, propietario, fecha_posteo, monto, monto_transaccion, no_serial, descripcion_banco, tipo_pago, periodo, estado, observacion",
+          )
+          .eq("condominio_id", Number(id)),
+      ]);
 
-    if (bancoError) {
-      alert("Error cargando archivo_banco: " + bancoError.message);
+    if (bancoResultado.error) {
+      alert("Error cargando archivo_banco: " + bancoResultado.error.message);
       setLoading(false);
       return;
     }
 
-    const { data: unidadesData, error: unidadesError } = await supabase
-      .from("unidades")
-      .select("id, condominio_id, codigo, propietario_nombre, activa")
-      .eq("condominio_id", Number(id))
-      .eq("activa", true)
-      .order("codigo", { ascending: true });
-
-    if (unidadesError) {
-      alert("Error cargando unidades: " + unidadesError.message);
+    if (unidadesResultado.error) {
+      alert("Error cargando unidades: " + unidadesResultado.error.message);
       setLoading(false);
       return;
     }
 
-    const { data: aliasData, error: aliasError } = await supabase
-      .from("apartamento_banco_alias")
-      .select(
-        "id, condominio_id, unidad_id, no_apartamento, propietario, descripcion_banco, estado",
-      )
-      .eq("condominio_id", Number(id))
-      .eq("estado", "Activo")
-      .order("no_apartamento", { ascending: true });
-
-    if (aliasError) {
-      alert("Error cargando apartamento_banco_alias: " + aliasError.message);
+    if (aliasResultado.error) {
+      alert("Error cargando alias bancarios: " + aliasResultado.error.message);
       setLoading(false);
       return;
     }
 
-    const { data: pagosData, error: pagosError } = await supabase
-      .from("pagos_identificados")
-      .select(
-        "id, archivo_banco_id, condominio_id, unidad_id, apartamento, no_apartamento, propietario, fecha_posteo, monto, monto_transaccion, no_serial, descripcion_banco, tipo_pago, periodo, estado, observacion",
-      )
-      .eq("condominio_id", Number(id));
-
-    if (pagosError) {
-      alert("Error cargando pagos_identificados: " + pagosError.message);
+    if (pagosResultado.error) {
+      alert("Error cargando pagos_identificados: " + pagosResultado.error.message);
       setLoading(false);
       return;
     }
 
-    setUnidades((unidadesData as UnidadRow[]) || []);
+    const unidadesData = (unidadesResultado.data || []) as UnidadRow[];
+    setUnidades(unidadesData);
 
     compararDatos(
-      (bancoData as BancoRow[]) || [],
-      (aliasData as AliasRow[]) || [],
-      (unidadesData as UnidadRow[]) || [],
-      (pagosData as PagoIdentificadoRow[]) || [],
+      (bancoResultado.data || []) as BancoRow[],
+      (aliasResultado.data || []) as AliasRow[],
+      unidadesData,
+      (pagosResultado.data || []) as PagoIdentificadoRow[],
     );
 
     setLoading(false);
@@ -441,16 +409,16 @@ export default function IdentificarPagosPage() {
       }
     });
 
-    const aliasOrdenados = [...aliasRows].sort((a, b) => {
-      const textoA = limpiarTexto(a.descripcion_banco || "");
-      const textoB = limpiarTexto(b.descripcion_banco || "");
-
-      return textoB.length - textoA.length;
-    });
+    const aliasOrdenados = [...aliasRows].sort(
+      (a, b) =>
+        limpiarTexto(b.descripcion_banco || "").length -
+        limpiarTexto(a.descripcion_banco || "").length,
+    );
 
     const resultadoComparado: ResultadoRow[] = bancoRows.map((item) => {
       const pagoGuardado = pagosPorArchivo.get(item.id);
 
+      // 1. Si ya está en pagos_identificados, conservarlo como identificado.
       if (pagoGuardado) {
         const apartamentoGuardado =
           pagoGuardado.no_apartamento || pagoGuardado.apartamento || "";
@@ -458,18 +426,53 @@ export default function IdentificarPagosPage() {
         return {
           ...item,
           alias_id: null,
-          unidad_id: pagoGuardado.unidad_id || null,
-          apartamento_identificado: apartamentoGuardado,
-          propietario_identificado: pagoGuardado.propietario || "",
+          unidad_id: pagoGuardado.unidad_id || item.unidad_id || null,
+          apartamento_identificado:
+            apartamentoGuardado || item.apartamento || "",
+          propietario_identificado:
+            pagoGuardado.propietario || item.propietario || "",
           alias_registrado:
-            pagoGuardado.observacion ||
-            "Registro guardado en pagos_identificados",
+            pagoGuardado.observacion || "Registro guardado en pagos_identificados",
           metodo_identificacion: "Pago ya guardado",
           puntos_coincidencia: 100,
           estado_identificacion: "Identificado",
+          guardado_en_pagos_identificados: true,
         };
       }
 
+      // 2. Respetar la identificación que ya fue realizada al cargar el archivo.
+      const unidadPorId = item.unidad_id
+        ? unidadesRows.find(
+            (unidad) => Number(unidad.id) === Number(item.unidad_id),
+          ) || null
+        : null;
+
+      const unidadPorApartamento = buscarUnidadPorCodigo(
+        item.apartamento,
+        unidadesRows,
+      );
+
+      const unidadArchivo = unidadPorId || unidadPorApartamento;
+
+      if (unidadArchivo && (item.apartamento || unidadArchivo.codigo)) {
+        return {
+          ...item,
+          alias_id: null,
+          unidad_id: unidadArchivo.id,
+          apartamento_identificado:
+            item.apartamento || unidadArchivo.codigo || "",
+          propietario_identificado:
+            item.propietario || unidadArchivo.propietario_nombre || "",
+          alias_registrado:
+            "Identificación existente en archivo_banco desde la importación",
+          metodo_identificacion: "Identificado en archivo bancario",
+          puntos_coincidencia: 100,
+          estado_identificacion: "Identificado",
+          guardado_en_pagos_identificados: false,
+        };
+      }
+
+      // 3. Si no estaba identificado en archivo_banco, intentar por descripción.
       const unidadDetectada = buscarUnidadEnDescripcion(
         item.descripcion || "",
         unidadesRows,
@@ -487,27 +490,38 @@ export default function IdentificarPagosPage() {
           metodo_identificacion: "Apartamento en descripción",
           puntos_coincidencia: 100,
           estado_identificacion: "Identificado",
+          guardado_en_pagos_identificados: false,
         };
       }
 
+      // 4. Intentar por alias bancario.
       const evaluado = buscarMejorAlias(item.descripcion || "", aliasOrdenados);
 
       if (evaluado?.alias) {
         const encontrado = evaluado.alias;
+        const unidadAlias = encontrado.unidad_id
+          ? unidadesRows.find(
+              (unidad) => Number(unidad.id) === Number(encontrado.unidad_id),
+            ) || null
+          : null;
 
         return {
           ...item,
           alias_id: encontrado.id,
           unidad_id: encontrado.unidad_id || null,
-          apartamento_identificado: encontrado.no_apartamento || "",
-          propietario_identificado: encontrado.propietario || "",
+          apartamento_identificado:
+            encontrado.no_apartamento || unidadAlias?.codigo || "",
+          propietario_identificado:
+            encontrado.propietario || unidadAlias?.propietario_nombre || "",
           alias_registrado: encontrado.descripcion_banco || "",
           metodo_identificacion: "Alias banco",
           puntos_coincidencia: evaluado.puntos,
           estado_identificacion: "Identificado",
+          guardado_en_pagos_identificados: false,
         };
       }
 
+      // 5. Solo aquí es realmente pendiente.
       return {
         ...item,
         alias_id: null,
@@ -518,14 +532,15 @@ export default function IdentificarPagosPage() {
         metodo_identificacion: "Sin coincidencia",
         puntos_coincidencia: 0,
         estado_identificacion: "Revisar",
+        guardado_en_pagos_identificados: false,
       };
     });
 
     setResultado(resultadoComparado);
   }
 
-  async function actualizarPagoMovilRecibido(pagos: PagoIdentificadoRow[]) {
-    if (!condominioId || pagos.length === 0) return;
+  async function actualizarPagoMovilRecibido(pagosGuardados: PagoIdentificadoRow[]) {
+    if (!condominioId || pagosGuardados.length === 0) return;
 
     const { data: pagosMovilData, error } = await supabase
       .from("pagos_movil")
@@ -536,16 +551,12 @@ export default function IdentificarPagosPage() {
 
     if (error) {
       console.error(error);
-      alert(
-        "Los pagos identificados fueron guardados, pero hubo error consultando pagos_movil: " +
-          error.message,
-      );
       return;
     }
 
-    const pagosMovil = (pagosMovilData as PagoMovilRow[]) || [];
+    const pagosMovil = (pagosMovilData || []) as PagoMovilRow[];
 
-    for (const pago of pagos) {
+    for (const pago of pagosGuardados) {
       const periodo = pago.periodo || obtenerPeriodo(pago.fecha_posteo || "");
       const montoPago = Number(pago.monto_transaccion || pago.monto || 0);
 
@@ -568,7 +579,7 @@ export default function IdentificarPagosPage() {
 
       if (!pagoMovil) continue;
 
-      const { error: updateError } = await supabase
+      await supabase
         .from("pagos_movil")
         .update({
           estado: "Recibido",
@@ -579,10 +590,6 @@ export default function IdentificarPagosPage() {
         })
         .eq("id", pagoMovil.id)
         .eq("condominio_id", Number(condominioId));
-
-      if (updateError) {
-        console.error(updateError);
-      }
     }
   }
 
@@ -597,11 +604,7 @@ export default function IdentificarPagosPage() {
 
     const unidad = unidades.find((item) => String(item.id) === unidadId);
 
-    if (!unidad) {
-      setEditApartamento("");
-      setEditPropietario("");
-      return;
-    }
+    if (!unidad) return;
 
     setEditApartamento(unidad.codigo || "");
     setEditPropietario(unidad.propietario_nombre || "");
@@ -609,17 +612,13 @@ export default function IdentificarPagosPage() {
 
   function abrirEdicionManual(item: ResultadoRow) {
     setEditando(item);
-
     setEditUnidadId(item.unidad_id ? String(item.unidad_id) : "");
-
     setEditApartamento(
       item.apartamento_identificado !== "Pendiente"
         ? item.apartamento_identificado || ""
         : "",
     );
-
     setEditPropietario(item.propietario_identificado || "");
-
     setEditObservacion(
       item.estado_identificacion === "Revisar"
         ? "Identificado manualmente desde revisión"
@@ -640,15 +639,7 @@ export default function IdentificarPagosPage() {
   async function guardarIdentificacionManual(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!editando) {
-      alert("Debe seleccionar una transacción.");
-      return;
-    }
-
-    if (!condominioId) {
-      alert("No se encontró el condominio activo.");
-      return;
-    }
+    if (!editando || !condominioId) return;
 
     if (!editUnidadId || !editApartamento || !editPropietario) {
       alert("Debe seleccionar el apartamento correcto.");
@@ -669,18 +660,20 @@ export default function IdentificarPagosPage() {
       no_serial: editando.no_serial,
       descripcion_banco: editando.descripcion,
       tipo_pago: "Mantenimiento",
-      periodo: obtenerPeriodo(editando.fecha_posteo),
+      periodo: editando.periodo || obtenerPeriodo(editando.fecha_posteo),
       estado: "Identificado",
       observacion:
         editObservacion ||
         `Identificado manualmente | Apartamento: ${editApartamento}`,
     };
 
-    const confirmar = confirm(
-      `Se actualizará este pago como identificado para el apartamento ${editApartamento}. ¿Desea continuar?`,
-    );
-
-    if (!confirmar) return;
+    if (
+      !confirm(
+        `Se guardará la identificación para el apartamento ${editApartamento}. ¿Desea continuar?`,
+      )
+    ) {
+      return;
+    }
 
     setGuardandoManual(true);
 
@@ -694,78 +687,72 @@ export default function IdentificarPagosPage() {
 
     if (errorPago) {
       setGuardandoManual(false);
-      console.error(errorPago);
       alert("Error guardando pago identificado: " + errorPago.message);
       return;
     }
 
-    const { error: errorBanco } = await supabase
+    await supabase
       .from("archivo_banco")
-      .update({ estado: "Identificado" })
+      .update({
+        estado: "Identificado",
+        unidad_id: Number(editUnidadId),
+        apartamento: editApartamento,
+        propietario: editPropietario,
+      })
       .eq("id", editando.id)
       .eq("condominio_id", Number(condominioId));
-
-    if (errorBanco) {
-      setGuardandoManual(false);
-      alert(
-        "El pago fue guardado, pero hubo error actualizando archivo_banco: " +
-          errorBanco.message,
-      );
-      return;
-    }
 
     await actualizarPagoMovilRecibido([pagoGuardado as PagoIdentificadoRow]);
 
     setGuardandoManual(false);
-
-    alert("Pago actualizado e identificado correctamente.");
-
     cancelarEdicionManual();
-    cargarDatos(condominioId);
+    await cargarDatos(condominioId);
   }
 
   async function guardarPagosIdentificados() {
-    if (!condominioId) {
-      alert("No se encontró el condominio activo.");
-      return;
-    }
+    if (!condominioId) return;
 
-    const pagos = resultado
-      .filter(
-        (r) =>
-          r.estado_identificacion === "Identificado" &&
-          r.apartamento_identificado &&
-          r.apartamento_identificado !== "Pendiente",
-      )
-      .map((r) => ({
-        archivo_banco_id: r.id,
-        condominio_id: Number(condominioId),
-        condominio: r.condominio || condominioNombre,
-        unidad_id: r.unidad_id,
-        apartamento: r.apartamento_identificado,
-        no_apartamento: r.apartamento_identificado,
-        propietario: r.propietario_identificado,
-        fecha_posteo: r.fecha_posteo,
-        monto: Number(r.monto_transaccion || 0),
-        monto_transaccion: Number(r.monto_transaccion || 0),
-        no_serial: r.no_serial,
-        descripcion_banco: r.descripcion,
-        tipo_pago: "Mantenimiento",
-        periodo: obtenerPeriodo(r.fecha_posteo),
-        estado: "Identificado",
-        observacion: `${r.metodo_identificacion} | Coincidencia: ${r.puntos_coincidencia}%`,
-      }));
-
-    if (pagos.length === 0) {
-      alert("No hay pagos identificados para guardar.");
-      return;
-    }
-
-    const confirmar = confirm(
-      `Se procesarán ${pagos.length} pagos identificados para ${condominioNombre}. Si alguno ya existe, se actualizará. ¿Desea continuar?`,
+    // Solo guardamos identificados que todavía no existen en pagos_identificados.
+    const nuevosIdentificados = resultado.filter(
+      (r) =>
+        r.estado_identificacion === "Identificado" &&
+        !r.guardado_en_pagos_identificados &&
+        Boolean(r.unidad_id) &&
+        Boolean(r.apartamento_identificado) &&
+        r.apartamento_identificado !== "Pendiente",
     );
 
-    if (!confirmar) return;
+    if (nuevosIdentificados.length === 0) {
+      alert("No hay nuevas identificaciones pendientes de guardar.");
+      return;
+    }
+
+    const pagos = nuevosIdentificados.map((r) => ({
+      archivo_banco_id: r.id,
+      condominio_id: Number(condominioId),
+      condominio: r.condominio || condominioNombre,
+      unidad_id: r.unidad_id,
+      apartamento: r.apartamento_identificado,
+      no_apartamento: r.apartamento_identificado,
+      propietario: r.propietario_identificado,
+      fecha_posteo: r.fecha_posteo,
+      monto: Number(r.monto_transaccion || 0),
+      monto_transaccion: Number(r.monto_transaccion || 0),
+      no_serial: r.no_serial,
+      descripcion_banco: r.descripcion,
+      tipo_pago: "Mantenimiento",
+      periodo: r.periodo || obtenerPeriodo(r.fecha_posteo),
+      estado: "Identificado",
+      observacion: `${r.metodo_identificacion} | Coincidencia: ${r.puntos_coincidencia}%`,
+    }));
+
+    if (
+      !confirm(
+        `Se guardarán ${pagos.length} nuevas identificaciones para ${condominioNombre}. ¿Desea continuar?`,
+      )
+    ) {
+      return;
+    }
 
     setGuardando(true);
 
@@ -778,47 +765,24 @@ export default function IdentificarPagosPage() {
 
     if (error) {
       setGuardando(false);
-      console.error(error);
       alert("Error al guardar pagos identificados: " + error.message);
       return;
     }
 
-    await marcarArchivoBancoIdentificado();
+    const idsIdentificados = nuevosIdentificados.map((r) => r.id);
+
+    await supabase
+      .from("archivo_banco")
+      .update({ estado: "Identificado" })
+      .in("id", idsIdentificados)
+      .eq("condominio_id", Number(condominioId));
 
     await actualizarPagoMovilRecibido(
-      (pagosGuardados as PagoIdentificadoRow[]) || [],
+      (pagosGuardados || []) as PagoIdentificadoRow[],
     );
 
     setGuardando(false);
-
-    alert("Pagos identificados guardados correctamente.");
-    cargarDatos(condominioId);
-  }
-
-  async function marcarArchivoBancoIdentificado() {
-    const idsIdentificados = resultado
-      .filter((r) => r.estado_identificacion === "Identificado")
-      .map((r) => r.id);
-
-    const idsPendientes = resultado
-      .filter((r) => r.estado_identificacion === "Revisar")
-      .map((r) => r.id);
-
-    if (idsIdentificados.length > 0) {
-      await supabase
-        .from("archivo_banco")
-        .update({ estado: "Identificado" })
-        .in("id", idsIdentificados)
-        .eq("condominio_id", Number(condominioId));
-    }
-
-    if (idsPendientes.length > 0) {
-      await supabase
-        .from("archivo_banco")
-        .update({ estado: "Revisar" })
-        .in("id", idsPendientes)
-        .eq("condominio_id", Number(condominioId));
-    }
+    await cargarDatos(condominioId);
   }
 
   async function refrescar() {
@@ -826,7 +790,18 @@ export default function IdentificarPagosPage() {
     await cargarDatos(condominioId);
   }
 
+  function limpiarFiltros() {
+    setBusqueda("");
+    setFiltroEstado("Todos");
+    setTipoPeriodo("TODOS");
+    setMesFiltro(obtenerMesActual());
+    setFechaDesde("");
+    setFechaHasta("");
+  }
+
   const resultadoFiltrado = useMemo(() => {
+    const textoBusqueda = busqueda.toLowerCase().trim();
+
     return resultado.filter((item) => {
       const texto = `${item.fecha_posteo || ""} ${item.monto_transaccion || ""} ${
         item.descripcion || ""
@@ -836,32 +811,56 @@ export default function IdentificarPagosPage() {
         .toLowerCase()
         .trim();
 
-      const coincideBusqueda = texto.includes(busqueda.toLowerCase().trim());
-
+      const coincideBusqueda = !textoBusqueda || texto.includes(textoBusqueda);
       const coincideEstado =
-        filtroEstado === "Todos"
-          ? true
-          : item.estado_identificacion === filtroEstado;
+        filtroEstado === "Todos" || item.estado_identificacion === filtroEstado;
 
-      return coincideBusqueda && coincideEstado;
+      const fecha = fechaISO(item.fecha_posteo);
+      let coincidePeriodo = true;
+
+      if (tipoPeriodo === "MES") {
+        coincidePeriodo = Boolean(mesFiltro) && fecha.slice(0, 7) === mesFiltro;
+      }
+
+      if (tipoPeriodo === "RANGO") {
+        if (fechaDesde) coincidePeriodo = coincidePeriodo && fecha >= fechaDesde;
+        if (fechaHasta) coincidePeriodo = coincidePeriodo && fecha <= fechaHasta;
+      }
+
+      return coincideBusqueda && coincideEstado && coincidePeriodo;
     });
-  }, [resultado, busqueda, filtroEstado]);
+  }, [
+    resultado,
+    busqueda,
+    filtroEstado,
+    tipoPeriodo,
+    mesFiltro,
+    fechaDesde,
+    fechaHasta,
+  ]);
 
-  const identificados = resultado.filter(
-    (r) => r.estado_identificacion === "Identificado",
-  ).length;
+  const resumen = useMemo(() => {
+    const identificados = resultadoFiltrado.filter(
+      (r) => r.estado_identificacion === "Identificado",
+    );
+    const pendientes = resultadoFiltrado.filter(
+      (r) => r.estado_identificacion === "Revisar",
+    );
 
-  const pendientes = resultado.filter(
-    (r) => r.estado_identificacion === "Revisar",
-  ).length;
-
-  const montoIdentificado = resultado
-    .filter((r) => r.estado_identificacion === "Identificado")
-    .reduce((total, item) => total + Number(item.monto_transaccion || 0), 0);
-
-  const montoPendiente = resultado
-    .filter((r) => r.estado_identificacion === "Revisar")
-    .reduce((total, item) => total + Number(item.monto_transaccion || 0), 0);
+    return {
+      total: resultadoFiltrado.length,
+      identificados: identificados.length,
+      pendientes: pendientes.length,
+      montoIdentificado: identificados.reduce(
+        (total, item) => total + Number(item.monto_transaccion || 0),
+        0,
+      ),
+      montoPendiente: pendientes.reduce(
+        (total, item) => total + Number(item.monto_transaccion || 0),
+        0,
+      ),
+    };
+  }, [resultadoFiltrado]);
 
   return (
     <PageContainer>
@@ -885,17 +884,12 @@ export default function IdentificarPagosPage() {
             label: "Pagos identificados",
             icon: ListChecks,
           },
-          {
-            href: "/archivo-banco/importar-banco-identificado",
-            label: "Archivo Banco identificados",
-            icon: SearchCheck,
-          },
         ]}
       />
 
       <ModuleToolbar
-        title="Identificación Automática de Pagos"
-        subtitle={`Cruce de pagos bancarios contra apartamentos y alias. Condominio: ${
+        title="Identificación de Pagos Bancarios"
+        subtitle={`Valida la identificación realizada durante la importación y permite corregir excepciones. Condominio: ${
           condominioNombre || "No identificado"
         }.`}
         icon={SearchCheck}
@@ -918,44 +912,38 @@ export default function IdentificarPagosPage() {
 
       {editando && (
         <SectionCard
-          title="Actualizar pago en revisión"
-          subtitle="Seleccione el apartamento correcto para guardar este registro como identificado."
+          title="Actualizar identificación"
+          subtitle="Seleccione el apartamento correcto para corregir esta transacción."
           action={
             <button
               type="button"
               onClick={cancelarEdicionManual}
-              className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              className="rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
             >
               Cancelar
             </button>
           }
         >
-          <div className="mb-5 rounded-2xl border bg-yellow-50 p-4">
-            <p className="text-sm font-black uppercase text-yellow-800">
-              Transacción seleccionada
+          <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <InfoLine label="Fecha" value={fechaCorta(editando.fecha_posteo)} />
+            <InfoLine
+              label="Monto"
+              value={formatearMoneda(editando.monto_transaccion)}
+            />
+            <InfoLine
+              label="Estado"
+              value={editando.estado_identificacion}
+              danger={editando.estado_identificacion === "Revisar"}
+            />
+          </div>
+
+          <div className="mb-5 rounded-xl bg-slate-50 p-4">
+            <p className="text-xs font-bold uppercase text-slate-500">
+              Descripción banco
             </p>
-
-            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
-              <InfoLine label="Fecha" value={fechaCorta(editando.fecha_posteo)} />
-              <InfoLine
-                label="Monto"
-                value={formatearMoneda(editando.monto_transaccion)}
-              />
-              <InfoLine
-                label="Estado"
-                value={editando.estado_identificacion}
-                danger={editando.estado_identificacion === "Revisar"}
-              />
-            </div>
-
-            <div className="mt-4 rounded-xl bg-white p-3">
-              <p className="text-xs font-bold uppercase text-slate-500">
-                Descripción banco
-              </p>
-              <p className="mt-1 text-sm font-semibold text-slate-800">
-                {editando.descripcion || "-"}
-              </p>
-            </div>
+            <p className="mt-1 text-sm font-semibold text-slate-800">
+              {editando.descripcion || "-"}
+            </p>
           </div>
 
           <form
@@ -966,14 +954,12 @@ export default function IdentificarPagosPage() {
               <label className="mb-1 block text-sm font-semibold">
                 Apartamento correcto *
               </label>
-
               <select
                 value={editUnidadId}
                 onChange={(e) => seleccionarUnidadManual(e.target.value)}
                 className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
               >
                 <option value="">Seleccione apartamento</option>
-
                 {unidades.map((unidad) => (
                   <option key={unidad.id} value={unidad.id}>
                     {unidad.codigo} - {unidad.propietario_nombre}
@@ -983,109 +969,79 @@ export default function IdentificarPagosPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-semibold">
-                No. Apartamento
-              </label>
-
-              <input
-                value={editApartamento}
-                onChange={(e) => setEditApartamento(e.target.value)}
-                className="w-full rounded-xl border px-4 py-3 text-sm"
-                placeholder="Ej. G1"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-semibold">
-                Propietario
-              </label>
-
+              <label className="mb-1 block text-sm font-semibold">Propietario</label>
               <input
                 value={editPropietario}
                 onChange={(e) => setEditPropietario(e.target.value)}
                 className="w-full rounded-xl border px-4 py-3 text-sm"
-                placeholder="Nombre del propietario"
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-semibold">
-                Período
-              </label>
-
+              <label className="mb-1 block text-sm font-semibold">Apartamento</label>
               <input
-                value={obtenerPeriodo(editando.fecha_posteo)}
+                value={editApartamento}
+                onChange={(e) => setEditApartamento(e.target.value)}
+                className="w-full rounded-xl border px-4 py-3 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-semibold">Período</label>
+              <input
+                value={editando.periodo || obtenerPeriodo(editando.fecha_posteo)}
                 disabled
                 className="w-full rounded-xl border bg-slate-100 px-4 py-3 text-sm"
               />
             </div>
 
             <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-semibold">
-                Observación
-              </label>
-
+              <label className="mb-1 block text-sm font-semibold">Observación</label>
               <textarea
                 value={editObservacion}
                 onChange={(e) => setEditObservacion(e.target.value)}
-                className="w-full rounded-xl border px-4 py-3 text-sm"
                 rows={3}
+                className="w-full rounded-xl border px-4 py-3 text-sm"
               />
             </div>
 
-            <div className="flex flex-col gap-3 md:col-span-2 md:flex-row">
+            <div className="md:col-span-2">
               <button
                 type="submit"
                 disabled={guardandoManual}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
               >
                 <Save className="h-4 w-4" />
-                {guardandoManual ? "Guardando..." : "Guardar como identificado"}
-              </button>
-
-              <button
-                type="button"
-                onClick={cancelarEdicionManual}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-700 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800"
-              >
-                Cancelar
+                {guardandoManual ? "Guardando..." : "Guardar identificación"}
               </button>
             </div>
           </form>
         </SectionCard>
       )}
 
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-5">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-5">
+        <InfoBox label="Total" value={String(resumen.total)} />
         <InfoBox
-          label="Total transacciones"
-          value={`${resultado.length}`}
-          tone="slate"
-        />
-
-        <InfoBox
-          label="Identificadas"
-          value={`${identificados}`}
+          label="Identificados"
+          value={String(resumen.identificados)}
           tone="emerald"
         />
-
-        <InfoBox label="Pendientes" value={`${pendientes}`} tone="red" />
-
+        <InfoBox label="Pendientes" value={String(resumen.pendientes)} tone="red" />
         <InfoBox
           label="Monto identificado"
-          value={formatearMoneda(montoIdentificado)}
+          value={formatearMoneda(resumen.montoIdentificado)}
           tone="emerald"
         />
-
         <InfoBox
           label="Monto pendiente"
-          value={formatearMoneda(montoPendiente)}
+          value={formatearMoneda(resumen.montoPendiente)}
           tone="red"
         />
       </div>
 
       <SectionCard
         title="Filtros"
-        subtitle="Filtre las transacciones por estado, descripción, apartamento o propietario."
+        subtitle="Consulte por estado, mes bancario, rango de fechas o texto."
         action={
           <div className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">
             <Filter className="h-4 w-4" />
@@ -1093,10 +1049,9 @@ export default function IdentificarPagosPage() {
           </div>
         }
       >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
           <div>
             <label className="mb-1 block text-sm font-semibold">Estado</label>
-
             <select
               value={filtroEstado}
               onChange={(e) => setFiltroEstado(e.target.value)}
@@ -1108,25 +1063,84 @@ export default function IdentificarPagosPage() {
             </select>
           </div>
 
-          <div className="md:col-span-2">
-            <label className="mb-1 block text-sm font-semibold">Buscar</label>
+          <div>
+            <label className="mb-1 block text-sm font-semibold">Período</label>
+            <select
+              value={tipoPeriodo}
+              onChange={(e) => setTipoPeriodo(e.target.value as TipoPeriodo)}
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+            >
+              <option value="TODOS">Todos los meses</option>
+              <option value="MES">Por mes</option>
+              <option value="RANGO">Rango de fechas</option>
+            </select>
+          </div>
 
+          {tipoPeriodo === "MES" && (
+            <div>
+              <label className="mb-1 block text-sm font-semibold">Mes bancario</label>
+              <input
+                type="month"
+                value={mesFiltro}
+                onChange={(e) => setMesFiltro(e.target.value)}
+                className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+              />
+            </div>
+          )}
+
+          {tipoPeriodo === "RANGO" && (
+            <>
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Desde</label>
+                <input
+                  type="date"
+                  value={fechaDesde}
+                  onChange={(e) => setFechaDesde(e.target.value)}
+                  className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-semibold">Hasta</label>
+                <input
+                  type="date"
+                  value={fechaHasta}
+                  min={fechaDesde || undefined}
+                  onChange={(e) => setFechaHasta(e.target.value)}
+                  className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+                />
+              </div>
+            </>
+          )}
+
+          <div className={tipoPeriodo === "RANGO" ? "xl:col-span-1" : "xl:col-span-2"}>
+            <label className="mb-1 block text-sm font-semibold">Buscar</label>
             <div className="relative">
               <Search className="pointer-events-none absolute left-4 top-3.5 h-4 w-4 text-slate-400" />
               <input
                 value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
                 className="w-full rounded-xl border px-10 py-3 text-sm"
-                placeholder="Buscar por descripción, apartamento o propietario..."
+                placeholder="Descripción, apartamento, propietario..."
               />
             </div>
+          </div>
+
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={limpiarFiltros}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Limpiar
+            </button>
           </div>
         </div>
       </SectionCard>
 
       <SectionCard
         title="Resultado de identificación"
-        subtitle="Transacciones importadas del banco comparadas contra unidades y alias bancarios."
+        subtitle="La identificación guardada durante la carga del archivo se respeta como fuente válida."
         action={
           loading ? (
             <div className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">
@@ -1135,197 +1149,72 @@ export default function IdentificarPagosPage() {
             </div>
           ) : (
             <div className="rounded-xl bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">
-              Identificadas: {identificados}
+              Identificados: {resumen.identificados}
             </div>
           )
         }
       >
         {loading ? (
           <p className="text-sm text-slate-500">Cargando datos...</p>
-        ) : !condominioId ? (
-          <EmptyState
-            title="Condominio no identificado"
-            description="No se encontró el condominio activo. Debe iniciar sesión nuevamente."
-          />
         ) : resultadoFiltrado.length === 0 ? (
           <EmptyState
             title="Sin transacciones"
-            description="No hay transacciones para mostrar con esta consulta."
+            description="No hay registros para mostrar con los filtros seleccionados."
           />
         ) : (
-          <>
-            {/* Vista móvil y tablet pequeña: tarjetas sin desplazamiento horizontal */}
-            <div className="space-y-3 md:hidden">
-              {resultadoFiltrado.map((r) => (
-                <article
-                  key={r.id}
-                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold uppercase text-slate-500">
-                        {fechaCorta(r.fecha_posteo)}
-                      </p>
-                      <p className="mt-1 text-lg font-black text-slate-900">
-                        {formatearMoneda(r.monto_transaccion)}
-                      </p>
-                      {r.no_serial && (
-                        <p className="mt-1 break-all text-xs text-slate-500">
-                          Serial: {r.no_serial}
-                        </p>
-                      )}
-                    </div>
-
-                    <span
-                      className={`flex-none rounded-full px-3 py-1 text-xs font-black ${
-                        r.estado_identificacion === "Identificado"
-                          ? "bg-emerald-50 text-emerald-700"
-                          : "bg-red-50 text-red-700"
-                      }`}
-                    >
-                      {r.estado_identificacion}
-                    </span>
-                  </div>
-
-                  <div className="mt-4 rounded-xl bg-slate-50 p-3">
-                    <p className="text-xs font-bold uppercase text-slate-500">
-                      Descripción del banco
-                    </p>
-                    <p className="mt-1 break-words text-sm font-semibold leading-5 text-slate-800">
-                      {r.descripcion || "-"}
-                    </p>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <InfoLine
-                      label="Apartamento"
-                      value={r.apartamento_identificado || "Pendiente"}
-                      danger={r.estado_identificacion === "Revisar"}
-                    />
-                    <InfoLine
-                      label="Coincidencia"
-                      value={
-                        r.puntos_coincidencia > 0
-                          ? `${r.puntos_coincidencia}%`
-                          : "-"
-                      }
-                    />
-                  </div>
-
-                  <div className="mt-3 rounded-xl border bg-white px-4 py-3">
-                    <p className="text-xs font-bold uppercase text-slate-500">
-                      Propietario
-                    </p>
-                    <p className="mt-1 break-words text-sm font-black text-slate-900">
-                      {r.propietario_identificado || "-"}
-                    </p>
-                    <p className="mt-2 break-words text-xs text-slate-500">
-                      Método: {r.metodo_identificacion || "-"}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => abrirEdicionManual(r)}
-                    className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-bold text-white ${
-                      r.estado_identificacion === "Revisar"
-                        ? "bg-blue-700 hover:bg-blue-800"
-                        : "bg-slate-700 hover:bg-slate-800"
-                    }`}
-                  >
-                    <Pencil className="h-4 w-4" />
-                    {r.estado_identificacion === "Revisar"
-                      ? "Actualizar identificación"
-                      : "Corregir identificación"}
-                  </button>
-                </article>
-              ))}
-            </div>
-
-            {/* Vista de escritorio: tabla compacta de cinco columnas */}
-            <div className="hidden overflow-hidden rounded-2xl border border-slate-200 md:block">
-              <table className="w-full table-fixed text-xs lg:text-sm">
-                <colgroup>
-                  <col className="w-[16%]" />
-                  <col className="w-[30%]" />
-                  <col className="w-[17%]" />
-                  <col className="w-[22%]" />
-                  <col className="w-[15%]" />
-                </colgroup>
-
+          <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <div className="overflow-x-auto">
+              <table className="min-w-[1050px] w-full text-sm">
                 <thead className="bg-slate-100 text-slate-600">
                   <tr>
-                    <th className="px-3 py-3 text-left">Transacción</th>
+                    <th className="px-3 py-3 text-left">Fecha</th>
+                    <th className="px-3 py-3 text-right">Monto</th>
                     <th className="px-3 py-3 text-left">Descripción banco</th>
-                    <th className="px-3 py-3 text-left">Identificación</th>
-                    <th className="px-3 py-3 text-left">Unidad / propietario</th>
-                    <th className="px-3 py-3 text-center">Estado / acción</th>
+                    <th className="px-3 py-3 text-left">Método</th>
+                    <th className="px-3 py-3 text-left">Apartamento / propietario</th>
+                    <th className="px-3 py-3 text-center">Estado</th>
+                    <th className="px-3 py-3 text-center">Guardado</th>
+                    <th className="px-3 py-3 text-center">Acción</th>
                   </tr>
                 </thead>
-
                 <tbody className="divide-y divide-slate-200">
                   {resultadoFiltrado.map((r) => (
-                    <tr key={r.id} className="bg-white align-top hover:bg-slate-50">
-                      <td className="px-3 py-3">
-                        <p className="font-bold text-slate-700">
-                          {fechaCorta(r.fecha_posteo)}
-                        </p>
-                        <p className="mt-1 font-black text-slate-900">
-                          {formatearMoneda(r.monto_transaccion)}
+                    <tr key={r.id} className="bg-white hover:bg-slate-50">
+                      <td className="whitespace-nowrap px-3 py-3">
+                        {fechaCorta(r.fecha_posteo)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right font-black">
+                        {formatearMoneda(r.monto_transaccion)}
+                      </td>
+                      <td className="max-w-[320px] px-3 py-3">
+                        <p className="line-clamp-2 text-slate-700">
+                          {r.descripcion || "-"}
                         </p>
                         {r.no_serial && (
-                          <p
-                            className="mt-1 break-all text-[11px] leading-4 text-slate-500"
-                            title={r.no_serial}
-                          >
+                          <p className="mt-1 text-xs text-slate-500">
                             Serial: {r.no_serial}
                           </p>
                         )}
                       </td>
-
                       <td className="px-3 py-3">
-                        <p
-                          className="whitespace-normal break-words leading-5 text-slate-700"
-                          title={r.descripcion || ""}
-                        >
-                          {r.descripcion || "-"}
+                        <p className="font-semibold text-slate-800">
+                          {r.metodo_identificacion}
+                        </p>
+                        <p className="mt-1 text-xs text-blue-700">
+                          Coincidencia: {r.puntos_coincidencia || 0}%
                         </p>
                       </td>
-
-                      <td className="px-3 py-3">
-                        <p className="whitespace-normal break-words font-semibold text-slate-800">
-                          {r.metodo_identificacion || "-"}
-                        </p>
-                        <p className="mt-2 text-xs font-black text-blue-700">
-                          Coincidencia: {
-                            r.puntos_coincidencia > 0
-                              ? `${r.puntos_coincidencia}%`
-                              : "-"
-                          }
-                        </p>
-                      </td>
-
-                      <td className="px-3 py-3">
-                        <p
-                          className={`font-black ${
-                            r.estado_identificacion === "Revisar"
-                              ? "text-red-700"
-                              : "text-slate-900"
-                          }`}
-                        >
+                      <td className="min-w-[220px] px-3 py-3">
+                        <p className="font-black text-slate-900">
                           {r.apartamento_identificado || "Pendiente"}
                         </p>
-                        <p
-                          className="mt-1 whitespace-normal break-words leading-5 text-slate-600"
-                          title={r.propietario_identificado || ""}
-                        >
+                        <p className="mt-1 text-xs text-slate-600">
                           {r.propietario_identificado || "-"}
                         </p>
                       </td>
-
                       <td className="px-3 py-3 text-center">
                         <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black ${
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${
                             r.estado_identificacion === "Identificado"
                               ? "bg-emerald-50 text-emerald-700"
                               : "bg-red-50 text-red-700"
@@ -1333,20 +1222,36 @@ export default function IdentificarPagosPage() {
                         >
                           {r.estado_identificacion}
                         </span>
-
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <span
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${
+                            r.guardado_en_pagos_identificados
+                              ? "bg-blue-50 text-blue-700"
+                              : r.estado_identificacion === "Identificado"
+                                ? "bg-amber-50 text-amber-700"
+                                : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {r.guardado_en_pagos_identificados
+                            ? "Sí"
+                            : r.estado_identificacion === "Identificado"
+                              ? "Pendiente de guardar"
+                              : "No"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-center">
                         <button
                           type="button"
                           onClick={() => abrirEdicionManual(r)}
-                          className={`mx-auto mt-2 inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-bold text-white ${
+                          className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-white ${
                             r.estado_identificacion === "Revisar"
                               ? "bg-blue-700 hover:bg-blue-800"
                               : "bg-slate-700 hover:bg-slate-800"
                           }`}
                         >
                           <Pencil className="h-3.5 w-3.5" />
-                          {r.estado_identificacion === "Revisar"
-                            ? "Actualizar"
-                            : "Corregir"}
+                          {r.estado_identificacion === "Revisar" ? "Identificar" : "Corregir"}
                         </button>
                       </td>
                     </tr>
@@ -1354,7 +1259,7 @@ export default function IdentificarPagosPage() {
                 </tbody>
               </table>
             </div>
-          </>
+          </div>
         )}
       </SectionCard>
     </PageContainer>

@@ -433,6 +433,68 @@ export default function CajaChicaPage() {
     return data.publicUrl;
   }
 
+  async function adjuntarFacturaGasto(
+    gastoId: number,
+    archivo: File,
+    facturaActual?: string | null,
+  ) {
+    if (!archivo || !condominioId) return;
+
+    if (facturaActual) {
+      const confirmar = confirm(
+        "Este gasto ya tiene una factura adjunta. ¿Desea reemplazarla por el nuevo archivo?",
+      );
+
+      if (!confirmar) return;
+    }
+
+    try {
+      setGuardando(true);
+
+      const extension = archivo.name.split(".").pop() || "pdf";
+      const nombreArchivo = `${gastoId}-${Date.now()}-${Math.random()
+        .toString(36)
+        .substring(2)}.${extension}`;
+
+      const rutaArchivo = `${condominioId}/${nombreArchivo}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("facturas-caja-chica")
+        .upload(rutaArchivo, archivo);
+
+      if (uploadError) {
+        alert("Error subiendo factura: " + uploadError.message);
+        return;
+      }
+
+      const { data } = supabase.storage
+        .from("facturas-caja-chica")
+        .getPublicUrl(rutaArchivo);
+
+      const { error: updateError } = await supabase
+        .from("caja_chica")
+        .update({ factura_url: data.publicUrl })
+        .eq("id", gastoId);
+
+      if (updateError) {
+        alert("Error actualizando el gasto: " + updateError.message);
+        return;
+      }
+
+      alert(
+        facturaActual
+          ? "Factura reemplazada correctamente."
+          : "Factura adjuntada correctamente.",
+      );
+
+      await cargarGastos(condominio);
+    } catch (err: any) {
+      alert(err?.message || "Error adjuntando la factura.");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
   async function guardarGasto(e: React.FormEvent) {
     e.preventDefault();
 
@@ -967,6 +1029,7 @@ export default function CajaChicaPage() {
                 <th className="px-4 py-3 text-left">Responsable</th>
                 <th className="px-4 py-3 text-right">Monto</th>
                 <th className="px-4 py-3 text-center">Factura</th>
+                <th className="px-4 py-3 text-center">Adjuntar / Cambiar</th>
                 <th className="px-4 py-3 text-center">Reporte</th>
               </tr>
             </thead>
@@ -1000,6 +1063,30 @@ export default function CajaChicaPage() {
                     ) : (
                       <span className="text-xs text-slate-400">Sin factura</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <label className="inline-block cursor-pointer rounded-lg bg-blue-700 px-3 py-1 text-xs font-bold text-white hover:bg-blue-800">
+                      {g.factura_url ? "Cambiar factura" : "Adjuntar factura"}
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png,.webp"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const inputArchivo = e.currentTarget;
+                          const archivo = inputArchivo.files?.[0];
+
+                          if (archivo) {
+                            await adjuntarFacturaGasto(
+                              g.id,
+                              archivo,
+                              g.factura_url,
+                            );
+                          }
+
+                          inputArchivo.value = "";
+                        }}
+                      />
+                    </label>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <Link
