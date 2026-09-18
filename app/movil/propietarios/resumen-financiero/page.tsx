@@ -64,31 +64,6 @@ type Gasto = {
   recibo_url?: string | null;
 };
 
-type DocumentoGastoPropietario = {
-  id: number;
-  gasto_id: number;
-  tipo_documento: "FACTURA" | "CHEQUE" | "RECIBO_SUPLIDOR" | string;
-  archivo_url: string;
-  es_principal: boolean | null;
-  visible_propietarios?: boolean | null;
-  created_at: string | null;
-};
-
-const BUCKET_DOCUMENTOS = "gastos-documentos";
-const TIPOS_RECIBO = [
-  "RECIBO_SUPLIDOR",
-  "RECIBO",
-  "RECIBO_PAGO",
-  "CONSTANCIA_PAGO",
-  "FACTURA_PAGADA",
-  "CERTIFICACION_PAGO",
-];
-
-const TIPOS_SOPORTE_PROPIETARIO = [
-  "FACTURA",
-  "CHEQUE",
-  ...TIPOS_RECIBO,
-];
 
 const money = (v: unknown) =>
   new Intl.NumberFormat("es-DO", {
@@ -124,25 +99,6 @@ const esPeriodoCerrado = (estado?: string | null) =>
 
 function esUrlPublica(url?: string | null) {
   return Boolean(url && /^https?:\/\//i.test(url));
-}
-
-async function resolverUrlDocumento(ruta?: string | null) {
-  if (!ruta) return null;
-
-  if (esUrlPublica(ruta)) {
-    return ruta as string;
-  }
-
-  const { data, error } = await supabase.storage
-    .from(BUCKET_DOCUMENTOS)
-    .createSignedUrl(ruta, 60 * 10);
-
-  if (error || !data?.signedUrl) {
-    console.error("No se pudo generar la URL firmada del soporte:", error?.message);
-    return null;
-  }
-
-  return data.signedUrl;
 }
 
 export default function TransparenciaFinancieraPage() {
@@ -228,90 +184,59 @@ export default function TransparenciaFinancieraPage() {
     }
   }
 
-  async function cargarSoportesPropietario(gastosBase: Gasto[]) {
+  async function cargarSoportesPropietario(
+    gastosBase: Gasto[],
+    sesion: PropietarioActual,
+    periodoConsultado: string,
+  ) {
     if (gastosBase.length === 0) return gastosBase;
 
-    const gastoIds = gastosBase.map((gasto) => gasto.id);
+    try {
+      const token = localStorage.getItem("propietario_token") || "";
+      if (!token) throw new Error("Sesión del propietario no disponible.");
 
-    const { data: documentosData, error: documentosError } = await supabase
-      .from("gastos_documentos")
-      .select(
-        "id,gasto_id,tipo_documento,archivo_url,es_principal,visible_propietarios,created_at",
-      )
-      .in("gasto_id", gastoIds)
-      .in("tipo_documento", TIPOS_SOPORTE_PROPIETARIO)
-      .eq("estado", "ACTIVO")
-      .order("es_principal", { ascending: false })
-      .order("created_at", { ascending: false });
-
-    if (documentosError) {
-      console.error(
-        "No se pudieron consultar los documentos visibles para propietarios:",
-        documentosError.message,
-      );
-    }
-
-    const documentosPorGastoTipo = new Map<string, DocumentoGastoPropietario>();
-    const recibosPorGasto = new Map<number, DocumentoGastoPropietario>();
-
-    for (const documento of (documentosData || []) as DocumentoGastoPropietario[]) {
-      const esRecibo = TIPOS_RECIBO.includes(documento.tipo_documento);
-
-      // Compatibilidad de implementación:
-      // Los recibos cargados por la versión anterior se guardaban con
-      // visible_propietarios=false. Para no ocultar esos recibos ya existentes,
-      // todo recibo ACTIVO se considera soporte consultable por el propietario.
-      // Factura y cheque nuevos continúan respetando visible_propietarios.
-      if (!esRecibo && documento.visible_propietarios !== true) {
-        continue;
+      const respuesta = await fetch("/api/propietarios/soportes-gastos", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+        body: JSON.stringify({
+          condominio_id: sesion.condominio_id,
+          unidad_id: sesion.unidad_id,
+          periodo: periodoConsultado,
+        }),
+      });
+      const datos = await respuesta.json();
+      if (!respuesta.ok || datos?.ok !== true) {
+        throw new Error(datos?.mensaje || "No fue posible consultar los soportes.");
       }
 
-      if (esRecibo) {
-        if (!recibosPorGasto.has(documento.gasto_id)) {
-          recibosPorGasto.set(documento.gasto_id, documento);
-        }
-        continue;
-      }
-
-      const llave = `${documento.gasto_id}:${documento.tipo_documento}`;
-      if (!documentosPorGastoTipo.has(llave)) {
-        documentosPorGastoTipo.set(llave, documento);
-      }
-    }
-
-    return Promise.all(
-      gastosBase.map(async (gasto) => {
-        const facturaDocumento = documentosPorGastoTipo.get(`${gasto.id}:FACTURA`);
-        const chequeDocumento = documentosPorGastoTipo.get(`${gasto.id}:CHEQUE`);
-        const reciboDocumento = recibosPorGasto.get(gasto.id);
-
-        // Compatibilidad con documentos antiguos: Factura/Cheque con URL pública
-        // en gastos se siguen mostrando. El recibo se obtiene de gastos_documentos,
-        // incluyendo los recibos ACTIVO creados por la versión anterior del módulo.
-        const rutaFactura =
-          facturaDocumento?.archivo_url ||
-          (esUrlPublica(gasto.factura_url) ? gasto.factura_url : null);
-
-        const rutaCheque =
-          chequeDocumento?.archivo_url ||
-          (esUrlPublica(gasto.cheque_url) ? gasto.cheque_url : null);
-
-        const rutaRecibo = reciboDocumento?.archivo_url || null;
-
-        const [facturaUrl, chequeUrl, reciboUrl] = await Promise.all([
-          resolverUrlDocumento(rutaFactura),
-          resolverUrlDocumento(rutaCheque),
-          resolverUrlDocumento(rutaRecibo),
-        ]);
-
+      const documentos = datos.documentos || {};
+      return gastosBase.map((gasto) => {
+        const soportes = documentos[String(gasto.id)] || {};
         return {
           ...gasto,
-          factura_url: facturaUrl,
-          cheque_url: chequeUrl,
-          recibo_url: reciboUrl,
+          // Mantener compatibilidad con documentos públicos antiguos del gasto.
+          factura_url: soportes.factura_url ||
+            (esUrlPublica(gasto.factura_url) ? gasto.factura_url : null),
+          cheque_url: soportes.cheque_url ||
+            (esUrlPublica(gasto.cheque_url) ? gasto.cheque_url : null),
+          recibo_url: soportes.recibo_url || null,
         };
-      }),
-    );
+      });
+    } catch (error) {
+      console.error("Error al consultar los soportes de gastos:", error);
+      setError(error instanceof Error ? error.message : "No se pudieron cargar los soportes.");
+      // Ante errores de autenticación o conexión, no exponer soportes antiguos.
+      return gastosBase.map((gasto) => ({
+        ...gasto,
+        factura_url: null,
+        cheque_url: null,
+        recibo_url: null,
+      }));
+    }
   }
 
   async function cargarPeriodo(s: PropietarioActual, p: string) {
@@ -376,7 +301,7 @@ export default function TransparenciaFinancieraPage() {
       setGastos([]);
     } else {
       const gastosBase = (gastosResp.data || []) as Gasto[];
-      const gastosConSoportes = await cargarSoportesPropietario(gastosBase);
+      const gastosConSoportes = await cargarSoportesPropietario(gastosBase, s, p);
       setGastos(gastosConSoportes);
     }
 
