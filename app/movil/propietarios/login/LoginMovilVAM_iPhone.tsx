@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import InstalarVAMButton from "@/components/vam/InstalarVAMButton";
+import InstalarVAMUniversal from "@/components/vam/InstalarVAMUniversal";
 import {
   ArrowLeft,
   Bell,
@@ -24,8 +24,6 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "@/app/lib/supabaseClient";
-
-// VAM Móvil Login v2.1 - Directiva homologada por cédula; roles y accesos separados.
 
 type Condominio = {
   id: number;
@@ -280,6 +278,7 @@ export default function LoginMovilVAMPage() {
   const [mostrarClavePropietario, setMostrarClavePropietario] = useState(false);
   const [mostrarConfirmacion, setMostrarConfirmacion] = useState(false);
 
+  const [correoDirectiva, setCorreoDirectiva] = useState("");
   const [cedulaDirectiva, setCedulaDirectiva] = useState("");
   const [codigoActivacionDirectiva, setCodigoActivacionDirectiva] = useState("");
   const [claveDirectiva, setClaveDirectiva] = useState("");
@@ -422,6 +421,7 @@ export default function LoginMovilVAMPage() {
     setClavePropietario("");
     setConfirmarClave("");
     setCodigoActivacion("");
+    setCorreoDirectiva("");
     setClaveDirectiva("");
     setCondominiosDirectiva([]);
     setMostrarSelectorDirectiva(false);
@@ -860,7 +860,7 @@ export default function LoginMovilVAMPage() {
       usuario_id: usuario.id,
       usuario_nombre: nombreUsuario,
       nombre: nombreUsuario,
-      correo: usuario.email || "",
+      correo: usuario.email || correoDirectiva.trim().toLowerCase(),
       rol,
       empresa_id: condominio.empresa_id || null,
       condominio_id: Number(condominio.condominio_id),
@@ -909,10 +909,16 @@ export default function LoginMovilVAMPage() {
     event?.preventDefault();
 
     const cedulaLimpia = limpiarCedula(cedulaDirectiva);
+    const correo = correoDirectiva.trim().toLowerCase();
     const codigo = codigoActivacionDirectiva.trim().toUpperCase();
 
     if (cedulaLimpia.length !== 11) {
       mostrarError("La cédula debe contener 11 dígitos.");
+      return;
+    }
+
+    if (!correo) {
+      mostrarError("Debe indicar el correo registrado en la Directiva.");
       return;
     }
 
@@ -935,43 +941,111 @@ export default function LoginMovilVAMPage() {
     limpiarMensaje();
 
     try {
-      const response = await fetch("/api/directiva/activar-cedula", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const { data: validacionData, error: validacionError } = await supabase.rpc(
+        "validar_activacion_directiva",
+        {
+          p_cedula: cedulaLimpia,
+          p_correo: correo,
+          p_codigo_activacion: codigo,
+        }
+      );
+
+      if (validacionError) {
+        mostrarError(validacionError.message);
+        return;
+      }
+
+      const validacion = extraerRespuesta<{
+        ok?: boolean;
+        mensaje?: string;
+        message?: string;
+        nombre?: string;
+      }>(validacionData);
+
+      if (!validacion.ok) {
+        mostrarError(
+          validacion.mensaje ||
+            validacion.message ||
+            "No fue posible validar los datos de activación."
+        );
+        return;
+      }
+
+      const { data: registroData, error: registroError } = await supabase.auth.signUp({
+        email: correo,
+        password: claveDirectiva,
+        options: {
+          data: {
+            full_name: validacion.nombre || "Miembro de la directiva",
+          },
         },
-        body: JSON.stringify({
-          cedula: cedulaLimpia,
-          codigo,
-          password: claveDirectiva,
-        }),
       });
 
-      const result = await response.json();
-
-      if (!response.ok || !result?.ok) {
-        mostrarError(
-          result?.error ||
-            result?.mensaje ||
-            "No fue posible activar la cuenta de Directiva."
-        );
+      if (registroError) {
+        const texto = registroError.message.toLowerCase();
+        if (texto.includes("already") || texto.includes("registered")) {
+          mostrarError(
+            "Este correo ya tiene una cuenta. Use la opción Entrar como directiva."
+          );
+        } else {
+          mostrarError(registroError.message);
+        }
         return;
       }
 
-      if (!result.access_token || !result.refresh_token) {
-        mostrarError(
-          "La cuenta fue activada, pero no fue posible iniciar la sesión automáticamente."
-        );
+      let usuario = registroData.user;
+      let sesion = registroData.session;
+
+      if (!sesion || !usuario) {
+        const { data: ingresoData, error: ingresoError } =
+          await supabase.auth.signInWithPassword({
+            email: correo,
+            password: claveDirectiva,
+          });
+
+        if (ingresoError || !ingresoData.user) {
+          mostrarExito(
+            "La cuenta fue creada. Si Supabase requiere confirmar el correo, confirme el mensaje recibido y luego entre como Directiva."
+          );
+          setVistaDirectiva("entrar");
+          setCedulaDirectiva("");
+          setCodigoActivacionDirectiva("");
+          setConfirmarClaveDirectiva("");
+          return;
+        }
+
+        usuario = ingresoData.user;
+        sesion = ingresoData.session;
+      }
+
+      const { data: finalizarData, error: finalizarError } = await supabase.rpc(
+        "finalizar_activacion_directiva",
+        {
+          p_cedula: cedulaLimpia,
+          p_correo: correo,
+          p_codigo_activacion: codigo,
+        }
+      );
+
+      if (finalizarError) {
+        await supabase.auth.signOut();
+        mostrarError(finalizarError.message);
         return;
       }
 
-      const { error: sesionError } = await supabase.auth.setSession({
-        access_token: result.access_token,
-        refresh_token: result.refresh_token,
-      });
+      const finalizacion = extraerRespuesta<{
+        ok?: boolean;
+        mensaje?: string;
+        message?: string;
+      }>(finalizarData);
 
-      if (sesionError) {
-        mostrarError("No fue posible iniciar la sesión de Directiva.");
+      if (!finalizacion.ok) {
+        await supabase.auth.signOut();
+        mostrarError(
+          finalizacion.mensaje ||
+            finalizacion.message ||
+            "No fue posible completar la activación de la cuenta."
+        );
         return;
       }
 
@@ -1025,10 +1099,8 @@ export default function LoginMovilVAMPage() {
   async function entrarDirectiva(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
 
-    const cedulaLimpia = limpiarCedula(cedulaDirectiva);
-
-    if (cedulaLimpia.length !== 11 || !claveDirectiva) {
-      mostrarError("Debe indicar cédula y contraseña.");
+    if (!correoDirectiva.trim() || !claveDirectiva) {
+      mostrarError("Debe indicar correo y contraseña.");
       return;
     }
 
@@ -1036,36 +1108,14 @@ export default function LoginMovilVAMPage() {
     limpiarMensaje();
 
     try {
-      const response = await fetch("/api/directiva/login-cedula", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          cedula: cedulaLimpia,
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email: correoDirectiva.trim().toLowerCase(),
           password: claveDirectiva,
-        }),
-      });
+        });
 
-      const result = await response.json();
-
-      if (!response.ok || !result?.ok) {
-        mostrarError("Cédula o contraseña incorrecta.");
-        return;
-      }
-
-      if (!result.access_token || !result.refresh_token) {
-        mostrarError("No fue posible iniciar la sesión de Directiva.");
-        return;
-      }
-
-      const { error: sesionError } = await supabase.auth.setSession({
-        access_token: result.access_token,
-        refresh_token: result.refresh_token,
-      });
-
-      if (sesionError) {
-        mostrarError("No fue posible iniciar la sesión de Directiva.");
+      if (authError || !authData.user) {
+        mostrarError("Correo o contraseña incorrectos.");
         return;
       }
 
@@ -1489,7 +1539,7 @@ export default function LoginMovilVAMPage() {
                         )}
                         {loading ? "Validando acceso..." : "Entrar a mi cuenta"}
                       </button>
-                      <InstalarVAMButton />
+                      <InstalarVAMUniversal />
 
                       <button
                         type="button"
@@ -1703,7 +1753,7 @@ export default function LoginMovilVAMPage() {
                             Acceso de directiva
                           </h1>
                           <p className="mt-1 text-xs leading-5 text-slate-500">
-                            Ingrese con su cédula y contraseña. El sistema identificará
+                            Ingrese con su correo y contraseña. El sistema identificará
                             automáticamente los condominios que tiene autorizados.
                           </p>
                         </div>
@@ -1714,17 +1764,14 @@ export default function LoginMovilVAMPage() {
 
                       <div>
                         <label className="mb-1 block text-xs font-bold text-slate-700">
-                          Cédula
+                          Correo electrónico
                         </label>
                         <input
-                          type="text"
-                          inputMode="numeric"
-                          autoComplete="username"
-                          value={cedulaDirectiva}
-                          onChange={(event) =>
-                            setCedulaDirectiva(formatearCedula(event.target.value))
-                          }
-                          placeholder="000-0000000-0"
+                          type="email"
+                          autoComplete="email"
+                          value={correoDirectiva}
+                          onChange={(event) => setCorreoDirectiva(event.target.value)}
+                          placeholder="usuario@correo.com"
                           disabled={loading}
                           className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-100"
                         />
@@ -1823,6 +1870,19 @@ export default function LoginMovilVAMPage() {
                       </div>
 
                       <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">Correo electrónico</label>
+                        <input
+                          type="email"
+                          autoComplete="email"
+                          value={correoDirectiva}
+                          onChange={(event) => setCorreoDirectiva(event.target.value)}
+                          placeholder="correo registrado en la Directiva"
+                          disabled={loading}
+                          className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                        />
+                      </div>
+
+                      <div>
                         <label className="mb-1 block text-xs font-bold text-slate-700">Código de activación</label>
                         <input
                           type="text"
@@ -1887,7 +1947,7 @@ export default function LoginMovilVAMPage() {
                       </div>
 
                       <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 text-[11px] leading-5 text-blue-800">
-                        La cédula y el código deben coincidir con un miembro activo registrado en la Directiva.
+                        La cédula, el correo y el código deben coincidir con un miembro activo registrado en la Directiva.
                       </div>
 
                       {mensaje && (
@@ -1922,7 +1982,7 @@ export default function LoginMovilVAMPage() {
 
               <div className="mt-4 border-t border-slate-100 pt-3 text-center">
                 <p className="text-[10px] font-semibold text-slate-400">
-                  VAM Administración de Condominios
+                  VAM Administración de Condominios · Login móvil v1.0.0
                 </p>
               </div>
             </div>

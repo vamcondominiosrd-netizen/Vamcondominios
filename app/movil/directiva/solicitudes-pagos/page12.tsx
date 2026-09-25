@@ -394,8 +394,8 @@ export default function InicioDirectivaPage() {
             onClick={() => router.push("/movil/directiva/caja-chica")}
           />
           <MenuCard
-            titulo="Estado financiero"
-            descripcion="Informe mensual validado: banco, gastos, cierres y cuotas pendientes."
+            titulo="Estados financieros"
+            descripcion="Ingresos, egresos, resultados y cierres por período."
             icono={<BarChart3 size={22} />}
             onClick={() => router.push("/movil/directiva/estados-financieros")}
           />
@@ -408,7 +408,7 @@ export default function InicioDirectivaPage() {
         )}
 
         <p className="pt-2 text-right text-[10px] font-semibold text-slate-400">
-          Directiva Inicio · v2.2
+          Directiva Inicio · v2.1
         </p>
       </div>
     </main>

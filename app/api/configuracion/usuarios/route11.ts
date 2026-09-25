@@ -15,17 +15,6 @@ const ROLES_ADMINISTRACION = [
   "administrador",
 ];
 
-const ROLES_DIRECTIVA = [
-  "presidente",
-  "tesorero",
-  "tesoreria",
-  "secretario",
-  "secretaria",
-  "vocal",
-  "miembro directiva",
-  "miembro de directiva",
-];
-
 type ContextoAutorizado = {
   userId: string;
   empresaId: number;
@@ -94,10 +83,6 @@ function estadoPermiteAcceso(estado: unknown, activa: unknown) {
 
 function esRolAdministrador(nombre: unknown) {
   return ROLES_ADMINISTRACION.includes(normalizar(nombre));
-}
-
-function esRolDirectiva(nombre: unknown) {
-  return ROLES_DIRECTIVA.includes(normalizar(nombre));
 }
 
 function permisoRequerido(method: string, body?: ActualizarUsuarioBody) {
@@ -415,8 +400,7 @@ async function validarContexto(
 async function validarRolesSolicitados(
   supabaseAdmin: SupabaseClient,
   contexto: ContextoAutorizado,
-  entrada: Array<number | string> | undefined,
-  opciones: { permitirVacio?: boolean; bloquearRolesDirectiva?: boolean } = {}
+  entrada: Array<number | string> | undefined
 ) {
   const rolIds = Array.from(
     new Set(
@@ -427,7 +411,6 @@ async function validarRolesSolicitados(
   );
 
   if (rolIds.length === 0) {
-    if (opciones.permitirVacio) return [];
     throw new Error("Debe seleccionar al menos un rol.");
   }
 
@@ -452,16 +435,6 @@ async function validarRolesSolicitados(
     throw new Error(
       "Uno o varios roles no pertenecen a la empresa o al condominio activo."
     );
-  }
-
-  if (opciones.bloquearRolesDirectiva) {
-    const rolDirectiva = rolesValidos.find((rol) => esRolDirectiva(rol.nombre));
-
-    if (rolDirectiva) {
-      throw new Error(
-        `El rol ${rolDirectiva.nombre} pertenece a la Directiva. Registre ese cargo desde el módulo Directiva y Usuarios.`
-      );
-    }
   }
 
   if (!contexto.esAdministradorPrincipal) {
@@ -591,7 +564,7 @@ export async function GET(request: Request) {
     new Set(accesos.map((item) => String(item.user_id)))
   );
 
-  const [empresasResultado, asignacionesResultado, directivaResultado] = await Promise.all([
+  const [empresasResultado, asignacionesResultado] = await Promise.all([
     userIds.length
       ? supabaseAdmin
           .from("usuarios_empresas")
@@ -612,29 +585,15 @@ export async function GET(request: Request) {
             `condominio_id.is.null,condominio_id.eq.${contexto.condominioId}`
           )
       : Promise.resolve({ data: [], error: null }),
-    userIds.length
-      ? supabaseAdmin
-          .from("directiva_condominio")
-          .select(
-            "id, condominio_id, nombre, cargo, cedula, telefono, correo, fecha_inicio, fecha_fin, estado, auth_user_id"
-          )
-          .eq("condominio_id", contexto.condominioId)
-          .in("auth_user_id", userIds)
-      : Promise.resolve({ data: [], error: null }),
   ]);
 
-  if (
-    empresasResultado.error ||
-    asignacionesResultado.error ||
-    directivaResultado.error
-  ) {
+  if (empresasResultado.error || asignacionesResultado.error) {
     return NextResponse.json(
       {
         ok: false,
         error:
           empresasResultado.error?.message ||
           asignacionesResultado.error?.message ||
-          directivaResultado.error?.message ||
           "No fue posible completar el listado de usuarios.",
       },
       { status: 400 }
@@ -644,20 +603,6 @@ export async function GET(request: Request) {
   const usuariosEmpresa = new Map<string, any>();
   (empresasResultado.data || []).forEach((item: any) => {
     usuariosEmpresa.set(String(item.user_id), item);
-  });
-
-  const directivaPorUsuario = new Map<string, any>();
-  (directivaResultado.data || []).forEach((item: any) => {
-    if (!item.auth_user_id) return;
-
-    const clave = String(item.auth_user_id);
-    const actual = directivaPorUsuario.get(clave);
-    const actualActivo = normalizar(actual?.estado) === "activo";
-    const nuevoActivo = normalizar(item.estado) === "activo";
-
-    if (!actual || (!actualActivo && nuevoActivo)) {
-      directivaPorUsuario.set(clave, item);
-    }
   });
 
   const rolesPorId = new Map<number, any>();
@@ -683,31 +628,16 @@ export async function GET(request: Request) {
   });
 
   const usuarios = accesos.map((acceso: any) => {
-    const claveUsuario = String(acceso.user_id);
-    const empresaUsuario = usuariosEmpresa.get(claveUsuario);
-    const rolesUsuario = rolesPorUsuario.get(claveUsuario) || [];
-    const directiva = directivaPorUsuario.get(claveUsuario) || null;
-    const esDirectiva = Boolean(directiva);
+    const empresaUsuario = usuariosEmpresa.get(String(acceso.user_id));
+    const rolesUsuario = rolesPorUsuario.get(String(acceso.user_id)) || [];
 
     return {
       acceso_id: Number(acceso.id),
-      user_id: claveUsuario,
-      nombre:
-        directiva?.nombre ||
-        empresaUsuario?.nombre_usuario ||
-        "Usuario sin nombre",
+      user_id: String(acceso.user_id),
+      nombre: empresaUsuario?.nombre_usuario || "Usuario sin nombre",
       correo: empresaUsuario?.correo || null,
-      correo_contacto: directiva?.correo || empresaUsuario?.correo || null,
-      tipo_usuario: esDirectiva ? "DIRECTIVA" : "SISTEMA",
-      directiva_id: directiva?.id ? Number(directiva.id) : null,
-      cedula: directiva?.cedula || null,
-      cargo_directiva: directiva?.cargo || null,
-      estado_directiva: directiva?.estado || null,
-      fecha_inicio_directiva: directiva?.fecha_inicio || null,
-      fecha_fin_directiva: directiva?.fecha_fin || null,
       rol_global: empresaUsuario?.rol_global || null,
-      rol_condominio:
-        directiva?.cargo || acceso.rol_condominio || null,
+      rol_condominio: acceso.rol_condominio || null,
       activo: acceso.activo === true,
       roles: rolesUsuario,
       created_at: acceso.created_at,
@@ -792,8 +722,7 @@ export async function POST(request: Request) {
     const roles = await validarRolesSolicitados(
       supabaseAdmin,
       contexto,
-      body.rol_ids,
-      { bloquearRolesDirectiva: true }
+      body.rol_ids
     );
 
     const usuarioExistente = await buscarUsuarioAuthPorEmail(
@@ -1154,33 +1083,13 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const { data: directiva, error: directivaError } = await supabaseAdmin
-      .from("directiva_condominio")
-      .select("id, nombre, cargo, estado, auth_user_id")
-      .eq("condominio_id", contexto.condominioId)
-      .eq("auth_user_id", userId)
-      .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (directivaError) {
-      throw new Error(
-        `No se pudo validar si el usuario pertenece a la Directiva: ${directivaError.message}`
-      );
-    }
-
-    const esDirectiva = Boolean(directiva);
     let roles: any[] | null = null;
 
     if (Array.isArray(body.rol_ids)) {
       roles = await validarRolesSolicitados(
         supabaseAdmin,
         contexto,
-        body.rol_ids,
-        {
-          permitirVacio: esDirectiva,
-          bloquearRolesDirectiva: true,
-        }
+        body.rol_ids
       );
 
       const { error: desactivarError } = await supabaseAdmin
@@ -1248,9 +1157,7 @@ export async function PATCH(request: Request) {
       actualizacionAcceso.activo = body.activo;
     }
 
-    if (esDirectiva && directiva?.cargo) {
-      actualizacionAcceso.rol_condominio = directiva.cargo;
-    } else if (roles && roles.length > 0) {
+    if (roles && roles.length > 0) {
       actualizacionAcceso.rol_condominio = roles[0].nombre;
     }
 
@@ -1269,7 +1176,7 @@ export async function PATCH(request: Request) {
 
     const nombre = texto(body.nombre);
 
-    if (nombre && !esDirectiva) {
+    if (nombre) {
       const { error } = await supabaseAdmin
         .from("usuarios_empresas")
         .update({ nombre_usuario: nombre })
@@ -1285,9 +1192,7 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      mensaje: esDirectiva
-        ? "Acceso de Directiva actualizado correctamente. El cargo oficial se administra desde Directiva y Usuarios."
-        : "Usuario actualizado correctamente.",
+      mensaje: "Usuario actualizado correctamente.",
       user_id: userId,
       activo:
         typeof body.activo === "boolean" ? body.activo : acceso.activo,

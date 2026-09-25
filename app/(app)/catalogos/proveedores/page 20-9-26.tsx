@@ -8,7 +8,6 @@ import {
   Building2,
   CalendarDays,
   Download,
-  Pencil,
   FileSpreadsheet,
   FolderOpen,
   RefreshCw,
@@ -60,8 +59,6 @@ export default function ProveedoresPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
-  const [editandoId, setEditandoId] = useState<number | null>(null);
-  const [estado, setEstado] = useState("activo");
 
   const [condominioId, setCondominioId] = useState("");
   const [condominio, setCondominio] = useState("");
@@ -116,43 +113,17 @@ export default function ProveedoresPage() {
   }
 
   function limpiarFormulario() {
-    setEditandoId(null);
     setNombreProveedor("");
     setRncCedula("");
     setTelefono("");
     setCorreo("");
     setDireccion("");
     setCuentaBanco("");
-    setEstado("activo");
-  }
-
-  function editarProveedor(proveedor: Proveedor) {
-    if (guardando || !condominioId) return;
-    if (proveedor.condominio_id !== Number(condominioId)) {
-      alert("Este proveedor no pertenece al condominio activo.");
-      return;
-    }
-
-    setEditandoId(proveedor.id);
-    setNombreProveedor(proveedor.nombre_proveedor || "");
-    setRncCedula(proveedor.rnc_cedula || "");
-    setTelefono(proveedor.telefono || "");
-    setCorreo(proveedor.correo || "");
-    setDireccion(proveedor.direccion || "");
-    setCuentaBanco(proveedor.cuenta_banco || "");
-    setEstado(proveedor.estado || "activo");
-
-    // El formulario se encuentra antes del listado, también en la vista móvil.
-    document.getElementById("formulario-proveedor")?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
   }
 
   async function guardarProveedor(e: React.FormEvent) {
     e.preventDefault();
 
-    if (guardando) return;
     if (!condominioId || !condominio) {
       alert("No hay condominio activo. Debe iniciar sesión nuevamente.");
       return;
@@ -163,56 +134,33 @@ export default function ProveedoresPage() {
       return;
     }
 
-    const datos = {
-      nombre_proveedor: nombreProveedor.trim(),
-      rnc_cedula: rncCedula.trim(),
-      telefono: telefono.trim(),
-      correo: correo.trim(),
-      direccion: direccion.trim(),
-      cuenta_banco: cuentaBanco.trim(),
-      estado,
-    };
-
     setGuardando(true);
-    try {
-      if (editandoId !== null) {
-        // Dos filtros impiden modificar por accidente otro condominio.
-        // No se modifica id, condominio_id, condominio ni created_at.
-        const { data, error } = await supabase
-          .from("catalogo_proveedores")
-          .update(datos)
-          .eq("id", editandoId)
-          .eq("condominio_id", Number(condominioId))
-          .select("id")
-          .maybeSingle();
 
-        if (error) throw error;
-        if (!data) {
-          alert(
-            "No se actualizó el proveedor. Verifique que exista y que tenga permiso para editarlo.",
-          );
-          return;
-        }
-        alert("Proveedor actualizado correctamente.");
-      } else {
-        const { error } = await supabase.from("catalogo_proveedores").insert([
-          { ...datos, condominio_id: Number(condominioId), condominio },
-        ]);
-        if (error) throw error;
-        alert("Proveedor registrado correctamente.");
-      }
+    const { error } = await supabase.from("catalogo_proveedores").insert([
+      {
+        condominio_id: Number(condominioId),
+        condominio,
+        nombre_proveedor: nombreProveedor.trim(),
+        rnc_cedula: rncCedula.trim(),
+        telefono: telefono.trim(),
+        correo: correo.trim(),
+        direccion: direccion.trim(),
+        cuenta_banco: cuentaBanco.trim(),
+        estado: "activo",
+      },
+    ]);
 
-      limpiarFormulario();
-      await cargarProveedores(condominioId);
-    } catch (error) {
-      alert(
-        `Error ${editandoId !== null ? "actualizando" : "registrando"} proveedor: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    } finally {
-      setGuardando(false);
+    setGuardando(false);
+
+    if (error) {
+      alert("Error guardando proveedor: " + error.message);
+      return;
     }
+
+    alert("Proveedor registrado correctamente.");
+
+    limpiarFormulario();
+    cargarProveedores(condominioId);
   }
 
   const proveedoresFiltrados = useMemo(() => {
@@ -329,7 +277,7 @@ export default function ProveedoresPage() {
 
       <ModuleToolbar
         title="Catálogo de Proveedores"
-        subtitle={`Registro, edición, consulta y exportación de proveedores. Condominio: ${
+        subtitle={`Registro, consulta y exportación de proveedores. Condominio: ${
           condominio || "No seleccionado"
         }.`}
         icon={Building2}
@@ -381,14 +329,10 @@ export default function ProveedoresPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-        <section id="formulario-proveedor" className="scroll-mt-6 xl:col-span-1">
+        <section className="xl:col-span-1">
           <SectionCard
-            title={editandoId !== null ? "Editar proveedor" : "Registrar proveedor"}
-            subtitle={
-              editandoId !== null
-                ? "Corrija los datos y guarde los cambios del proveedor seleccionado."
-                : "Complete los datos principales del proveedor."
-            }
+            title="Registrar proveedor"
+            subtitle="Complete los datos principales del proveedor."
           >
             <form onSubmit={guardarProveedor} className="space-y-4">
               <div>
@@ -488,24 +432,6 @@ export default function ProveedoresPage() {
                 />
               </div>
 
-              <div>
-                <label htmlFor="estado-proveedor" className="mb-1 block text-sm font-semibold">
-                  Estado
-                </label>
-                <select
-                  id="estado-proveedor"
-                  value={estado}
-                  onChange={(e) => setEstado(e.target.value)}
-                  className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
-                >
-                  {estado !== "activo" && estado !== "inactivo" && (
-                    <option value={estado}>{estado}</option>
-                  )}
-                  <option value="activo">Activo</option>
-                  <option value="inactivo">Inactivo</option>
-                </select>
-              </div>
-
               <div className="flex flex-col gap-3 sm:flex-row">
                 <button
                   type="submit"
@@ -513,20 +439,15 @@ export default function ProveedoresPage() {
                   className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-50"
                 >
                   <Save className="h-4 w-4" />
-                  {guardando
-                    ? "Guardando..."
-                    : editandoId !== null
-                      ? "Guardar cambios"
-                      : "Guardar proveedor"}
+                  {guardando ? "Guardando..." : "Guardar proveedor"}
                 </button>
 
                 <button
                   type="button"
                   onClick={limpiarFormulario}
-                  disabled={guardando}
-                  className="inline-flex items-center justify-center rounded-xl bg-slate-700 px-5 py-3 text-sm font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+                  className="inline-flex items-center justify-center rounded-xl bg-slate-700 px-5 py-3 text-sm font-bold text-white hover:bg-slate-800"
                 >
-                  {editandoId !== null ? "Cancelar edición" : "Limpiar"}
+                  Limpiar
                 </button>
               </div>
             </form>
@@ -590,7 +511,6 @@ export default function ProveedoresPage() {
                     <th className="px-4 py-3 text-left">Correo</th>
                     <th className="px-4 py-3 text-left">Cuenta Banco</th>
                     <th className="px-4 py-3 text-center">Estado</th>
-                    <th className="px-4 py-3 text-center">Acciones</th>
                   </tr>
                 </thead>
 
@@ -623,18 +543,6 @@ export default function ProveedoresPage() {
                         >
                           {p.estado || "activo"}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => editarProveedor(p)}
-                          disabled={guardando}
-                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-                          aria-label={`Editar proveedor ${p.nombre_proveedor || p.id}`}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          Editar
-                        </button>
                       </td>
                     </tr>
                   ))}
@@ -670,14 +578,11 @@ export default function ProveedoresPage() {
 
           <FlujoPaso
             numero="4"
-            titulo="Corregir y exportar"
-            descripcion="Editar datos existentes y generar respaldo actualizado en Excel."
+            titulo="Exportar"
+            descripcion="Generar respaldo en Excel para revisión administrativa."
           />
         </div>
       </SectionCard>
-      <p className="pb-2 text-right text-xs text-slate-400">
-        Catálogo de Proveedores · v1.1.0
-      </p>
     </PageContainer>
   );
 }

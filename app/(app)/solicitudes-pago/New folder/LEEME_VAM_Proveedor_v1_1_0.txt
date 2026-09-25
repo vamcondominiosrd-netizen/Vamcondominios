@@ -1,0 +1,28 @@
+VAM CONDOMINIOS | Homologación de proveedores v1.1.0
+Fecha: 2026-09-20
+
+QUÉ SE REVISÓ
+- page.tsx del listado de Solicitudes de Pago compartido por el usuario.
+- Funciones reales pagar_solicitud_pago_bancaria y preparar_gasto_documento.
+- Vista real vw_gastos_control_documental.
+
+QUÉ CORRIGE
+1) El botón Generar gasto vuelve a consultar el proveedor por ID y condominio; evita generar un gasto cuando el ID existe pero el nombre no puede verificarse. Mantiene la escritura del nombre por compatibilidad temporal.
+2) La función bancaria valida proveedor contra el mismo condominio; evita nuevos gastos sin nombre cuando se entra por la rama que crea gastos y completa el nombre cuando procesa un gasto existente cuyo campo histórico está vacío.
+3) La vista documental presenta el nombre actual del catálogo si existe; como respaldo utiliza el nombre legado.
+4) La función de documentos puede obtener un nombre cuando el campo de gasto está vacío, y no pisa automáticamente los nombres previamente guardados en documentos al actualizarlos.
+
+DESPLIEGUE
+1. Crear respaldo y ensayar en ambiente de pruebas.
+2. Ejecutar VAM_Proveedor_Homologacion_v1_1_0.sql en Supabase SQL Editor. Es una transacción con CREATE OR REPLACE, sin UPDATE masivo ni DROP de columnas.
+3. Sustituir el page.tsx del LISTADO de Solicitudes de Pago por Solicitudes_Pago_VAM_Proveedor_v1_1_0.tsx. Confirmar la ruta real de tu repositorio antes de reemplazar.
+4. Compilar y desplegar Next.js en el entorno apropiado.
+5. Ejecutar VAM_Proveedor_Verificacion_v1_1_0.sql y probar una solicitud nueva con proveedor, generación de gasto, reporte documental y documento adjunto. Solo en entorno de pruebas: procesar un pago de prueba.
+
+IMPORTANTE
+- No ejecuté los SQL en Supabase ni desplegué la pantalla. El test de sintaxis TSX local pasó, pero faltan compilación del proyecto y ejecución SQL en PostgreSQL.
+- Se conserva gastos.proveedor temporalmente porque otros módulos podrían leerlo; no es todavía seguro eliminarlo.
+- No se actualizan gastos, cheques, banco ni documentos históricos en masa.
+- La función bancaria actual registra en el campo beneficiario un texto derivado del concepto; no cambiamos ese comportamiento financiero en esta entrega. Auditar beneficiarios contra cheques antes de corregirlo.
+- La carga inicial de solicitudes obtiene nombres desde un catálogo filtrado por condominio: se refuerza la validación en el momento de generar el gasto.
+- Si un documento existente tiene proveedor_nombre vacío, no se reescribe masivamente; se rellena al editarlo mediante el trigger modificado.

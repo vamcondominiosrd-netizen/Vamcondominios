@@ -225,18 +225,6 @@ function nombrePeriodo(periodo: string): string {
   return `${mes.charAt(0).toUpperCase() + mes.slice(1)} ${year}`;
 }
 
-/** Rango legible del mes seleccionado; respeta febrero y años bisiestos. */
-function periodoCompletoTexto(periodo: string): string {
-  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(periodo);
-  if (!match) return nombrePeriodo(periodo);
-  const anio = Number(match[1]);
-  const mes = Number(match[2]);
-  const ultimoDia = new Date(anio, mes, 0).getDate();
-  const nombreMes = new Intl.DateTimeFormat("es-DO", { month: "long" })
-    .format(new Date(anio, mes - 1, 1)).toLowerCase();
-  return `del 01 al ${String(ultimoDia).padStart(2, "0")} de ${nombreMes} del ${anio}`;
-}
-
 function rangoPeriodo(periodo: string) {
   const [yearRaw, monthRaw] = String(periodo || "").split("-");
   const year = Number(yearRaw);
@@ -348,16 +336,6 @@ function diferenciaImportante(value: number | null): boolean {
   return value !== null && Math.abs(centavos(value)) > 0;
 }
 
-
-function conceptoParaPropietario(value: string): string {
-  return limpiarTexto(value, "Gasto del condominio")
-    .replace(/^pago solicitud\s*(?:no\.?\s*\d+)?\s*[-:]\s*/i, "")
-    .replace(/n[oó]mina\s+n[oó]mina/gi, "Nómina")
-    .replace(/admininstracion/gi, "Administración")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 export default function ResumenFinancieroPropietariosPage() {
   const [loading, setLoading] = useState(true);
   const [consultando, setConsultando] = useState(false);
@@ -418,14 +396,10 @@ export default function ResumenFinancieroPropietariosPage() {
           gasto?.proveedor || (normalizarTexto(m.descripcion).includes("nomina")
             ? "Nómina / beneficiario no consignado"
             : m.beneficiario), "Proveedor / beneficiario");
-        // Mostrar únicamente un número de cheque real; referencia_banco no es cheque.
-        // El gasto se consulta solo cuando coincide con importe y documento.
-        const documentoMovimiento = limpiarTexto(m.numero_documento, "");
-        const documentoGasto = limpiarTexto(gasto?.numero_cheque, "");
-        const chequeCandidato = documentoMovimiento || documentoGasto;
-        const numeroDocumento = /^\d{1,12}$/.test(chequeCandidato)
-          ? chequeCandidato
-          : "—";
+        const numeroDocumento = limpiarTexto(
+          gasto?.numero_cheque || m.numero_documento || m.referencia_banco,
+          "-"
+        );
 
         return {
           id: `gasto-${m.id}`,
@@ -798,9 +772,8 @@ export default function ResumenFinancieroPropietariosPage() {
   }
 
   function imprimirReporte() {
-    // No emitir un informe final si falta el cierre o hay discrepancias financieras.
-    if (loading || consultando || error || !cuenta || !cierre || hayDiferencias ||
-        balanceInicial === null || balanceFinal === null) return;
+    if (consultando || loading || error || !cuenta) return;
+    // Abre la vista previa nativa del navegador; seleccionar "Guardar como PDF".
     window.print();
   }
 
@@ -810,181 +783,582 @@ export default function ResumenFinancieroPropietariosPage() {
     }
   }
 
+  const estadoPeriodo = String(cierre?.estado || "SIN_CIERRE").toUpperCase();
   const condominioNombre = condominio?.nombre || perfil?.condominio || "Condominio";
-  const numeroCuenta = (cuenta?.numero_cuenta || "").replace(/\D/g, "");
   const cuentaTexto = cuenta
-    ? `${cuenta.nombre_banco || "Banco"}${numeroCuenta ? ` · terminación ${numeroCuenta.slice(-4)}` : ""}`
-    : "Cuenta no seleccionada";
-  const fechaCorte = formatDate(rangoPeriodo(periodoSeleccionado).cierre);
-  const fechaEmision = formatDate(new Date());
-  const listoParaPublicar = Boolean(cierre && cuenta && !hayDiferencias &&
-    balanceInicial !== null && balanceFinal !== null);
-  const gastosPresentacion = [...detalleGastos].sort((a, b) => {
-    const ordenFecha = (texto: string) => texto.split("/").reverse().join("-");
-    return ordenFecha(a.fecha).localeCompare(ordenFecha(b.fecha)) ||
-      compararNumeroDocumento(a.numeroDocumento, b.numeroDocumento);
-  });
+    ? `${cuenta.nombre_banco || "Banco"} - ${cuenta.numero_cuenta || "Sin número"}`
+    : "Cuenta bancaria no identificada";
 
   if (loading) {
-    return <div className="min-h-screen bg-slate-50 p-6 text-slate-700">Cargando informe financiero...</div>;
+    return (
+      <div className="min-h-screen bg-slate-100 p-6">
+        <div className="mx-auto max-w-5xl rounded-2xl bg-white p-8 shadow-sm">
+          <p className="text-slate-600">Cargando resumen financiero...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div id="vam-informe-propietarios-v17" className="min-h-screen bg-slate-100 px-3 py-5 print:min-h-0 print:bg-white print:p-0">
+    <div id="reporte-propietarios-print-root" className="min-h-screen bg-slate-100 px-4 py-6 print:bg-white print:px-0 print:py-0 print:min-h-0">
       <style jsx global>{`
-        @page { size: letter portrait; margin: 0.43in; }
         @media print {
-          html, body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          body * { visibility: hidden !important; }
-          #vam-informe-propietarios-v17, #vam-informe-propietarios-v17 * { visibility: visible !important; }
-          #vam-informe-propietarios-v17 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
-          #vam-informe-propietarios-v17 .no-print { display: none !important; visibility: hidden !important; }
-          #vam-informe-propietarios-v17 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-          #vam-informe-propietarios-v17 .report-head { padding-bottom: 12px !important; }
-          #vam-informe-propietarios-v17 .mini-card { padding: 10px 8px !important; }
-          #vam-informe-propietarios-v17 .mini-card p:last-child { font-size: 12px !important; }
-          #vam-informe-propietarios-v17 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
-          #vam-informe-propietarios-v17 .report-table th, #vam-informe-propietarios-v17 .report-table td { padding: 5px 5px !important; }
-          #vam-informe-propietarios-v17 .report-table thead { display: table-header-group !important; }
-          #vam-informe-propietarios-v17 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-          #vam-informe-propietarios-v17 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
-          #vam-informe-propietarios-v17 .report-block { break-inside: avoid; page-break-inside: avoid; }
+          @page {
+            size: letter portrait;
+            margin: 0.25in;
+          }
+
+          body {
+            background: white !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          #reporte-propietarios-print-root,
+          #reporte-propietarios-print-root * {
+            visibility: visible !important;
+          }
+
+          #reporte-propietarios-print-root {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            min-height: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: white !important;
+          }
+
+          .no-print {
+            display: none !important;
+            visibility: hidden !important;
+          }
+
+          .print-card {
+            box-shadow: none !important;
+            border: none !important;
+            margin: 0 !important;
+            max-width: none !important;
+            width: 100% !important;
+          }
+
+          .print-avoid-break {
+            break-inside: auto !important;
+            page-break-inside: auto !important;
+          }
+
+          .print-keep-together {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+
+          .print-text-xs {
+            font-size: 9px !important;
+          }
+
+          .print-card {
+            font-size: 10px !important;
+            line-height: 1.22 !important;
+          }
+
+          .print-header {
+            padding-bottom: 8px !important;
+            border-bottom-width: 2px !important;
+          }
+
+          .print-header-title {
+            font-size: 17px !important;
+            line-height: 1.05 !important;
+            margin-top: 4px !important;
+          }
+
+          .print-header-subtitle {
+            font-size: 10px !important;
+            margin-top: 3px !important;
+          }
+
+          .print-logo-img {
+            height: 42px !important;
+            max-width: 92px !important;
+          }
+
+          .print-logo-box {
+            height: 42px !important;
+            width: 42px !important;
+            border-radius: 10px !important;
+            font-size: 13px !important;
+          }
+
+          .print-meta {
+            margin-top: 5px !important;
+            gap: 4px !important;
+            padding: 7px !important;
+            border-radius: 10px !important;
+            font-size: 9.5px !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          }
+
+          .print-section {
+            margin-top: 7px !important;
+          }
+
+          .print-section h3 {
+            font-size: 11px !important;
+            margin-bottom: 5px !important;
+            letter-spacing: .025em !important;
+          }
+
+          .print-summary-cards {
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            gap: 4px !important;
+            margin-bottom: 6px !important;
+          }
+
+          .print-summary-cards > div {
+            padding: 6px !important;
+            border-radius: 9px !important;
+          }
+
+          .print-summary-cards p:first-child {
+            font-size: 7.5px !important;
+            line-height: 1 !important;
+          }
+
+          .print-summary-cards p:last-child {
+            font-size: 10.5px !important;
+            line-height: 1.05 !important;
+            margin-top: 3px !important;
+          }
+
+          .print-table {
+            font-size: 9.2px !important;
+            line-height: 1.14 !important;
+          }
+
+          .print-table th,
+          .print-table td {
+            padding: 3px 5px !important;
+            vertical-align: top !important;
+          }
+
+
+          .print-table,
+          .print-table thead,
+          .print-table tbody,
+          .print-table tr,
+          .print-table th,
+          .print-table td {
+            visibility: visible !important;
+          }
+
+          .print-table thead {
+            display: table-header-group !important;
+          }
+
+          .print-table tr {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+
+          .print-table thead th {
+            padding-top: 4px !important;
+            padding-bottom: 4px !important;
+          }
+
+          .print-compact-box {
+            padding: 7px !important;
+            border-radius: 10px !important;
+          }
+
+          .print-cuadre-title {
+            padding: 6px 8px !important;
+          }
+
+          .print-note-signature {
+            margin-top: 9px !important;
+            gap: 8px !important;
+            grid-template-columns: 1.2fr .8fr !important;
+          }
+
+          .print-signature-line {
+            margin-top: 24px !important;
+            padding-top: 5px !important;
+          }
         }
       `}</style>
 
-      <div className="no-print mx-auto mb-4 flex max-w-4xl flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="no-print mx-auto mb-4 flex max-w-5xl flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="text-lg font-bold text-slate-900">Informe financiero · Propietarios</p>
-          <p className="text-xs text-slate-500">V1.7 · Versión ejecutiva lista para impresión y PDF</p>
+          <h1 className="text-xl font-bold text-slate-900">Resumen Financiero Mensual</h1>
+          <p className="mt-1 text-sm text-slate-500">V1.2 · Reporte para propietarios, con revisión de diferencias por cuenta y período.</p>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="text-xs font-semibold text-slate-600">Cuenta
-            <select value={cuenta?.id || ""}
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <label className="text-sm font-medium text-slate-700">
+            Cuenta bancaria
+            <select
+              value={cuenta?.id || ""}
               onChange={(e) => setCuenta(cuentasDisponibles.find((item) => item.id === Number(e.target.value)) || null)}
-              className="mt-1 block max-w-52 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+              className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+            >
               {cuentasDisponibles.map((item) => (
-                <option key={item.id} value={item.id}>{item.nombre_banco || "Banco"} · {String(item.numero_cuenta || "").slice(-4)}</option>
+                <option key={item.id} value={item.id}>{item.nombre_banco || "Banco"} · {item.numero_cuenta || "Sin número"}</option>
               ))}
             </select>
           </label>
-          <label className="text-xs font-semibold text-slate-600">Mes
-            <select value={periodoSeleccionado} onChange={(e) => setPeriodoSeleccionado(e.target.value)}
-              className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
-              {periodosDisponibles.map((p) => <option key={p} value={p}>{nombrePeriodo(p)}</option>)}
+          <label className="text-sm font-medium text-slate-700">
+            Periodo
+            <select
+              value={periodoSeleccionado}
+              onChange={(e) => setPeriodoSeleccionado(e.target.value)}
+              className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+            >
+              {periodosDisponibles.map((p) => (
+                <option key={p} value={p}>
+                  {nombrePeriodo(p)}
+                </option>
+              ))}
             </select>
           </label>
-          <button type="button" onClick={recargar} disabled={consultando}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
-            {consultando ? "Actualizando…" : "Actualizar"}
+
+          <button
+            type="button"
+            onClick={recargar}
+            disabled={consultando}
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {consultando ? "Consultando..." : "Actualizar"}
           </button>
-          <button type="button" onClick={imprimirReporte}
-            disabled={!listoParaPublicar || consultando || Boolean(error)}
-            className="rounded-lg bg-blue-900 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
+
+          <button
+            type="button"
+            onClick={imprimirReporte}
+            disabled={consultando || loading || Boolean(error) || !cuenta || !perfil}
+            title="Se abrirá la vista previa del navegador; seleccione Guardar como PDF."
+            className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
+          >
             Imprimir / Guardar PDF
           </button>
         </div>
       </div>
 
-      {error && <div className="no-print mx-auto mb-3 max-w-4xl rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
-      {consultando && <div className="no-print mx-auto mb-3 max-w-4xl rounded-lg bg-blue-50 p-3 text-sm text-blue-800">Actualizando el período. Espere para imprimir.</div>}
-      {!consultando && !error && !listoParaPublicar && (
-        <div className="no-print mx-auto max-w-4xl rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
-          Este período necesita revisión administrativa antes de emitir un informe para propietarios: falta el cierre de esta cuenta o existen diferencias en los registros. No se muestran saldos como definitivos ni se habilita el PDF.
+      {error && (
+        <div className="no-print mx-auto mb-4 max-w-5xl rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
         </div>
       )}
 
-      {!consultando && !error && listoParaPublicar && (
-        <main className="print-paper mx-auto max-w-4xl rounded-2xl border border-slate-200 bg-white px-8 py-7 shadow-sm">
-          <header className="report-head flex items-start justify-between gap-4 border-b-2 border-blue-900 pb-4">
-            <div className="min-w-0 flex-1">
-              <h1 className="text-[22px] font-black leading-tight text-slate-950">{condominioNombre}</h1>
-              <p className="mt-1 text-[13px] font-bold uppercase tracking-wide text-blue-900">Informe financiero mensual</p>
-              <p className="mt-1 text-xs text-slate-500">Período: {periodoCompletoTexto(periodoSeleccionado)} · {cuentaTexto}</p>
+      <div className="no-print mx-auto mb-4 max-w-5xl rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+        «Imprimir / Guardar PDF» abre la vista previa de impresión. Seleccione «Guardar como PDF» como destino.
+        El cuadre interno no prueba por sí solo que los datos coincidan con el estado de cuenta externo.
+      </div>
+
+      {!error && !consultando && cuenta && <main className="print-card mx-auto max-w-5xl rounded-3xl border border-slate-200 bg-white p-7 shadow-sm print:p-0">
+        <header className="print-header border-b-4 border-blue-900 pb-5">
+          <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">
+            Estado de revisión: {estadoRevision}. Estado en control: {estadoPeriodo}.
+            {pendientesConciliar > 0 ? ` ${pendientesConciliar} movimiento(s) sin marca de conciliación.` : ""}
+            {montosNegativos > 0 ? ` ${montosNegativos} monto(s) negativos: revisar su naturaleza.` : ""}
+            {tiposDesconocidos > 0 ? ` ${tiposDesconocidos} movimiento(s) sin tipo INGRESO/EGRESO: no incluidos en totales.` : ""}
+            {" "}Conciliación con extracto externo: NO VERIFICADA en este reporte.
+          </p>
+          <div className="flex items-start justify-between gap-5">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-blue-900">VAM Administradora de Condominios</p>
+              <h2 className="print-header-title mt-2 text-2xl font-black uppercase text-slate-950">Resumen Financiero Mensual para Propietarios</h2>
+              <p className="print-header-subtitle mt-2 text-sm text-slate-600">Movimientos registrados en VAM, exclusivamente para la cuenta y fecha de posteo indicadas. V1.2.</p>
             </div>
+
             {condominio?.logo_url ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={condominio.logo_url} alt="Logo del condominio" className="h-14 w-24 shrink-0 object-contain" />
-            ) : null}
-          </header>
+              <img src={condominio.logo_url} alt="Logo" className="print-logo-img h-16 max-w-[130px] object-contain" />
+            ) : (
+              <div className="print-logo-box flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-900 text-lg font-black text-white">VAM</div>
+            )}
+          </div>
 
-          <section className="report-block mt-5 grid grid-cols-2 gap-2 md:grid-cols-4 print:grid-cols-4">
-            <div className="mini-card min-w-0 rounded-lg border border-slate-200 p-3">
-              <p className="text-[10px] font-semibold uppercase text-slate-500">Saldo inicial</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-bold tabular-nums text-slate-900">{mostrarMonto(balanceInicial)}</p>
-            </div>
-            <div className="mini-card min-w-0 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-              <p className="text-[10px] font-semibold uppercase text-emerald-700">Ingresos del mes</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-bold tabular-nums text-emerald-800">{formatMoney(totalIngresosPeriodo)}</p>
-            </div>
-            <div className="mini-card min-w-0 rounded-lg border border-rose-200 bg-rose-50 p-3">
-              <p className="text-[10px] font-semibold uppercase text-rose-700">Egresos del mes</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-bold tabular-nums text-rose-800">{formatMoney(totalEgresos)}</p>
-            </div>
-            <div className="mini-card min-w-0 rounded-lg border border-blue-900 bg-blue-950 p-3">
-              <p className="text-[10px] font-semibold uppercase text-blue-100">Saldo bancario</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-black tabular-nums text-white">{mostrarMonto(balanceFinal)}</p>
-            </div>
-          </section>
+          <div className="print-meta mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700 md:grid-cols-2">
+            <div><span className="font-bold text-slate-900">Condominio:</span> {condominioNombre}</div>
+            <div><span className="font-bold text-slate-900">Periodo:</span> {nombrePeriodo(periodoSeleccionado)}</div>
+            <div><span className="font-bold text-slate-900">Cuenta bancaria:</span> {cuentaTexto}</div>
+            <div><span className="font-bold text-slate-900">Fecha del reporte:</span> {formatDate(new Date().toISOString())}</div>
+            <div><span className="font-bold text-slate-900">Estado del periodo:</span> {estadoPeriodo === "SIN_CIERRE" ? "SIN CIERRE" : estadoPeriodo}</div>
+            <div><span className="font-bold text-slate-900">Fecha de corte:</span> {fechaCierreTexto}</div>
+          </div>
+        </header>
 
-          <section className="report-block mt-5">
-            <h2 className="mb-2 flex items-center justify-between text-[13px] font-extrabold text-slate-900">
-              <span>¿EN QUÉ SE UTILIZARON LOS RECURSOS?</span>
-              <span className="text-[11px] font-medium text-slate-500">Importes RD$</span>
-            </h2>
-            <div className="overflow-hidden rounded-lg border border-slate-200">
-              <table className="report-table w-full table-fixed text-left text-[11px]">
-                <colgroup><col style={{ width: "12%" }}/><col style={{ width: "12%" }}/><col style={{ width: "55%" }}/><col style={{ width: "21%" }}/></colgroup>
-                <thead className="bg-slate-100 text-slate-700">
+        <section className="print-section mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+          <p className="font-bold">Control de diferencias · Cuenta ID {cuenta?.id || "-"} · Movimientos leídos: {movimientos.length}</p>
+          <p className="mt-1">Ingreso cierre vs. detalle: {mostrarMonto(diferenciaIngresos)} · Gasto cierre vs. detalle: {mostrarMonto(diferenciaEgresos)} · Diferencia saldo final: {mostrarMonto(diferencia)}.</p>
+          <p className="mt-1">Egresos sin clasificar: {totalNoClasificados} · Sin conciliar: {pendientesConciliar} · Montos negativos: {montosNegativos} · Tipos desconocidos: {tiposDesconocidos}.</p>
+          <p className="mt-1">Vínculos con gastos sin validar: {vinculosGastosSinValidar} · Gastos cuyo campo monto difiere de total: {montosGastoDivergentes}. Los importes del reporte siempre provienen del movimiento bancario.</p>
+          <p className="mt-1 font-semibold text-amber-800">Extracto bancario independiente: no cargado ni verificado por esta pantalla.</p>
+        </section>
+
+        <section className="print-section mt-6">
+          <h3 className="mb-3 text-base font-black uppercase tracking-wide text-slate-900">1. Resumen general del mes</h3>
+
+          <div className="print-summary-cards grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <p className="text-xs font-bold uppercase text-slate-500">Balance inicial</p>
+              <p className="mt-2 text-lg font-black text-slate-900">{mostrarMonto(balanceInicial)}</p>
+            </div>
+
+            <div className="print-compact-box rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <p className="text-xs font-bold uppercase text-emerald-700">Ingresos</p>
+              <p className="mt-2 text-lg font-black text-emerald-800">{formatMoney(totalIngresosPeriodo)}</p>
+            </div>
+
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+              <p className="text-xs font-bold uppercase text-red-700">Gastos operativos</p>
+              <p className="mt-2 text-lg font-black text-red-800">{formatMoney(totalGastosOperativos)}</p>
+            </div>
+
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-xs font-bold uppercase text-amber-700">Impuestos / cargos</p>
+              <p className="mt-2 text-lg font-black text-amber-800">{formatMoney(totalCargosBancarios)}</p>
+            </div>
+
+            <div className="rounded-2xl border border-purple-200 bg-purple-50 p-4">
+              <p className="text-xs font-bold uppercase text-purple-700">Egresos por clasificar</p>
+              <p className="mt-2 text-lg font-black text-purple-900">{formatMoney(totalSinClasificar)}</p>
+            </div>
+
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+              <p className="text-xs font-bold uppercase text-blue-700">Balance final</p>
+              <p className="mt-2 text-lg font-black text-blue-900">{mostrarMonto(balanceFinal)}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-200">
+            <table className="print-table w-full text-sm">
+              <tbody>
+                <tr className="border-b border-slate-100">
+                  <td className="px-4 py-3 font-semibold text-slate-700">Balance inicial al 01/{periodoSeleccionado.slice(5, 7)}/{periodoSeleccionado.slice(0, 4)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-slate-900">{mostrarMonto(balanceInicial)}</td>
+                </tr>
+                <tr className="border-b border-slate-100">
+                  <td className="px-4 py-3 font-semibold text-slate-700">Total ingresos del mes</td>
+                  <td className="px-4 py-3 text-right font-bold text-emerald-700">{formatMoney(totalIngresosPeriodo)}</td>
+                </tr>
+                <tr className="border-b border-slate-100">
+                  <td className="px-4 py-3 font-semibold text-slate-700">Total gastos operativos registrados</td>
+                  <td className="px-4 py-3 text-right font-bold text-red-700">{formatMoney(totalGastosOperativos)}</td>
+                </tr>
+                <tr className="border-b border-slate-100">
+                  <td className="px-4 py-3 font-semibold text-slate-700">Cargos / impuestos bancarios</td>
+                  <td className="px-4 py-3 text-right font-bold text-amber-700">{formatMoney(totalCargosBancarios)}</td>
+                </tr>
+                <tr className="border-b border-slate-100">
+                  <td className="px-4 py-3 font-semibold text-slate-700">Otros egresos pendientes de clasificar</td>
+                  <td className="px-4 py-3 text-right font-bold text-purple-800">{formatMoney(totalSinClasificar)}</td>
+                </tr>
+                <tr className="border-b border-slate-100">
+                  <td className="px-4 py-3 font-semibold text-slate-700">Total egresos del mes</td>
+                  <td className="px-4 py-3 text-right font-bold">{formatMoney(totalEgresos)}</td>
+                </tr>
+                <tr className="bg-blue-900 text-white">
+                  <td className="px-4 py-3 text-base font-black">Saldo de cierre del Control Bancario al {fechaCierreTexto}</td>
+                  <td className="px-4 py-3 text-right text-base font-black">{mostrarMonto(balanceFinal)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="print-section mt-6">
+          <h3 className="mb-3 text-base font-black uppercase tracking-wide text-slate-900">2. Ingresos recibidos</h3>
+          <div className="print-compact-box rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <p className="font-bold text-emerald-900">Ingresos por mantenimiento y otros conceptos</p>
+              <p className="text-xl font-black text-emerald-800">{formatMoney(totalIngresosPeriodo)}</p>
+            </div>
+              <p className="mt-2 text-xs text-emerald-800">Suma de ingresos registrados en banco_movimientos para la cuenta seleccionada y su fecha bancaria. No representa validación del CSV externo.</p>
+          </div>
+        </section>
+
+        <section className="print-section mt-6">
+          <div className="mb-3 flex items-end justify-between gap-4">
+            <h3 className="text-base font-black uppercase tracking-wide text-slate-900">3. Detalle de gastos operativos</h3>
+            <p className="text-sm font-black text-red-700">Total: {formatMoney(totalGastosOperativos)}</p>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <table className="print-table w-full text-left text-xs md:text-sm">
+              <thead className="bg-slate-100 text-slate-700">
+                <tr>
+                  <th className="px-3 py-3">Fecha</th>
+                  <th className="px-3 py-3">Concepto / Factura</th>
+                  <th className="px-3 py-3">Proveedor / Beneficiario</th>
+                  <th className="px-3 py-3">No. cheque / doc.</th>
+                  <th className="px-3 py-3 text-right">Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detalleGastos.length === 0 ? (
                   <tr>
-                    <th className="px-3 py-2">Fecha</th>
-                    <th className="px-3 py-2">Cheque</th>
-                    <th className="px-3 py-2">Concepto / proveedor</th>
-                    <th className="px-3 py-2 text-right">Monto</th>
+                    <td colSpan={5} className="px-3 py-5 text-center text-slate-500">No hay gastos operativos registrados para este periodo.</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {gastosPresentacion.length === 0 && (
-                    <tr><td colSpan={4} className="px-3 py-4 text-center text-slate-500">Sin gastos operativos para el período.</td></tr>
-                  )}
-                  {gastosPresentacion.map((gasto) => (
-                    <tr key={gasto.id} className="border-t border-slate-100 align-top">
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-600">{gasto.fecha.slice(0, 5)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 font-semibold tabular-nums text-slate-700">{gasto.numeroDocumento}</td>
-                      <td className="px-3 py-2">
-                        <p className="font-semibold text-slate-850">{conceptoParaPropietario(gasto.concepto)}</p>
-                        {gasto.proveedor && gasto.proveedor !== "-" && !/no consignado|proveedor \/ beneficiario/i.test(gasto.proveedor) && (
-                          <p className="text-[10px] text-slate-500">{gasto.proveedor}</p>
+                ) : (
+                  detalleGastos.map((item) => (
+                    <tr key={item.id} className="border-t border-slate-100 align-top">
+                      <td className="px-3 py-3 whitespace-nowrap">{item.fecha}</td>
+                      <td className="px-3 py-3">
+                        <div className="font-semibold text-slate-900">{item.concepto}</div>
+                        {(item.factura !== "-" || item.ncf !== "-") && (
+                          <div className="mt-1 text-[11px] text-slate-500">Factura: {item.factura} {item.ncf !== "-" ? `| NCF: ${item.ncf}` : ""}</div>
+                        )}
+                        {item.advertencia && (
+                          <div className="mt-1 text-[10px] font-semibold text-amber-800">{item.advertencia}</div>
                         )}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-slate-900">{formatMoney(gasto.monto)}</td>
+                      <td className="px-3 py-3">{item.proveedor}</td>
+                      <td className="px-3 py-3 font-semibold text-slate-700">{item.numeroDocumento}</td>
+                      <td className="px-3 py-3 text-right font-bold text-red-700 whitespace-nowrap">{formatMoney(Math.abs(toNumber(item.monto)))}</td>
                     </tr>
-                  ))}
-                  {totalCargosBancarios > 0 && (
-                    <tr className="border-t border-slate-200">
-                      <td className="px-3 py-2 text-slate-600">—</td>
-                      <td className="px-3 py-2 text-slate-600">—</td>
-                      <td className="px-3 py-2 font-semibold text-slate-900">Comisiones e impuestos bancarios</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-slate-900">{formatMoney(totalCargosBancarios)}</td>
-                    </tr>
-                  )}
-                  <tr className="border-t-2 border-blue-900 bg-blue-50">
-                    <td colSpan={3} className="px-3 py-2 font-black text-blue-950">TOTAL EGRESOS</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right font-black tabular-nums text-blue-950">{formatMoney(totalEgresos)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
-          <footer className="report-footer mt-5 flex items-end justify-between gap-3 border-t border-slate-200 pt-3 text-[10px] leading-relaxed text-slate-500">
-            <div className="max-w-[75%]">
-              <p>Datos de ingresos, egresos y saldos registrados al {fechaCorte}.</p>
-              <p className="mt-1">Emitido el {fechaEmision} · Elaborado por VAM Administradora de Condominios</p>
+        <section className="print-section mt-6">
+          <div className="mb-3 flex items-end justify-between gap-4">
+            <h3 className="text-base font-black uppercase tracking-wide text-slate-900">4. Cargos e impuestos bancarios</h3>
+            <p className="text-sm font-black text-amber-700">Total: {formatMoney(totalCargosBancarios)}</p>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <table className="print-table w-full text-left text-xs md:text-sm">
+              <thead className="bg-slate-100 text-slate-700">
+                <tr>
+                  <th className="px-3 py-3">Fecha</th>
+                  <th className="px-3 py-3">Concepto</th>
+                  <th className="px-3 py-3">Referencia</th>
+                  <th className="px-3 py-3 text-right">Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detalleCargosBanco.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-3 py-5 text-center text-slate-500">No hay cargos o impuestos bancarios registrados para este periodo.</td>
+                  </tr>
+                ) : (
+                  detalleCargosBanco.map((item) => (
+                    <tr key={item.id} className="border-t border-slate-100">
+                      <td className="px-3 py-3 whitespace-nowrap">{item.fecha}</td>
+                      <td className="px-3 py-3 font-semibold text-slate-900">{item.concepto}</td>
+                      <td className="px-3 py-3">{item.referencia}</td>
+                      <td className="px-3 py-3 text-right font-bold text-amber-700 whitespace-nowrap">{formatMoney(Math.abs(toNumber(item.monto)))}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="print-section mt-6">
+          <h3 className="mb-3 text-base font-black uppercase tracking-wide text-slate-900">5. Egresos pendientes de clasificar · {formatMoney(totalSinClasificar)}</h3>
+          {egresosPorClasificar.length === 0 ? (
+            <p className="rounded-xl border p-3 text-xs text-slate-600">Sin egresos por clasificar.</p>
+          ) : (
+            <table className="print-table w-full border-collapse text-xs">
+              <thead className="bg-purple-50"><tr>
+                <th className="px-3 py-2 text-left">Fecha</th>
+                <th className="px-3 py-2 text-left">Descripción</th>
+                <th className="px-3 py-2 text-left">Documento</th>
+                <th className="px-3 py-2 text-right">Monto</th>
+              </tr></thead>
+              <tbody>{egresosPorClasificar.map((item) => (
+                <tr key={item.id} className="border-t">
+                  <td className="px-3 py-2">{formatDate(fechaEfectiva(item))}</td>
+                  <td className="px-3 py-2">{item.descripcion || item.origen || "Sin descripción"}</td>
+                  <td className="px-3 py-2">{item.numero_documento || item.referencia_banco || "-"}</td>
+                  <td className="px-3 py-2 text-right">{formatMoney(Math.abs(toNumber(item.monto)))}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+        </section>
+
+        <section className="print-section print-keep-together mt-6 rounded-2xl border-2 border-blue-900">
+          <div className="print-cuadre-title bg-blue-900 px-4 py-3 text-white">
+            <h3 className="text-base font-black uppercase tracking-wide">6. Cuadre y diferencias del mes</h3>
+          </div>
+
+          <table className="print-table w-full text-sm">
+            <tbody>
+              <tr className="border-b border-slate-100">
+                <td className="px-4 py-3 font-semibold text-slate-700">Balance inicial</td>
+                <td className="px-4 py-3 text-right font-bold">{mostrarMonto(balanceInicial)}</td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <td className="px-4 py-3 font-semibold text-slate-700">Más total ingresos</td>
+                <td className="px-4 py-3 text-right font-bold text-emerald-700">{formatMoney(totalIngresosPeriodo)}</td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <td className="px-4 py-3 font-semibold text-slate-700">Menos gastos operativos</td>
+                <td className="px-4 py-3 text-right font-bold text-red-700">{formatMoney(totalGastosOperativos)}</td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <td className="px-4 py-3 font-semibold text-slate-700">Menos cargos / impuestos bancarios</td>
+                <td className="px-4 py-3 text-right font-bold text-amber-700">{formatMoney(totalCargosBancarios)}</td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <td className="px-4 py-3 font-semibold text-slate-700">Menos egresos sin clasificar</td>
+                <td className="px-4 py-3 text-right font-bold text-purple-800">{formatMoney(totalSinClasificar)}</td>
+              </tr>
+              <tr className="bg-slate-100">
+                <td className="px-4 py-3 text-base font-black text-slate-900">Saldo declarado en cierre al {fechaCierreTexto}</td>
+                <td className="px-4 py-3 text-right text-base font-black text-blue-900">{mostrarMonto(balanceFinal)}</td>
+              </tr>
+              <tr className="border-t bg-slate-50">
+                <td className="px-4 py-3 font-bold">Saldo recalculado con los movimientos detallados</td>
+                <td className="px-4 py-3 text-right font-bold">{mostrarMonto(balanceCalculado)}</td>
+              </tr>
+              <tr className={diferenciaImportante(diferencia) ? "bg-amber-50" : "bg-slate-50"}>
+                <td className="px-4 py-3 font-bold">Diferencia saldo cierre - movimientos</td>
+                <td className="px-4 py-3 text-right font-bold">{mostrarMonto(diferencia)}</td>
+              </tr>
+              <tr className={diferenciaImportante(diferenciaIngresos) ? "bg-amber-50" : ""}>
+                <td className="px-4 py-3 font-semibold">Diferencia ingresos cierre - detalle</td>
+                <td className="px-4 py-3 text-right font-bold">{mostrarMonto(diferenciaIngresos)}</td>
+              </tr>
+              <tr className={diferenciaImportante(diferenciaEgresos) ? "bg-amber-50" : ""}>
+                <td className="px-4 py-3 font-semibold">Diferencia gastos cierre - detalle</td>
+                <td className="px-4 py-3 text-right font-bold">{mostrarMonto(diferenciaEgresos)}</td>
+              </tr>
+              <tr className={diferenciaImportante(diferenciaFormulaCierre) ? "bg-amber-50" : ""}>
+                <td className="px-4 py-3 font-semibold">Diferencia fórmula interna del cierre</td>
+                <td className="px-4 py-3 text-right font-bold">{mostrarMonto(diferenciaFormulaCierre)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section className="print-note-signature print-section print-keep-together mt-6 grid gap-6 md:grid-cols-2">
+          <div className="print-compact-box rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-600">
+            <p className="font-bold uppercase text-slate-900">Nota</p>
+            <p className="mt-2">Este reporte muestra movimientos registrados en VAM para UNA cuenta y mes. Estado de revisión: {estadoRevision}; {pendientesConciliar} movimientos pendientes de conciliación. Las diferencias se presentan, no se corrigen automáticamente. No sustituye ni certifica el estado de cuenta emitido por el banco: el extracto externo debe contrastarse por administración antes de declarar conciliación bancaria definitiva.</p>
+            <p className="mt-2 font-bold">Resumen financiero para propietarios · V1.2 · Impresión/PDF</p>
+          </div>
+
+          <div className="print-compact-box rounded-2xl border border-slate-200 p-4 text-center">
+            <div className="print-signature-line mt-10 border-t border-slate-400 pt-3">
+              <p className="font-bold text-slate-900">VAM Administradora de Condominios</p>
+              <p className="text-xs text-slate-500">Administración</p>
             </div>
-            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Informe financiero · V1.7</p>
-          </footer>
-        </main>
-      )}
+          </div>
+        </section>
+      </main>}
     </div>
   );
 }

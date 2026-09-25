@@ -830,38 +830,47 @@ export default function ResumenFinancieroPropietariosPage() {
   }
 
   return (
-    <div id="vam-informe-propietarios-v17" className="min-h-screen bg-slate-100 px-3 py-5 print:min-h-0 print:bg-white print:p-0">
+    <div id="vam-informe-propietarios-v18" className="min-h-screen min-w-0 max-w-full overflow-x-hidden bg-slate-100 px-2 py-3 sm:px-3 sm:py-5 print:min-h-0 print:bg-white print:p-0">
       <style jsx global>{`
         @page { size: letter portrait; margin: 0.43in; }
+        @media screen and (max-width: 767px) {
+          #vam-informe-propietarios-v18 { max-width: 100vw; overflow-x: clip; }
+          #vam-informe-propietarios-v18 .print-paper { overflow-wrap: anywhere; }
+          #vam-informe-propietarios-v18 .mini-card { padding: 9px 7px; }
+          #vam-informe-propietarios-v18 .mini-card p:last-child { letter-spacing: -0.35px; }
+          #vam-informe-propietarios-v18 .report-head { flex-wrap: wrap; }
+          #vam-informe-propietarios-v18 .report-head img { max-width: 76px; }
+        }
+
         @media print {
           html, body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           body * { visibility: hidden !important; }
-          #vam-informe-propietarios-v17, #vam-informe-propietarios-v17 * { visibility: visible !important; }
-          #vam-informe-propietarios-v17 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
-          #vam-informe-propietarios-v17 .no-print { display: none !important; visibility: hidden !important; }
-          #vam-informe-propietarios-v17 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-          #vam-informe-propietarios-v17 .report-head { padding-bottom: 12px !important; }
-          #vam-informe-propietarios-v17 .mini-card { padding: 10px 8px !important; }
-          #vam-informe-propietarios-v17 .mini-card p:last-child { font-size: 12px !important; }
-          #vam-informe-propietarios-v17 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
-          #vam-informe-propietarios-v17 .report-table th, #vam-informe-propietarios-v17 .report-table td { padding: 5px 5px !important; }
-          #vam-informe-propietarios-v17 .report-table thead { display: table-header-group !important; }
-          #vam-informe-propietarios-v17 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-          #vam-informe-propietarios-v17 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
-          #vam-informe-propietarios-v17 .report-block { break-inside: avoid; page-break-inside: avoid; }
+          #vam-informe-propietarios-v18, #vam-informe-propietarios-v18 * { visibility: visible !important; }
+          #vam-informe-propietarios-v18 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+          #vam-informe-propietarios-v18 .no-print { display: none !important; visibility: hidden !important; }
+          #vam-informe-propietarios-v18 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+          #vam-informe-propietarios-v18 .report-head { padding-bottom: 12px !important; }
+          #vam-informe-propietarios-v18 .mini-card { padding: 10px 8px !important; }
+          #vam-informe-propietarios-v18 .mini-card p:last-child { font-size: 12px !important; }
+          #vam-informe-propietarios-v18 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
+          #vam-informe-propietarios-v18 .report-table th, #vam-informe-propietarios-v18 .report-table td { padding: 5px 5px !important; }
+          #vam-informe-propietarios-v18 .report-table thead { display: table-header-group !important; }
+          #vam-informe-propietarios-v18 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+          #vam-informe-propietarios-v18 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
+          #vam-informe-propietarios-v18 .report-block { break-inside: avoid; page-break-inside: avoid; }
         }
       `}</style>
 
-      <div className="no-print mx-auto mb-4 flex max-w-4xl flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="no-print mx-auto mb-4 flex w-full min-w-0 max-w-4xl flex-col items-stretch gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:p-4">
         <div>
           <p className="text-lg font-bold text-slate-900">Informe financiero · Propietarios</p>
-          <p className="text-xs text-slate-500">V1.7 · Versión ejecutiva lista para impresión y PDF</p>
+          <p className="text-xs text-slate-500">V1.8 · Versión ejecutiva lista para impresión y PDF</p>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-end">
           <label className="text-xs font-semibold text-slate-600">Cuenta
             <select value={cuenta?.id || ""}
               onChange={(e) => setCuenta(cuentasDisponibles.find((item) => item.id === Number(e.target.value)) || null)}
-              className="mt-1 block max-w-52 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+              className="mt-1 block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-3 text-sm sm:max-w-52">
               {cuentasDisponibles.map((item) => (
                 <option key={item.id} value={item.id}>{item.nombre_banco || "Banco"} · {String(item.numero_cuenta || "").slice(-4)}</option>
               ))}
@@ -869,17 +878,17 @@ export default function ResumenFinancieroPropietariosPage() {
           </label>
           <label className="text-xs font-semibold text-slate-600">Mes
             <select value={periodoSeleccionado} onChange={(e) => setPeriodoSeleccionado(e.target.value)}
-              className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+              className="mt-1 block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-3 text-sm">
               {periodosDisponibles.map((p) => <option key={p} value={p}>{nombrePeriodo(p)}</option>)}
             </select>
           </label>
           <button type="button" onClick={recargar} disabled={consultando}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
+            className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
             {consultando ? "Actualizando…" : "Actualizar"}
           </button>
           <button type="button" onClick={imprimirReporte}
             disabled={!listoParaPublicar || consultando || Boolean(error)}
-            className="rounded-lg bg-blue-900 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
+            className="min-h-11 rounded-lg bg-blue-900 px-3 py-2 text-sm font-bold text-white disabled:opacity-40">
             Imprimir / Guardar PDF
           </button>
         </div>
@@ -894,10 +903,10 @@ export default function ResumenFinancieroPropietariosPage() {
       )}
 
       {!consultando && !error && listoParaPublicar && (
-        <main className="print-paper mx-auto max-w-4xl rounded-2xl border border-slate-200 bg-white px-8 py-7 shadow-sm">
-          <header className="report-head flex items-start justify-between gap-4 border-b-2 border-blue-900 pb-4">
+        <main className="print-paper mx-auto w-full min-w-0 max-w-4xl rounded-xl border border-slate-200 bg-white px-3 py-5 shadow-sm sm:rounded-2xl sm:px-8 sm:py-7">
+          <header className="report-head flex min-w-0 items-start justify-between gap-2 border-b-2 border-blue-900 pb-4 sm:gap-4">
             <div className="min-w-0 flex-1">
-              <h1 className="text-[22px] font-black leading-tight text-slate-950">{condominioNombre}</h1>
+              <h1 className="break-words text-[19px] font-black leading-tight text-slate-950 sm:text-[22px]">{condominioNombre}</h1>
               <p className="mt-1 text-[13px] font-bold uppercase tracking-wide text-blue-900">Informe financiero mensual</p>
               <p className="mt-1 text-xs text-slate-500">Período: {periodoCompletoTexto(periodoSeleccionado)} · {cuentaTexto}</p>
             </div>
@@ -907,22 +916,22 @@ export default function ResumenFinancieroPropietariosPage() {
             ) : null}
           </header>
 
-          <section className="report-block mt-5 grid grid-cols-2 gap-2 md:grid-cols-4 print:grid-cols-4">
+          <section className="report-block mt-5 grid min-w-0 grid-cols-2 gap-2 md:grid-cols-4 print:grid-cols-4">
             <div className="mini-card min-w-0 rounded-lg border border-slate-200 p-3">
               <p className="text-[10px] font-semibold uppercase text-slate-500">Saldo inicial</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-bold tabular-nums text-slate-900">{mostrarMonto(balanceInicial)}</p>
+              <p className="mt-1 break-words text-[clamp(10px,2.9vw,13px)] sm:whitespace-nowrap sm:text-[13px] font-bold tabular-nums text-slate-900">{mostrarMonto(balanceInicial)}</p>
             </div>
             <div className="mini-card min-w-0 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
               <p className="text-[10px] font-semibold uppercase text-emerald-700">Ingresos del mes</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-bold tabular-nums text-emerald-800">{formatMoney(totalIngresosPeriodo)}</p>
+              <p className="mt-1 break-words text-[clamp(10px,2.9vw,13px)] sm:whitespace-nowrap sm:text-[13px] font-bold tabular-nums text-emerald-800">{formatMoney(totalIngresosPeriodo)}</p>
             </div>
             <div className="mini-card min-w-0 rounded-lg border border-rose-200 bg-rose-50 p-3">
               <p className="text-[10px] font-semibold uppercase text-rose-700">Egresos del mes</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-bold tabular-nums text-rose-800">{formatMoney(totalEgresos)}</p>
+              <p className="mt-1 break-words text-[clamp(10px,2.9vw,13px)] sm:whitespace-nowrap sm:text-[13px] font-bold tabular-nums text-rose-800">{formatMoney(totalEgresos)}</p>
             </div>
             <div className="mini-card min-w-0 rounded-lg border border-blue-900 bg-blue-950 p-3">
               <p className="text-[10px] font-semibold uppercase text-blue-100">Saldo bancario</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-black tabular-nums text-white">{mostrarMonto(balanceFinal)}</p>
+              <p className="mt-1 break-words text-[clamp(10px,2.9vw,13px)] sm:whitespace-nowrap sm:text-[13px] font-black tabular-nums text-white">{mostrarMonto(balanceFinal)}</p>
             </div>
           </section>
 
@@ -931,7 +940,33 @@ export default function ResumenFinancieroPropietariosPage() {
               <span>¿EN QUÉ SE UTILIZARON LOS RECURSOS?</span>
               <span className="text-[11px] font-medium text-slate-500">Importes RD$</span>
             </h2>
-            <div className="overflow-hidden rounded-lg border border-slate-200">
+          <div className="grid min-w-0 gap-2 md:hidden print:hidden" aria-label="Gastos del mes">
+            {gastosPresentacion.length === 0 && <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Sin gastos operativos para el período.</p>}
+            {gastosPresentacion.map((gasto) => (
+              <article key={`movil-${gasto.id}`} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="flex min-w-0 items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-semibold text-blue-900">{gasto.fecha.slice(0, 5)} · Cheque: {gasto.numeroDocumento}</p>
+                    <p className="mt-1 break-words text-sm font-semibold leading-snug text-slate-900">{conceptoParaPropietario(gasto.concepto)}</p>
+                    {gasto.proveedor && gasto.proveedor !== "-" && !/no consignado|proveedor \/ beneficiario/i.test(gasto.proveedor) && (
+                      <p className="mt-1 break-words text-xs text-slate-600">{gasto.proveedor}</p>
+                    )}
+                  </div>
+                  <p className="shrink-0 whitespace-nowrap text-right text-xs font-bold tabular-nums text-slate-950">{formatMoney(gasto.monto)}</p>
+                </div>
+              </article>
+            ))}
+            {totalCargosBancarios > 0 && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-semibold">
+                <span>Comisiones e impuestos bancarios</span>
+                <span className="shrink-0 tabular-nums">{formatMoney(totalCargosBancarios)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-2 rounded-lg bg-blue-950 p-3 text-sm font-extrabold text-white">
+              <span>Total egresos</span><span className="shrink-0 tabular-nums">{formatMoney(totalEgresos)}</span>
+            </div>
+          </div>
+            <div className="hidden overflow-hidden rounded-lg border border-slate-200 md:block print:block">
               <table className="report-table w-full table-fixed text-left text-[11px]">
                 <colgroup><col style={{ width: "12%" }}/><col style={{ width: "12%" }}/><col style={{ width: "55%" }}/><col style={{ width: "21%" }}/></colgroup>
                 <thead className="bg-slate-100 text-slate-700">
@@ -976,12 +1011,12 @@ export default function ResumenFinancieroPropietariosPage() {
             </div>
           </section>
 
-          <footer className="report-footer mt-5 flex items-end justify-between gap-3 border-t border-slate-200 pt-3 text-[10px] leading-relaxed text-slate-500">
-            <div className="max-w-[75%]">
+          <footer className="report-footer mt-5 flex min-w-0 flex-wrap items-end justify-between gap-3 border-t border-slate-200 pt-3 text-[10px] leading-relaxed text-slate-500">
+            <div className="min-w-0 flex-1 break-words">
               <p>Datos de ingresos, egresos y saldos registrados al {fechaCorte}.</p>
               <p className="mt-1">Emitido el {fechaEmision} · Elaborado por VAM Administradora de Condominios</p>
             </div>
-            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Informe financiero · V1.7</p>
+            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Informe financiero · V1.8</p>
           </footer>
         </main>
       )}

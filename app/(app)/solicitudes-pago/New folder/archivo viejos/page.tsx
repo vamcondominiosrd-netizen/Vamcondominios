@@ -607,42 +607,17 @@ export default function SolicitudesPagoPage() {
     try {
       setProcesandoId(s.solicitud_id);
 
-      // v1.1.0: resolver el proveedor vigente en el momento de crear el gasto.
-      // proveedor_id es el identificador oficial; el nombre se mantiene como
-      // dato de compatibilidad hasta migrar las dependencias históricas.
-      const condominioGastoId = Number(s.condominio_id || condominioId || 0);
-      if (!condominioGastoId) {
-        throw new Error("No se pudo identificar el condominio del gasto.");
-      }
-
-      let nombreProveedorVerificado: string | null = null;
-      if (s.proveedor_id != null) {
-        const { data: proveedorActual, error: proveedorError } = await supabase
-          .from("catalogo_proveedores")
-          .select("id, nombre_proveedor")
-          .eq("id", s.proveedor_id)
-          .eq("condominio_id", condominioGastoId)
-          .maybeSingle();
-
-        if (proveedorError || !proveedorActual?.nombre_proveedor?.trim()) {
-          throw new Error(
-            "No se pudo verificar el proveedor en el catálogo de este condominio. " +
-              "No se generó ningún gasto. " + (proveedorError?.message || "Revise el proveedor seleccionado."),
-          );
-        }
-        nombreProveedorVerificado = proveedorActual.nombre_proveedor.trim();
-      }
-
       const { data: gastoData, error: gastoError } = await supabase
         .from("gastos")
         .insert([
           {
-            condominio_id: condominioGastoId,
+            condominio_id:
+              s.condominio_id || (condominioId ? Number(condominioId) : null),
             condominio: s.condominio || condominioNombre,
             fecha: s.fecha_solicitud,
             categoria: s.categoria_nombre || null,
             descripcion: s.detalle || s.concepto,
-            proveedor: nombreProveedorVerificado,
+            proveedor: s.proveedor_nombre || null,
             proveedor_id: s.proveedor_id,
             categoria_id: s.categoria_id,
             concepto: s.concepto,
@@ -1576,10 +1551,6 @@ export default function SolicitudesPagoPage() {
           </div>
         )}
       </SectionCard>
-
-      <div className="mt-3 text-right text-[10px] text-slate-400">
-        Solicitudes y Pagos · v1.1.0
-      </div>
 
       {modalCheque && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

@@ -98,6 +98,39 @@ type CargoBanco = {
   monto: number;
 };
 
+/** Saldos vigentes de obligaciones con periodo <= mes seleccionado. No reconstruye pagos históricos. */
+type MesPendienteDirectiva = {
+  periodo: string;
+  etiqueta?: string;
+  cuotaCentavos: number;
+  pagadoCentavos: number;
+  pendienteCentavos: number;
+};
+
+type CuotaPendienteDirectiva = {
+  unidadId: number;
+  apartamento: string;
+  propietario: string;
+  meses: MesPendienteDirectiva[];
+  totalAnteriorCentavos: number;
+  totalMesActualCentavos: number;
+  pendienteCentavos: number;
+};
+
+type ResumenCuotasDirectiva = {
+  pendientes: CuotaPendienteDirectiva[];
+  cargosAnalizados: number;
+  saldosInicialesPendientes: number;
+  unidadesConCargo: number;
+  totalPendienteCentavos: number;
+  totalAnteriorCentavos: number;
+  totalMesActualCentavos: number;
+  consultadoEn: string;
+  periodoCorte: string;
+  mesesConCargos: string[];
+  sinCargosMesActual: boolean;
+};
+
 const moneda = new Intl.NumberFormat("es-DO", {
   style: "currency",
   currency: "DOP",
@@ -213,6 +246,12 @@ function compararNumeroDocumento(a: string, b: string): number {
 function periodoActual(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Fecha de consulta solo para detectar resultados obsoletos; NO determina el periodo de la deuda. */
+function fechaLocalHoy(): string {
+  const hoy = new Date();
+  return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(hoy.getDate()).padStart(2, "0")}`;
 }
 
 function nombrePeriodo(periodo: string): string {
@@ -349,6 +388,35 @@ function diferenciaImportante(value: number | null): boolean {
 }
 
 
+/** Arrastres anteriores a 2026 se registran en VAM como saldos iniciales.
+ * No se deben interpretar como una segunda cuota ordinaria de enero. */
+function esSaldoInicial(cargo: Record<string, any>): boolean {
+  const tipo = normalizarTexto(cargo.tipo_cargo || cargo.tipo || "").replace(/[_-]/g, " ");
+  const concepto = normalizarTexto(cargo.concepto || "");
+  return tipo === "saldo inicial" || concepto.startsWith("saldo inicial al 01/01/2026");
+}
+
+/** No incluir cuotas extraordinarias, mora ni reserva en la deuda ordinaria. */
+function esCuotaOrdinaria(cargo: Record<string, any>): boolean | null {
+  const tipo = [cargo.tipo_cargo, cargo.tipo, cargo.tipo_cuota, cargo.categoria, cargo.tipo_pago]
+    .map((valor) => normalizarTexto(valor).replace(/[_-]/g, " "))
+    .find(Boolean) || "";
+  const concepto = normalizarTexto(cargo.concepto || cargo.descripcion || "").replace(/[_-]/g, " ");
+  const texto = `${tipo} ${concepto}`.trim();
+  if (!texto) return null;
+  // Una categoría de exclusión prevalece incluso si otro campo menciona "cuota".
+  if (/(extraordin|mora|recargo|multa|reserva|sancion|interes|especial)/.test(texto)) return false;
+  if (tipo && /(ordinari|mantenim|mensual|cuota)/.test(tipo)) return true;
+  if (!tipo && /(ordinari|mantenim|mensual|cuota)/.test(concepto)) return true;
+  return null;
+}
+
+function leerCentavosCargo(valor: unknown): number | null {
+  if (valor === null || valor === undefined || valor === "") return null;
+  const numero = typeof valor === "number" ? valor : Number(String(valor).replace(/,/g, "").trim());
+  return Number.isFinite(numero) ? Math.round(numero * 100) : null;
+}
+
 function conceptoParaPropietario(value: string): string {
   return limpiarTexto(value, "Gasto del condominio")
     .replace(/^pago solicitud\s*(?:no\.?\s*\d+)?\s*[-:]\s*/i, "")
@@ -358,7 +426,7 @@ function conceptoParaPropietario(value: string): string {
     .trim();
 }
 
-export default function ResumenFinancieroPropietariosPage() {
+export default function EstadoFinancieroDirectivaPage() {
   const [loading, setLoading] = useState(true);
   const [consultando, setConsultando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -373,6 +441,8 @@ export default function ResumenFinancieroPropietariosPage() {
   const [cierre, setCierre] = useState<CierreBancario | null>(null);
   const [movimientos, setMovimientos] = useState<MovimientoBanco[]>([]);
   const [gastosRelacionados, setGastosRelacionados] = useState<Map<number, GastoRelacionado>>(new Map());
+  const [cuotasDirectiva, setCuotasDirectiva] = useState<ResumenCuotasDirectiva | null>(null);
+  const [consultaCompletada, setConsultaCompletada] = useState("");
   const consultaActual = useRef(0);
 
   const periodosDisponibles = useMemo(() => {
@@ -697,17 +767,25 @@ export default function ResumenFinancieroPropietariosPage() {
     setCierre(null);
     setMovimientos([]);
     setGastosRelacionados(new Map());
+    setCuotasDirectiva(null);
+    setConsultaCompletada("");
 
     try {
-      const [cierreData, movimientosData] = await Promise.all([
+      // Cierre bancario y universo de cuotas: exactamente el mes seleccionado.
+      // ConsultadoEn solo controla la vigencia de los datos; no amplía el corte.
+      const fechaConsulta = fechaLocalHoy();
+      const [cierreData, movimientosData, cuotasData] = await Promise.all([
         buscarCierre(periodo, condominioId, cuentaBancariaId),
         cargarMovimientos(periodo, condominioId, cuentaBancariaId),
+        cargarCuotasPendientes(periodo, fechaConsulta, condominioId),
       ]);
       const gastosData = await cargarGastosRelacionados(movimientosData);
       if (consultaActual.current !== solicitud) return;
       setCierre(cierreData);
       setMovimientos(movimientosData);
       setGastosRelacionados(gastosData);
+      setCuotasDirectiva(cuotasData);
+      setConsultaCompletada(`${condominioId}:${cuentaBancariaId}:${periodo}`);
     } catch (err: any) {
       if (consultaActual.current === solicitud) {
         setError(err?.message || "Error consultando el período.");
@@ -797,10 +875,180 @@ export default function ResumenFinancieroPropietariosPage() {
     return gastos;
   }
 
+  async function cargarCuotasPendientes(
+    periodoCorte: string,
+    fechaConsulta: string,
+    condominioId: number,
+  ): Promise<ResumenCuotasDirectiva> {
+    // SOLO cargos de enero 2026 hasta el período seleccionado, INCLUSIVE.
+    // Ejemplo: informe agosto -> enero...agosto; septiembre queda excluido aunque
+    // ya esté generado, vencido o parcialmente pagado.
+    // El saldo de cada cargo es su saldo VIGENTE; no reconstruye importes históricos
+    // a 31/08 si se registraron pagos/aplicaciones con fecha posterior.
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodoCorte)) {
+      throw new Error('El período seleccionado no es válido para consultar las deudas.');
+    }
+    if (periodoCorte > fechaConsulta.slice(0, 7)) {
+      throw new Error('No se pueden publicar deudas de un período futuro.');
+    }
+    const cargos: Record<string, any>[] = [];
+    const TAMANO = 1000;
+    for (let inicio = 0; ; inicio += TAMANO) {
+      const { data, error } = await supabase.from("cargos_periodicos")
+        .select("*")
+        .eq("condominio_id", condominioId)
+        .gte("periodo", "2026-01")
+        .lte("periodo", periodoCorte)
+        .order("id", { ascending: true })
+        .range(inicio, inicio + TAMANO - 1);
+      if (error) throw new Error("No se pudieron consultar los cargos históricos: " + error.message);
+      const pagina = (data || []) as Record<string, any>[];
+      cargos.push(...pagina);
+      if (pagina.length < TAMANO) break;
+    }
+
+    if (!cargos.length) {
+      throw new Error(`No existen cargos periódicos entre enero 2026 y ${periodoCorte}. No es posible validar deudas.`);
+    }
+    const ordinarios: Record<string, any>[] = [];
+    const saldosIniciales: Record<string, any>[] = [];
+    const sinClasificar: number[] = [];
+    for (const cargo of cargos) {
+      // Los cargos anulados no constituyen deuda vigente.
+      if (["anulado", "cancelado", "eliminado"].includes(normalizarTexto(cargo.estado))) continue;
+      const mes = String(cargo.periodo || "").slice(0, 7);
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes) || mes > periodoCorte) continue;
+      // Los saldos iniciales no son cuotas de enero. Si están pagados,
+      // no son deuda ni tienen por qué bloquear el reporte.
+      if (esSaldoInicial(cargo)) {
+        const cuota = leerCentavosCargo(cargo.monto);
+        const pagado = leerCentavosCargo(cargo.monto_pagado) ?? 0;
+        const declarado = leerCentavosCargo(cargo.balance ?? cargo.saldo_pendiente);
+        if (cuota === null || cuota < 0 || pagado < 0 ||
+            (declarado !== null && Math.abs(declarado - (cuota - pagado)) > 1)) {
+          throw new Error(`Saldo inicial inconsistente en cargo ${cargo.id}.`);
+        }
+        const pendiente = declarado ?? cuota - pagado;
+        if (pendiente < 0 || pendiente > cuota ||
+            (normalizarTexto(cargo.estado) === "pagado" && pendiente > 0)) {
+          throw new Error(`Estado o saldo inicial inconsistente en cargo ${cargo.id}.`);
+        }
+        if (pendiente > 0) saldosIniciales.push(cargo);
+        continue;
+      }
+      const clase = esCuotaOrdinaria(cargo);
+      if (clase === null) {
+        // No bloquear la publicación por cargos de otra clase ya liquidados.
+        // Un cargo sin tipo con saldo pendiente SÍ requiere revisión.
+        const declarado = leerCentavosCargo(cargo.balance ?? cargo.saldo_pendiente);
+        const cuota = leerCentavosCargo(cargo.monto);
+        const pagado = leerCentavosCargo(cargo.monto_pagado);
+        const completamentePagado = declarado === 0 &&
+          cuota !== null && pagado !== null && Math.abs(cuota - pagado) <= 1;
+        if (!completamentePagado) sinClasificar.push(Number(cargo.id));
+      }
+      if (clase === true) ordinarios.push(cargo);
+    }
+    if (sinClasificar.length) {
+      throw new Error(`Existen ${sinClasificar.length} cargos históricos sin tipo verificable (IDs: ${sinClasificar.slice(0, 8).join(", ")}). Revisar antes de publicar deudas.`);
+    }
+    if (!ordinarios.length) {
+      throw new Error("No se encontraron cuotas ordinarias históricas. Verifique la generación de cargos.");
+    }
+
+    const idsUnidad = [...new Set([...ordinarios, ...saldosIniciales]
+      .map((cargo) => Number(cargo.unidad_id)))];
+    if (idsUnidad.some((id) => !Number.isInteger(id) || id <= 0)) {
+      throw new Error("Hay cuotas ordinarias sin una unidad válida. Revise los cargos antes de publicar.");
+    }
+    const unidades = new Map<number, { codigo: string | null; propietario_nombre: string | null }>();
+    for (let inicio = 0; inicio < idsUnidad.length; inicio += 200) {
+      const { data, error } = await supabase.from("unidades")
+        .select("id, codigo, propietario_nombre")
+        .eq("condominio_id", condominioId)
+        .in("id", idsUnidad.slice(inicio, inicio + 200));
+      if (error) throw new Error("No se pudieron consultar las unidades: " + error.message);
+      (data || []).forEach((unidad: any) => unidades.set(Number(unidad.id), unidad));
+    }
+    if (unidades.size !== idsUnidad.length) {
+      throw new Error("Una o más cuotas históricas apuntan a unidades inexistentes o de otro condominio.");
+    }
+
+    const vistos = new Set<string>();
+    const acumulado = new Map<number, CuotaPendienteDirectiva>();
+    const mesesConCargos = new Set<string>();
+    for (const cargo of [...ordinarios, ...saldosIniciales]) {
+      const apertura = esSaldoInicial(cargo);
+      const unidadId = Number(cargo.unidad_id);
+      const mes = String(cargo.periodo).slice(0, 7);
+      // Un saldo inicial y una cuota de enero son dos obligaciones distintas.
+      const clave = apertura ? `apertura:${cargo.id}` : `${mes}:${unidadId}`;
+      if (vistos.has(clave)) {
+        throw new Error(`Cuotas ordinarias duplicadas para ${unidades.get(unidadId)?.codigo || unidadId}, período ${mes}.`);
+      }
+      vistos.add(clave);
+      if (!apertura) mesesConCargos.add(mes);
+      const cuota = leerCentavosCargo(cargo.monto);
+      const pagado = leerCentavosCargo(cargo.monto_pagado) ?? 0;
+      const saldoDeclarado = leerCentavosCargo(cargo.balance ?? cargo.saldo_pendiente);
+      if (cuota === null || cuota < 0 || pagado < 0) {
+        throw new Error(`Importe inválido en el cargo ${cargo.id}.`);
+      }
+      const pendiente = saldoDeclarado ?? (cuota - pagado);
+      if (pendiente < 0 || pendiente > cuota ||
+          (saldoDeclarado !== null && Math.abs(saldoDeclarado - (cuota - pagado)) > 1)) {
+        throw new Error(`Saldo inconsistente en cargo ${cargo.id} (${mes}). Revisar créditos y aplicaciones.`);
+      }
+      if (normalizarTexto(cargo.estado) === "pagado" && pendiente > 0) {
+        throw new Error(`El cargo ${cargo.id} (${mes}) figura PAGADO con balance pendiente.`);
+      }
+      if (pendiente <= 0) continue;
+      const unidad = unidades.get(unidadId)!;
+      const existente = acumulado.get(unidadId) || {
+        unidadId,
+        apartamento: limpiarTexto(unidad.codigo, `Unidad ${unidadId}`),
+        propietario: limpiarTexto(unidad.propietario_nombre, "No registrado"),
+        meses: [],
+        totalAnteriorCentavos: 0,
+        totalMesActualCentavos: 0,
+        pendienteCentavos: 0,
+      };
+      existente.meses.push({
+        periodo: mes,
+        etiqueta: apertura ? limpiarTexto(cargo.concepto, "Saldo inicial de apertura") : undefined,
+        cuotaCentavos: cuota,
+        pagadoCentavos: pagado,
+        pendienteCentavos: pendiente,
+      });
+      if (apertura || mes < periodoCorte) existente.totalAnteriorCentavos += pendiente;
+      else existente.totalMesActualCentavos += pendiente;
+      existente.pendienteCentavos += pendiente;
+      acumulado.set(unidadId, existente);
+    }
+    const pendientes = [...acumulado.values()]
+      .map((item) => ({ ...item, meses: item.meses.sort((a, b) => a.periodo.localeCompare(b.periodo)) }))
+      .sort((a, b) => a.apartamento.localeCompare(b.apartamento, "es", { numeric: true }));
+    return {
+      pendientes,
+      cargosAnalizados: ordinarios.length,
+      saldosInicialesPendientes: saldosIniciales.length,
+      unidadesConCargo: idsUnidad.length,
+      totalAnteriorCentavos: pendientes.reduce((total, item) => total + item.totalAnteriorCentavos, 0),
+      totalMesActualCentavos: pendientes.reduce((total, item) => total + item.totalMesActualCentavos, 0),
+      totalPendienteCentavos: pendientes.reduce((total, item) => total + item.pendienteCentavos, 0),
+      consultadoEn: fechaConsulta,
+      periodoCorte,
+      mesesConCargos: [...mesesConCargos].sort(),
+      sinCargosMesActual: !mesesConCargos.has(periodoCorte),
+    };
+  }
+
   function imprimirReporte() {
     // No emitir un informe final si falta el cierre o hay discrepancias financieras.
-    if (loading || consultando || error || !cuenta || !cierre || hayDiferencias ||
-        balanceInicial === null || balanceFinal === null) return;
+    if (loading || consultando || error || !cuenta || !cierre || !cuotasDirectiva || hayDiferencias ||
+        consultaCompletada !== `${perfil?.condominio_id}:${cuenta.id}:${periodoSeleccionado}` ||
+        balanceInicial === null || balanceFinal === null ||
+        cuotasDirectiva.consultadoEn !== fechaLocalHoy()) return;
     window.print();
   }
 
@@ -817,8 +1065,10 @@ export default function ResumenFinancieroPropietariosPage() {
     : "Cuenta no seleccionada";
   const fechaCorte = formatDate(rangoPeriodo(periodoSeleccionado).cierre);
   const fechaEmision = formatDate(new Date());
-  const listoParaPublicar = Boolean(cierre && cuenta && !hayDiferencias &&
-    balanceInicial !== null && balanceFinal !== null);
+  const listoParaPublicar = Boolean(cierre && cuenta && cuotasDirectiva && !hayDiferencias &&
+    consultaCompletada === `${perfil?.condominio_id}:${cuenta?.id}:${periodoSeleccionado}` &&
+    balanceInicial !== null && balanceFinal !== null &&
+    cuotasDirectiva?.consultadoEn === fechaLocalHoy());
   const gastosPresentacion = [...detalleGastos].sort((a, b) => {
     const ordenFecha = (texto: string) => texto.split("/").reverse().join("-");
     return ordenFecha(a.fecha).localeCompare(ordenFecha(b.fecha)) ||
@@ -830,38 +1080,49 @@ export default function ResumenFinancieroPropietariosPage() {
   }
 
   return (
-    <div id="vam-informe-propietarios-v17" className="min-h-screen bg-slate-100 px-3 py-5 print:min-h-0 print:bg-white print:p-0">
+    <div id="vam-estado-financiero-directiva-v22" className="min-h-screen min-w-0 max-w-full overflow-x-hidden bg-slate-100 px-2 py-3 sm:px-3 sm:py-5 print:min-h-0 print:bg-white print:p-0">
       <style jsx global>{`
         @page { size: letter portrait; margin: 0.43in; }
+        @media screen and (max-width: 767px) {
+          #vam-estado-financiero-directiva-v22 { max-width: 100vw; overflow-x: clip; }
+          #vam-estado-financiero-directiva-v22 .print-paper { overflow-wrap: anywhere; }
+          #vam-estado-financiero-directiva-v22 .mini-card { padding: 9px 7px; }
+          #vam-estado-financiero-directiva-v22 .mini-card p:last-child { letter-spacing: -0.35px; }
+          #vam-estado-financiero-directiva-v22 .report-head { flex-wrap: wrap; }
+          #vam-estado-financiero-directiva-v22 .report-head img { max-width: 76px; }
+        }
+
         @media print {
           html, body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           body * { visibility: hidden !important; }
-          #vam-informe-propietarios-v17, #vam-informe-propietarios-v17 * { visibility: visible !important; }
-          #vam-informe-propietarios-v17 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
-          #vam-informe-propietarios-v17 .no-print { display: none !important; visibility: hidden !important; }
-          #vam-informe-propietarios-v17 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-          #vam-informe-propietarios-v17 .report-head { padding-bottom: 12px !important; }
-          #vam-informe-propietarios-v17 .mini-card { padding: 10px 8px !important; }
-          #vam-informe-propietarios-v17 .mini-card p:last-child { font-size: 12px !important; }
-          #vam-informe-propietarios-v17 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
-          #vam-informe-propietarios-v17 .report-table th, #vam-informe-propietarios-v17 .report-table td { padding: 5px 5px !important; }
-          #vam-informe-propietarios-v17 .report-table thead { display: table-header-group !important; }
-          #vam-informe-propietarios-v17 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-          #vam-informe-propietarios-v17 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
-          #vam-informe-propietarios-v17 .report-block { break-inside: avoid; page-break-inside: avoid; }
+          #vam-estado-financiero-directiva-v22, #vam-estado-financiero-directiva-v22 * { visibility: visible !important; }
+          #vam-estado-financiero-directiva-v22 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+          #vam-estado-financiero-directiva-v22 .no-print { display: none !important; visibility: hidden !important; }
+          #vam-estado-financiero-directiva-v22 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+          #vam-estado-financiero-directiva-v22 .report-head { padding-bottom: 12px !important; }
+          #vam-estado-financiero-directiva-v22 .mini-card { padding: 10px 8px !important; }
+          #vam-estado-financiero-directiva-v22 .mini-card p:last-child { font-size: 12px !important; }
+          #vam-estado-financiero-directiva-v22 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
+          #vam-estado-financiero-directiva-v22 .report-table th, #vam-estado-financiero-directiva-v22 .report-table td { padding: 5px 5px !important; }
+          #vam-estado-financiero-directiva-v22 .report-table thead { display: table-header-group !important; }
+          #vam-estado-financiero-directiva-v22 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+          #vam-estado-financiero-directiva-v22 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
+          #vam-estado-financiero-directiva-v22 table { break-inside: auto !important; }
+          #vam-estado-financiero-directiva-v22 thead { display: table-header-group !important; }
+          #vam-estado-financiero-directiva-v22 .report-block { break-inside: avoid; page-break-inside: avoid; }
         }
       `}</style>
 
-      <div className="no-print mx-auto mb-4 flex max-w-4xl flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="no-print mx-auto mb-4 flex w-full min-w-0 max-w-4xl flex-col items-stretch gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:p-4">
         <div>
-          <p className="text-lg font-bold text-slate-900">Informe financiero · Propietarios</p>
-          <p className="text-xs text-slate-500">V1.7 · Versión ejecutiva lista para impresión y PDF</p>
+          <p className="text-lg font-bold text-slate-900">Estado financiero · Directiva</p>
+          <p className="text-xs text-slate-500">V2.2 · Informe exclusivo de directiva · Impresión y PDF</p>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-end">
           <label className="text-xs font-semibold text-slate-600">Cuenta
             <select value={cuenta?.id || ""}
               onChange={(e) => setCuenta(cuentasDisponibles.find((item) => item.id === Number(e.target.value)) || null)}
-              className="mt-1 block max-w-52 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+              className="mt-1 block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-3 text-sm sm:max-w-52">
               {cuentasDisponibles.map((item) => (
                 <option key={item.id} value={item.id}>{item.nombre_banco || "Banco"} · {String(item.numero_cuenta || "").slice(-4)}</option>
               ))}
@@ -869,17 +1130,17 @@ export default function ResumenFinancieroPropietariosPage() {
           </label>
           <label className="text-xs font-semibold text-slate-600">Mes
             <select value={periodoSeleccionado} onChange={(e) => setPeriodoSeleccionado(e.target.value)}
-              className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+              className="mt-1 block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-3 text-sm">
               {periodosDisponibles.map((p) => <option key={p} value={p}>{nombrePeriodo(p)}</option>)}
             </select>
           </label>
           <button type="button" onClick={recargar} disabled={consultando}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
+            className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
             {consultando ? "Actualizando…" : "Actualizar"}
           </button>
           <button type="button" onClick={imprimirReporte}
             disabled={!listoParaPublicar || consultando || Boolean(error)}
-            className="rounded-lg bg-blue-900 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
+            className="min-h-11 rounded-lg bg-blue-900 px-3 py-2 text-sm font-bold text-white disabled:opacity-40">
             Imprimir / Guardar PDF
           </button>
         </div>
@@ -889,16 +1150,16 @@ export default function ResumenFinancieroPropietariosPage() {
       {consultando && <div className="no-print mx-auto mb-3 max-w-4xl rounded-lg bg-blue-50 p-3 text-sm text-blue-800">Actualizando el período. Espere para imprimir.</div>}
       {!consultando && !error && !listoParaPublicar && (
         <div className="no-print mx-auto max-w-4xl rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
-          Este período necesita revisión administrativa antes de emitir un informe para propietarios: falta el cierre de esta cuenta o existen diferencias en los registros. No se muestran saldos como definitivos ni se habilita el PDF.
+          No se puede emitir el estado financiero de directiva: falta el cierre, no se pudieron validar las cuotas ordinarias hasta el período seleccionado o existen diferencias financieras. Revise los datos y actualice.
         </div>
       )}
 
       {!consultando && !error && listoParaPublicar && (
-        <main className="print-paper mx-auto max-w-4xl rounded-2xl border border-slate-200 bg-white px-8 py-7 shadow-sm">
-          <header className="report-head flex items-start justify-between gap-4 border-b-2 border-blue-900 pb-4">
+        <main className="print-paper mx-auto w-full min-w-0 max-w-4xl rounded-xl border border-slate-200 bg-white px-3 py-5 shadow-sm sm:rounded-2xl sm:px-8 sm:py-7">
+          <header className="report-head flex min-w-0 items-start justify-between gap-2 border-b-2 border-blue-900 pb-4 sm:gap-4">
             <div className="min-w-0 flex-1">
-              <h1 className="text-[22px] font-black leading-tight text-slate-950">{condominioNombre}</h1>
-              <p className="mt-1 text-[13px] font-bold uppercase tracking-wide text-blue-900">Informe financiero mensual</p>
+              <h1 className="break-words text-[19px] font-black leading-tight text-slate-950 sm:text-[22px]">{condominioNombre}</h1>
+              <p className="mt-1 text-[13px] font-bold uppercase tracking-wide text-blue-900">Estado financiero de la directiva</p>
               <p className="mt-1 text-xs text-slate-500">Período: {periodoCompletoTexto(periodoSeleccionado)} · {cuentaTexto}</p>
             </div>
             {condominio?.logo_url ? (
@@ -907,22 +1168,22 @@ export default function ResumenFinancieroPropietariosPage() {
             ) : null}
           </header>
 
-          <section className="report-block mt-5 grid grid-cols-2 gap-2 md:grid-cols-4 print:grid-cols-4">
+          <section className="report-block mt-5 grid min-w-0 grid-cols-2 gap-2 md:grid-cols-4 print:grid-cols-4">
             <div className="mini-card min-w-0 rounded-lg border border-slate-200 p-3">
               <p className="text-[10px] font-semibold uppercase text-slate-500">Saldo inicial</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-bold tabular-nums text-slate-900">{mostrarMonto(balanceInicial)}</p>
+              <p className="mt-1 break-words text-[clamp(10px,2.9vw,13px)] sm:whitespace-nowrap sm:text-[13px] font-bold tabular-nums text-slate-900">{mostrarMonto(balanceInicial)}</p>
             </div>
             <div className="mini-card min-w-0 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
               <p className="text-[10px] font-semibold uppercase text-emerald-700">Ingresos del mes</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-bold tabular-nums text-emerald-800">{formatMoney(totalIngresosPeriodo)}</p>
+              <p className="mt-1 break-words text-[clamp(10px,2.9vw,13px)] sm:whitespace-nowrap sm:text-[13px] font-bold tabular-nums text-emerald-800">{formatMoney(totalIngresosPeriodo)}</p>
             </div>
             <div className="mini-card min-w-0 rounded-lg border border-rose-200 bg-rose-50 p-3">
               <p className="text-[10px] font-semibold uppercase text-rose-700">Egresos del mes</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-bold tabular-nums text-rose-800">{formatMoney(totalEgresos)}</p>
+              <p className="mt-1 break-words text-[clamp(10px,2.9vw,13px)] sm:whitespace-nowrap sm:text-[13px] font-bold tabular-nums text-rose-800">{formatMoney(totalEgresos)}</p>
             </div>
             <div className="mini-card min-w-0 rounded-lg border border-blue-900 bg-blue-950 p-3">
               <p className="text-[10px] font-semibold uppercase text-blue-100">Saldo bancario</p>
-              <p className="mt-1 whitespace-nowrap text-[13px] font-black tabular-nums text-white">{mostrarMonto(balanceFinal)}</p>
+              <p className="mt-1 break-words text-[clamp(10px,2.9vw,13px)] sm:whitespace-nowrap sm:text-[13px] font-black tabular-nums text-white">{mostrarMonto(balanceFinal)}</p>
             </div>
           </section>
 
@@ -931,7 +1192,33 @@ export default function ResumenFinancieroPropietariosPage() {
               <span>¿EN QUÉ SE UTILIZARON LOS RECURSOS?</span>
               <span className="text-[11px] font-medium text-slate-500">Importes RD$</span>
             </h2>
-            <div className="overflow-hidden rounded-lg border border-slate-200">
+          <div className="grid min-w-0 gap-2 md:hidden print:hidden" aria-label="Gastos del mes">
+            {gastosPresentacion.length === 0 && <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Sin gastos operativos para el período.</p>}
+            {gastosPresentacion.map((gasto) => (
+              <article key={`movil-${gasto.id}`} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="flex min-w-0 items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-semibold text-blue-900">{gasto.fecha.slice(0, 5)} · Cheque: {gasto.numeroDocumento}</p>
+                    <p className="mt-1 break-words text-sm font-semibold leading-snug text-slate-900">{conceptoParaPropietario(gasto.concepto)}</p>
+                    {gasto.proveedor && gasto.proveedor !== "-" && !/no consignado|proveedor \/ beneficiario/i.test(gasto.proveedor) && (
+                      <p className="mt-1 break-words text-xs text-slate-600">{gasto.proveedor}</p>
+                    )}
+                  </div>
+                  <p className="shrink-0 whitespace-nowrap text-right text-xs font-bold tabular-nums text-slate-950">{formatMoney(gasto.monto)}</p>
+                </div>
+              </article>
+            ))}
+            {totalCargosBancarios > 0 && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-semibold">
+                <span>Comisiones e impuestos bancarios</span>
+                <span className="shrink-0 tabular-nums">{formatMoney(totalCargosBancarios)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-2 rounded-lg bg-blue-950 p-3 text-sm font-extrabold text-white">
+              <span>Total egresos</span><span className="shrink-0 tabular-nums">{formatMoney(totalEgresos)}</span>
+            </div>
+          </div>
+            <div className="hidden overflow-hidden rounded-lg border border-slate-200 md:block print:block">
               <table className="report-table w-full table-fixed text-left text-[11px]">
                 <colgroup><col style={{ width: "12%" }}/><col style={{ width: "12%" }}/><col style={{ width: "55%" }}/><col style={{ width: "21%" }}/></colgroup>
                 <thead className="bg-slate-100 text-slate-700">
@@ -976,12 +1263,127 @@ export default function ResumenFinancieroPropietariosPage() {
             </div>
           </section>
 
-          <footer className="report-footer mt-5 flex items-end justify-between gap-3 border-t border-slate-200 pt-3 text-[10px] leading-relaxed text-slate-500">
-            <div className="max-w-[75%]">
+          <section className="mt-6 min-w-0 border-t-2 border-blue-900 pt-4">
+            <div className="mb-3 flex min-w-0 flex-wrap items-end justify-between gap-2">
+              <div>
+                <h2 className="text-[13px] font-extrabold uppercase text-slate-900">
+                  Cuotas de enero a {nombrePeriodo(cuotasDirectiva!.periodoCorte)} · saldos pendientes
+                </h2>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  {cuotasDirectiva!.pendientes.length} apartamento(s) con saldo ·
+                  {" "}{cuotasDirectiva!.cargosAnalizados} cuotas ordinarias verificadas desde enero de 2026
+                  {cuotasDirectiva!.saldosInicialesPendientes > 0
+                    ? ` · ${cuotasDirectiva!.saldosInicialesPendientes} saldo(s) inicial(es) pendiente(s)` : ""}
+                </p>
+              </div>
+              <div className="rounded-lg bg-amber-50 px-3 py-2 text-right">
+                <p className="text-[9px] font-bold uppercase text-amber-800">Total de cuotas hasta el corte</p>
+                <p className="text-[16px] font-black tabular-nums text-amber-950">
+                  {formatMoney(desdeCentavos(cuotasDirectiva!.totalPendienteCentavos))}
+                </p>
+              </div>
+            </div>
+            <div className="mb-3 grid grid-cols-1 gap-2 min-[390px]:grid-cols-2 print:grid-cols-2">
+              <div className="rounded-lg border border-rose-200 bg-rose-50 p-2">
+                <p className="text-[10px] font-semibold text-rose-800">Meses anteriores pendientes</p>
+                <p className="mt-1 text-[13px] font-extrabold text-rose-900">
+                  {formatMoney(desdeCentavos(cuotasDirectiva!.totalAnteriorCentavos))}
+                </p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-2">
+                <p className="text-[10px] font-semibold text-amber-800">Mes del informe pendiente</p>
+                <p className="mt-1 text-[13px] font-extrabold text-amber-900">
+                  {formatMoney(desdeCentavos(cuotasDirectiva!.totalMesActualCentavos))}
+                </p>
+              </div>
+            </div>
+            <div className="grid min-w-0 gap-2 md:hidden print:hidden" aria-label="Apartamentos con cuotas pendientes">
+              {cuotasDirectiva!.pendientes.length === 0 ? (
+                <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">No se encontraron saldos pendientes en las cuotas ordinarias consultadas.</p>
+              ) : cuotasDirectiva!.pendientes.map((item) => (
+                <article key={`deuda-movil-${item.unidadId}`} className="min-w-0 rounded-xl border border-amber-200 bg-white p-3 shadow-sm">
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-extrabold text-slate-900">{item.apartamento}</h3>
+                      <p className="break-words text-xs text-slate-600">{item.propietario}</p>
+                    </div>
+                    <p className="shrink-0 whitespace-nowrap text-right text-sm font-extrabold tabular-nums text-amber-900">
+                      {formatMoney(desdeCentavos(item.pendienteCentavos))}
+                    </p>
+                  </div>
+                  <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
+                    {item.meses.map((mes) => (
+                      <div key={`deuda-movil-${item.unidadId}-${mes.periodo}`} className="flex min-w-0 justify-between gap-2 text-xs">
+                        <span className="min-w-0 break-words text-slate-700">{mes.etiqueta || nombrePeriodo(mes.periodo)}{mes.pagadoCentavos > 0 ? " (parcial)" : ""}</span>
+                        <span className="shrink-0 whitespace-nowrap font-bold tabular-nums text-slate-900">{formatMoney(desdeCentavos(mes.pendienteCentavos))}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+              <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-100 p-3 text-sm font-bold text-amber-950">
+                <span>Total pendiente</span>
+                <span className="shrink-0 whitespace-nowrap tabular-nums">{formatMoney(desdeCentavos(cuotasDirectiva!.totalPendienteCentavos))}</span>
+              </div>
+            </div>
+            <div className="hidden overflow-hidden rounded-lg border border-slate-200 md:block print:block">
+              <table className="report-table w-full text-left text-[10.5px]">
+                <thead className="bg-slate-100 text-slate-700">
+                  <tr>
+                    <th className="px-3 py-2">Apartamento</th>
+                    <th className="px-3 py-2">Propietario</th>
+                    <th className="px-3 py-2">Meses con saldo pendiente</th>
+                    <th className="px-3 py-2 text-right">Total pendiente</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cuotasDirectiva!.pendientes.length === 0 ? (
+                    <tr><td colSpan={4} className="px-3 py-4 text-center text-emerald-800">
+                      No se encontraron saldos pendientes en los cargos ordinarios consultados.
+                    </td></tr>
+                  ) : cuotasDirectiva!.pendientes.map((item) => (
+                    <tr key={item.unidadId} className="border-t border-slate-100 align-top">
+                      <td className="whitespace-nowrap px-3 py-2 font-bold text-slate-900">{item.apartamento}</td>
+                      <td className="px-3 py-2 text-slate-700">{item.propietario}</td>
+                      <td className="px-3 py-2 text-slate-700">
+                        {item.meses.map((mes) => (
+                          <div key={`${item.unidadId}-${mes.periodo}`} className="flex justify-between gap-2">
+                            <span>{mes.etiqueta || nombrePeriodo(mes.periodo)}{mes.pagadoCentavos > 0 ? " (parcial)" : ""}</span>
+                            <span className="whitespace-nowrap font-semibold tabular-nums">
+                              {formatMoney(desdeCentavos(mes.pendienteCentavos))}
+                            </span>
+                          </div>
+                        ))}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right font-bold tabular-nums text-amber-900">
+                        {formatMoney(desdeCentavos(item.pendienteCentavos))}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="border-t-2 border-slate-300 bg-slate-50">
+                    <td colSpan={3} className="px-3 py-2 font-black text-slate-900">TOTAL DE CUOTAS HASTA {nombrePeriodo(cuotasDirectiva!.periodoCorte).toUpperCase()}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right font-black tabular-nums text-slate-950">
+                      {formatMoney(desdeCentavos(cuotasDirectiva!.totalPendienteCentavos))}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-[9px] leading-relaxed text-slate-500">
+              Se incluyen solo cuotas ordinarias de enero 2026 a {nombrePeriodo(cuotasDirectiva!.periodoCorte)}, inclusive, y saldos iniciales de apertura correspondientes a ese rango.
+              No se incluyen obligaciones de meses posteriores al período informado.
+              Los importes son saldos vigentes consultados el {formatDate(cuotasDirectiva!.consultadoEn)}: pagos o créditos aplicados después del cierre pueden cambiarlos; no representan una reconstrucción histórica certificada al {fechaCorte}.
+              Créditos a favor no aplicados requieren validación antes de gestionar cobros.
+              {cuotasDirectiva!.sinCargosMesActual ? " No hay cuotas del mes seleccionado registradas; verificar su generación." : ""}
+            </p>
+          </section>
+
+          <footer className="report-footer mt-5 flex min-w-0 flex-wrap items-end justify-between gap-3 border-t border-slate-200 pt-3 text-[10px] leading-relaxed text-slate-500">
+            <div className="min-w-0 flex-1 break-words">
               <p>Datos de ingresos, egresos y saldos registrados al {fechaCorte}.</p>
               <p className="mt-1">Emitido el {fechaEmision} · Elaborado por VAM Administradora de Condominios</p>
             </div>
-            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Informe financiero · V1.7</p>
+            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Estado financiero directiva · V2.2</p>
           </footer>
         </main>
       )}

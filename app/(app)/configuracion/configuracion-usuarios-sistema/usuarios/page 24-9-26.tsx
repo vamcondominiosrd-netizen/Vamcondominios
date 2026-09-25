@@ -54,14 +54,6 @@ type UsuarioCondominio = {
   user_id: string;
   nombre: string;
   correo: string | null;
-  correo_contacto?: string | null;
-  tipo_usuario?: "DIRECTIVA" | "SISTEMA";
-  directiva_id?: number | null;
-  cedula?: string | null;
-  cargo_directiva?: string | null;
-  estado_directiva?: string | null;
-  fecha_inicio_directiva?: string | null;
-  fecha_fin_directiva?: string | null;
   rol_global: string | null;
   rol_condominio: string | null;
   activo: boolean;
@@ -90,10 +82,6 @@ type FormularioEditar = {
   userId: string;
   nombre: string;
   correo: string;
-  correoContacto: string;
-  tipoUsuario: "DIRECTIVA" | "SISTEMA";
-  cedula: string;
-  cargoDirectiva: string;
   activo: boolean;
   rolIds: number[];
 };
@@ -105,49 +93,6 @@ const FORMULARIO_CREAR_VACIO: FormularioCrear = {
   password: "",
   rolIds: [],
 };
-
-const ROLES_DIRECTIVA = [
-  "presidente",
-  "tesorero",
-  "tesoreria",
-  "secretario",
-  "secretaria",
-  "vocal",
-  "miembro directiva",
-  "miembro de directiva",
-];
-
-function normalizarTexto(valor: unknown) {
-  return String(valor || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function esRolDirectiva(nombre: unknown) {
-  return ROLES_DIRECTIVA.includes(normalizarTexto(nombre));
-}
-
-function limpiarCedula(valor: unknown) {
-  return String(valor || "").replace(/\D/g, "").slice(0, 11);
-}
-
-function formatearCedula(valor: unknown) {
-  const limpia = limpiarCedula(valor);
-  if (!limpia) return "";
-  if (limpia.length <= 3) return limpia;
-  if (limpia.length <= 10) return `${limpia.slice(0, 3)}-${limpia.slice(3)}`;
-  return `${limpia.slice(0, 3)}-${limpia.slice(3, 10)}-${limpia.slice(10)}`;
-}
-
-function enmascararCedula(valor: unknown) {
-  const limpia = limpiarCedula(valor);
-  if (limpia.length !== 11) return "Cédula no disponible";
-  return `***-*******-${limpia.slice(-1)}`;
-}
 
 export default function UsuariosAccesosPage() {
   const router = useRouter();
@@ -284,10 +229,6 @@ export default function UsuariosAccesosPage() {
       userId: usuario.user_id,
       nombre: usuario.nombre || "",
       correo: usuario.correo || "",
-      correoContacto: usuario.correo_contacto || "",
-      tipoUsuario: usuario.tipo_usuario === "DIRECTIVA" ? "DIRECTIVA" : "SISTEMA",
-      cedula: usuario.cedula || "",
-      cargoDirectiva: usuario.cargo_directiva || usuario.rol_condominio || "",
       activo: usuario.activo === true,
       rolIds: (usuario.roles || []).map((rol) => Number(rol.id)),
     });
@@ -382,7 +323,7 @@ export default function UsuariosAccesosPage() {
       return;
     }
 
-    if (formEditar.tipoUsuario !== "DIRECTIVA" && formEditar.rolIds.length === 0) {
+    if (formEditar.rolIds.length === 0) {
       setErrorModal("Debe seleccionar al menos un rol.");
       return;
     }
@@ -450,7 +391,6 @@ export default function UsuariosAccesosPage() {
 
   const usuariosFiltrados = useMemo(() => {
     const texto = busqueda.trim().toLowerCase();
-    const textoCedula = limpiarCedula(busqueda);
 
     if (!texto) return usuarios;
 
@@ -460,17 +400,11 @@ export default function UsuariosAccesosPage() {
         .join(" ")
         .toLowerCase();
 
-      const coincideCedula =
-        textoCedula.length > 0 &&
-        limpiarCedula(usuario.cedula).includes(textoCedula);
-
       return (
         usuario.nombre.toLowerCase().includes(texto) ||
-        String(usuario.correo || "").toLowerCase().includes(texto) ||
-        String(usuario.correo_contacto || "").toLowerCase().includes(texto) ||
-        coincideCedula ||
-        String(usuario.cargo_directiva || "").toLowerCase().includes(texto) ||
-        String(usuario.tipo_usuario || "").toLowerCase().includes(texto) ||
+        String(usuario.correo || "")
+          .toLowerCase()
+          .includes(texto) ||
         rolesTexto.includes(texto)
       );
     });
@@ -478,10 +412,6 @@ export default function UsuariosAccesosPage() {
 
   const usuariosActivos = usuarios.filter((usuario) => usuario.activo).length;
   const usuariosInactivos = usuarios.length - usuariosActivos;
-  const rolesConfigurables = useMemo(
-    () => roles.filter((rol) => !esRolDirectiva(rol.nombre)),
-    [roles]
-  );
 
   return (
     <>
@@ -528,7 +458,7 @@ export default function UsuariosAccesosPage() {
           title="Usuarios y Accesos"
           subtitle={`Creación, asignación de roles y control de acceso. Condominio: ${
             condominioNombre || "No seleccionado"
-          }. Usuarios y Accesos · v2.1`}
+          }.`}
           icon={Users}
           actions={
             <ModuleActions
@@ -612,7 +542,7 @@ export default function UsuariosAccesosPage() {
                 value={busqueda}
                 onChange={(event) => setBusqueda(event.target.value)}
                 className="w-full rounded-xl border px-10 py-3 text-sm"
-                placeholder="Buscar por nombre, cédula, correo, cargo o rol..."
+                placeholder="Buscar por nombre, correo o rol..."
               />
             </div>
           </div>
@@ -634,9 +564,8 @@ export default function UsuariosAccesosPage() {
               <thead className="bg-slate-100 text-slate-600">
                 <tr>
                   <th className="px-4 py-3 text-left">Usuario</th>
-                  <th className="px-4 py-3 text-left">Tipo / acceso</th>
-                  <th className="px-4 py-3 text-left">Rol / cargo</th>
-                  <th className="px-4 py-3 text-left">Roles adicionales</th>
+                  <th className="px-4 py-3 text-left">Correo</th>
+                  <th className="px-4 py-3 text-left">Roles</th>
                   <th className="px-4 py-3 text-center">Estado</th>
                   <th className="px-4 py-3 text-center">Acciones</th>
                 </tr>
@@ -665,34 +594,8 @@ export default function UsuariosAccesosPage() {
                       </button>
                     </td>
 
-                    <td className="px-4 py-3">
-                      <div className="space-y-1">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black ${
-                            usuario.tipo_usuario === "DIRECTIVA"
-                              ? "bg-blue-50 text-blue-700"
-                              : "bg-slate-100 text-slate-700"
-                          }`}
-                        >
-                          {usuario.tipo_usuario === "DIRECTIVA" ? "Directiva" : "Sistema"}
-                        </span>
-                        <p className="text-xs font-semibold text-slate-700">
-                          {usuario.tipo_usuario === "DIRECTIVA"
-                            ? enmascararCedula(usuario.cedula)
-                            : usuario.correo || "Sin correo registrado"}
-                        </p>
-                        {usuario.tipo_usuario === "DIRECTIVA" && usuario.correo_contacto && (
-                          <p className="text-[11px] text-slate-500">
-                            Contacto: {usuario.correo_contacto}
-                          </p>
-                        )}
-                      </div>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-700">
-                        {usuario.cargo_directiva || usuario.rol_condominio || "Sin rol principal"}
-                      </span>
+                    <td className="px-4 py-3 text-slate-600">
+                      {usuario.correo || "Sin correo registrado"}
                     </td>
 
                     <td className="px-4 py-3">
@@ -707,10 +610,8 @@ export default function UsuariosAccesosPage() {
                             </span>
                           ))
                         ) : (
-                          <span className="text-xs font-semibold text-slate-500">
-                            {usuario.tipo_usuario === "DIRECTIVA"
-                              ? "Sin roles adicionales"
-                              : "Sin roles asignados"}
+                          <span className="text-xs font-semibold text-red-600">
+                            Sin roles asignados
                           </span>
                         )}
                       </div>
@@ -773,7 +674,7 @@ export default function UsuariosAccesosPage() {
             <FlujoPaso
               numero="2"
               titulo="Crear usuario"
-              descripcion="Cree aquí usuarios del sistema. Los miembros de Directiva se registran desde Directiva y Usuarios."
+              descripcion="Registre el correo, la clave temporal y los datos del personal."
             />
             <FlujoPaso
               numero="3"
@@ -790,10 +691,11 @@ export default function UsuariosAccesosPage() {
       </PageContainer>
 
 {mostrarCrear && (
-  <Modal titulo="Crear usuario del sistema" onCerrar={cerrarCrear}>
+  <Modal titulo="Crear usuario" onCerrar={cerrarCrear}>
     <div className="space-y-5">
       <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
-        Se creará una cuenta para personal administrativo o de operación y se asociará al condominio actual. Los cargos de Directiva se registran y activan desde el módulo Directiva y Usuarios.
+        Se creará una cuenta de acceso y se asociará únicamente al
+        condominio actual.
       </div>
 
       {errorModal && (
@@ -844,11 +746,9 @@ export default function UsuariosAccesosPage() {
       </div>
 
       <SelectorRoles
-        roles={rolesConfigurables}
+        roles={roles}
         seleccionados={formCrear.rolIds}
         onAlternar={alternarRolCrear}
-        titulo="Roles del usuario"
-        descripcion="Los cargos de Directiva no se asignan desde esta pantalla."
       />
 
       <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
@@ -882,43 +782,12 @@ export default function UsuariosAccesosPage() {
   <Modal titulo="Editar usuario" onCerrar={cerrarEdicion}>
     <div className="space-y-5">
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-black uppercase text-slate-500">
-              Usuario de acceso
-            </p>
-            <p className="mt-1 font-bold text-slate-800">
-              {formEditar.tipoUsuario === "DIRECTIVA"
-                ? formatearCedula(formEditar.cedula) || "Cédula no disponible"
-                : formEditar.correo || "Sin correo registrado"}
-            </p>
-          </div>
-          <span
-            className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${
-              formEditar.tipoUsuario === "DIRECTIVA"
-                ? "bg-blue-100 text-blue-700"
-                : "bg-slate-200 text-slate-700"
-            }`}
-          >
-            {formEditar.tipoUsuario === "DIRECTIVA" ? "Directiva" : "Sistema"}
-          </span>
-        </div>
-
-        {formEditar.tipoUsuario === "DIRECTIVA" && (
-          <div className="mt-3 border-t border-slate-200 pt-3 text-sm">
-            <p className="font-bold text-slate-800">
-              Cargo oficial: {formEditar.cargoDirectiva || "No definido"}
-            </p>
-            {formEditar.correoContacto && (
-              <p className="mt-1 text-slate-600">
-                Correo de contacto: {formEditar.correoContacto}
-              </p>
-            )}
-            <p className="mt-2 text-xs leading-5 text-blue-700">
-              El cargo y los datos oficiales de la Directiva se administran desde el módulo Directiva y Usuarios.
-            </p>
-          </div>
-        )}
+        <p className="text-xs font-black uppercase text-slate-500">
+          Correo de acceso
+        </p>
+        <p className="mt-1 font-bold text-slate-800">
+          {formEditar.correo || "Sin correo registrado"}
+        </p>
       </div>
 
       {errorModal && (
@@ -928,23 +797,16 @@ export default function UsuariosAccesosPage() {
         </div>
       )}
 
-      {formEditar.tipoUsuario === "SISTEMA" ? (
-        <Campo
-          etiqueta="Nombre completo"
-          valor={formEditar.nombre}
-          onChange={(valor) =>
-            setFormEditar((actual) =>
-              actual ? { ...actual, nombre: valor } : actual
-            )
-          }
-          placeholder="Nombre del usuario"
-        />
-      ) : (
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-xs font-black uppercase text-slate-500">Nombre</p>
-          <p className="mt-1 font-bold text-slate-900">{formEditar.nombre}</p>
-        </div>
-      )}
+      <Campo
+        etiqueta="Nombre completo"
+        valor={formEditar.nombre}
+        onChange={(valor) =>
+          setFormEditar((actual) =>
+            actual ? { ...actual, nombre: valor } : actual
+          )
+        }
+        placeholder="Nombre del usuario"
+      />
 
       <div>
         <label className="mb-2 block text-sm font-black text-slate-700">
@@ -971,19 +833,9 @@ export default function UsuariosAccesosPage() {
       </div>
 
       <SelectorRoles
-        roles={rolesConfigurables}
+        roles={roles}
         seleccionados={formEditar.rolIds}
         onAlternar={alternarRolEditar}
-        titulo={
-          formEditar.tipoUsuario === "DIRECTIVA"
-            ? "Roles adicionales"
-            : "Roles asignados"
-        }
-        descripcion={
-          formEditar.tipoUsuario === "DIRECTIVA"
-            ? "Opcional. El cargo oficial de Directiva se mantiene separado de estos permisos adicionales."
-            : "Seleccione uno o varios roles para este usuario."
-        }
       />
 
       <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
@@ -1106,22 +958,20 @@ function SelectorRoles({
   roles,
   seleccionados,
   onAlternar,
-  titulo = "Roles asignados",
-  descripcion = "Seleccione uno o varios roles para este usuario.",
 }: {
   roles: RolDisponible[];
   seleccionados: number[];
   onAlternar: (rolId: number) => void;
-  titulo?: string;
-  descripcion?: string;
 }) {
   return (
     <div>
       <div className="mb-3 flex items-center gap-2">
         <ShieldCheck className="h-5 w-5 text-violet-700" />
         <div>
-          <p className="font-black text-slate-800">{titulo}</p>
-          <p className="text-xs text-slate-500">{descripcion}</p>
+          <p className="font-black text-slate-800">Roles asignados</p>
+          <p className="text-xs text-slate-500">
+            Seleccione uno o varios roles para este usuario.
+          </p>
         </div>
       </div>
 

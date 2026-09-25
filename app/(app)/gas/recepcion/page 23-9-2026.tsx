@@ -70,8 +70,6 @@ type GasRecepcion = {
   } | null;
 };
 
-const VERSION = "1.1.0";
-
 export default function GasRecepcionPage() {
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
@@ -149,9 +147,9 @@ export default function GasRecepcionPage() {
 
     await Promise.all([
       cargarRecepciones(id),
-      cargarProveedores(id),
+      cargarProveedores(),
       cargarTanques(id),
-      cargarUnidades(id),
+      cargarUnidades(),
     ]);
 
     setLoading(false);
@@ -205,11 +203,10 @@ export default function GasRecepcionPage() {
     setRecepciones((data as GasRecepcion[]) || []);
   }
 
-  async function cargarProveedores(id: string) {
+  async function cargarProveedores() {
     const { data, error } = await supabase
       .from("catalogo_proveedores")
       .select("id, nombre_proveedor")
-      .eq("condominio_id", Number(id))
       .order("nombre_proveedor", { ascending: true });
 
     if (error) {
@@ -261,11 +258,10 @@ export default function GasRecepcionPage() {
     setTanques((data as GasTanque[]) || []);
   }
 
-  async function cargarUnidades(id: string) {
+  async function cargarUnidades() {
     const { data, error } = await supabase
       .from("gas_unidades_medida")
       .select("id, nombre, abreviatura, estado")
-      .eq("condominio_id", Number(id))
       .eq("estado", "Activo")
       .order("nombre", { ascending: true });
 
@@ -644,19 +640,6 @@ export default function GasRecepcionPage() {
     setLoading(false);
   }
 
-  function irSolicitudAgrupada(r: GasRecepcion) {
-    if (!r.proveedor_id) {
-      alert("La recepción no tiene proveedor asociado.");
-      return;
-    }
-
-    const url = `/solicitudes-pago/agrupada?proveedor_id=${encodeURIComponent(
-      String(r.proveedor_id)
-    )}&origen=GAS`;
-
-    window.location.href = url;
-  }
-
   async function generarSolicitudPago(r: GasRecepcion) {
     if (!condominioId) {
       alert("No hay condominio activo.");
@@ -692,7 +675,6 @@ export default function GasRecepcionPage() {
     const { data: categoriaGas } = await supabase
       .from("catalogo_categoria_gastos")
       .select("id, nombre_categoria")
-      .eq("condominio_id", Number(condominioId))
       .ilike("nombre_categoria", "%gas%")
       .limit(1)
       .maybeSingle();
@@ -840,10 +822,6 @@ const detalle = `Recepción de gas según conduce No. ${
               <h1 className="text-3xl font-black text-slate-900 mt-1">
                 Recepción de Gas
               </h1>
-
-              <p className="text-xs text-slate-400 mt-1">
-                Recepción de Gas · v{VERSION}
-              </p>
 
               <p className="text-slate-500 mt-2 max-w-3xl">
                 Reciba el gas mediante conduce, registre la factura cuando
@@ -1484,24 +1462,13 @@ const detalle = `Recepción de gas según conduce No. ${
 
                         {r.estado === "Factura recibida" &&
                           !r.solicitud_pago_id && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => irSolicitudAgrupada(r)}
-                                className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
-                              >
-                                Agrupar facturas
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => generarSolicitudPago(r)}
-                                className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
-                                title="Usar solamente cuando esta factura deba pagarse de forma individual."
-                              >
-                                Solicitud individual
-                              </button>
-                            </>
+                            <button
+                              type="button"
+                              onClick={() => generarSolicitudPago(r)}
+                              className="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                            >
+                              Generar solicitud
+                            </button>
                           )}
 
                         {r.solicitud_pago_id && (
@@ -1550,10 +1517,6 @@ const detalle = `Recepción de gas según conduce No. ${
             </p>
           </div>
         </section>
-
-        <p className="text-right text-xs text-slate-400">
-          Gas · Recepción v{VERSION}
-        </p>
       </div>
     </main>
   );

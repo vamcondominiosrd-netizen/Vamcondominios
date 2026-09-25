@@ -418,14 +418,10 @@ export default function ResumenFinancieroPropietariosPage() {
           gasto?.proveedor || (normalizarTexto(m.descripcion).includes("nomina")
             ? "Nómina / beneficiario no consignado"
             : m.beneficiario), "Proveedor / beneficiario");
-        // Mostrar únicamente un número de cheque real; referencia_banco no es cheque.
-        // El gasto se consulta solo cuando coincide con importe y documento.
-        const documentoMovimiento = limpiarTexto(m.numero_documento, "");
-        const documentoGasto = limpiarTexto(gasto?.numero_cheque, "");
-        const chequeCandidato = documentoMovimiento || documentoGasto;
-        const numeroDocumento = /^\d{1,12}$/.test(chequeCandidato)
-          ? chequeCandidato
-          : "—";
+        const numeroDocumento = limpiarTexto(
+          gasto?.numero_cheque || m.numero_documento || m.referencia_banco,
+          "-"
+        );
 
         return {
           id: `gasto-${m.id}`,
@@ -830,32 +826,32 @@ export default function ResumenFinancieroPropietariosPage() {
   }
 
   return (
-    <div id="vam-informe-propietarios-v17" className="min-h-screen bg-slate-100 px-3 py-5 print:min-h-0 print:bg-white print:p-0">
+    <div id="vam-informe-propietarios-v16" className="min-h-screen bg-slate-100 px-3 py-5 print:min-h-0 print:bg-white print:p-0">
       <style jsx global>{`
         @page { size: letter portrait; margin: 0.43in; }
         @media print {
           html, body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           body * { visibility: hidden !important; }
-          #vam-informe-propietarios-v17, #vam-informe-propietarios-v17 * { visibility: visible !important; }
-          #vam-informe-propietarios-v17 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
-          #vam-informe-propietarios-v17 .no-print { display: none !important; visibility: hidden !important; }
-          #vam-informe-propietarios-v17 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-          #vam-informe-propietarios-v17 .report-head { padding-bottom: 12px !important; }
-          #vam-informe-propietarios-v17 .mini-card { padding: 10px 8px !important; }
-          #vam-informe-propietarios-v17 .mini-card p:last-child { font-size: 12px !important; }
-          #vam-informe-propietarios-v17 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
-          #vam-informe-propietarios-v17 .report-table th, #vam-informe-propietarios-v17 .report-table td { padding: 5px 5px !important; }
-          #vam-informe-propietarios-v17 .report-table thead { display: table-header-group !important; }
-          #vam-informe-propietarios-v17 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-          #vam-informe-propietarios-v17 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
-          #vam-informe-propietarios-v17 .report-block { break-inside: avoid; page-break-inside: avoid; }
+          #vam-informe-propietarios-v16, #vam-informe-propietarios-v16 * { visibility: visible !important; }
+          #vam-informe-propietarios-v16 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+          #vam-informe-propietarios-v16 .no-print { display: none !important; visibility: hidden !important; }
+          #vam-informe-propietarios-v16 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+          #vam-informe-propietarios-v16 .report-head { padding-bottom: 12px !important; }
+          #vam-informe-propietarios-v16 .mini-card { padding: 10px 8px !important; }
+          #vam-informe-propietarios-v16 .mini-card p:last-child { font-size: 12px !important; }
+          #vam-informe-propietarios-v16 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
+          #vam-informe-propietarios-v16 .report-table th, #vam-informe-propietarios-v16 .report-table td { padding: 5px 8px !important; }
+          #vam-informe-propietarios-v16 .report-table thead { display: table-header-group !important; }
+          #vam-informe-propietarios-v16 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+          #vam-informe-propietarios-v16 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
+          #vam-informe-propietarios-v16 .report-block { break-inside: avoid; page-break-inside: avoid; }
         }
       `}</style>
 
       <div className="no-print mx-auto mb-4 flex max-w-4xl flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div>
           <p className="text-lg font-bold text-slate-900">Informe financiero · Propietarios</p>
-          <p className="text-xs text-slate-500">V1.7 · Versión ejecutiva lista para impresión y PDF</p>
+          <p className="text-xs text-slate-500">V1.6 · Versión ejecutiva lista para impresión y PDF</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs font-semibold text-slate-600">Cuenta
@@ -933,23 +929,21 @@ export default function ResumenFinancieroPropietariosPage() {
             </h2>
             <div className="overflow-hidden rounded-lg border border-slate-200">
               <table className="report-table w-full table-fixed text-left text-[11px]">
-                <colgroup><col style={{ width: "12%" }}/><col style={{ width: "12%" }}/><col style={{ width: "55%" }}/><col style={{ width: "21%" }}/></colgroup>
+                <colgroup><col style={{ width: "13%" }}/><col style={{ width: "66%" }}/><col style={{ width: "21%" }}/></colgroup>
                 <thead className="bg-slate-100 text-slate-700">
                   <tr>
                     <th className="px-3 py-2">Fecha</th>
-                    <th className="px-3 py-2">Cheque</th>
                     <th className="px-3 py-2">Concepto / proveedor</th>
                     <th className="px-3 py-2 text-right">Monto</th>
                   </tr>
                 </thead>
                 <tbody>
                   {gastosPresentacion.length === 0 && (
-                    <tr><td colSpan={4} className="px-3 py-4 text-center text-slate-500">Sin gastos operativos para el período.</td></tr>
+                    <tr><td colSpan={3} className="px-3 py-4 text-center text-slate-500">Sin gastos operativos para el período.</td></tr>
                   )}
                   {gastosPresentacion.map((gasto) => (
                     <tr key={gasto.id} className="border-t border-slate-100 align-top">
                       <td className="whitespace-nowrap px-3 py-2 text-slate-600">{gasto.fecha.slice(0, 5)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 font-semibold tabular-nums text-slate-700">{gasto.numeroDocumento}</td>
                       <td className="px-3 py-2">
                         <p className="font-semibold text-slate-850">{conceptoParaPropietario(gasto.concepto)}</p>
                         {gasto.proveedor && gasto.proveedor !== "-" && !/no consignado|proveedor \/ beneficiario/i.test(gasto.proveedor) && (
@@ -962,13 +956,12 @@ export default function ResumenFinancieroPropietariosPage() {
                   {totalCargosBancarios > 0 && (
                     <tr className="border-t border-slate-200">
                       <td className="px-3 py-2 text-slate-600">—</td>
-                      <td className="px-3 py-2 text-slate-600">—</td>
                       <td className="px-3 py-2 font-semibold text-slate-900">Comisiones e impuestos bancarios</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-slate-900">{formatMoney(totalCargosBancarios)}</td>
                     </tr>
                   )}
                   <tr className="border-t-2 border-blue-900 bg-blue-50">
-                    <td colSpan={3} className="px-3 py-2 font-black text-blue-950">TOTAL EGRESOS</td>
+                    <td colSpan={2} className="px-3 py-2 font-black text-blue-950">TOTAL EGRESOS</td>
                     <td className="whitespace-nowrap px-3 py-2 text-right font-black tabular-nums text-blue-950">{formatMoney(totalEgresos)}</td>
                   </tr>
                 </tbody>
@@ -981,7 +974,7 @@ export default function ResumenFinancieroPropietariosPage() {
               <p>Datos de ingresos, egresos y saldos registrados al {fechaCorte}.</p>
               <p className="mt-1">Emitido el {fechaEmision} · Elaborado por VAM Administradora de Condominios</p>
             </div>
-            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Informe financiero · V1.7</p>
+            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Informe financiero · V1.6</p>
           </footer>
         </main>
       )}

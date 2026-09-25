@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Users,
   WalletCards,
-  BarChart3,
 } from "lucide-react";
 
 type SesionDirectiva = {
@@ -393,12 +392,6 @@ export default function InicioDirectivaPage() {
             icono={<WalletCards size={22} />}
             onClick={() => router.push("/movil/directiva/caja-chica")}
           />
-          <MenuCard
-            titulo="Estado financiero"
-            descripcion="Informe mensual validado: banco, gastos, cierres y cuotas pendientes."
-            icono={<BarChart3 size={22} />}
-            onClick={() => router.push("/movil/directiva/estados-financieros")}
-          />
         </section>
 
         {!puedeFirmar && (
@@ -408,7 +401,7 @@ export default function InicioDirectivaPage() {
         )}
 
         <p className="pt-2 text-right text-[10px] font-semibold text-slate-400">
-          Directiva Inicio · v2.2
+          Directiva Inicio · v2.0
         </p>
       </div>
     </main>

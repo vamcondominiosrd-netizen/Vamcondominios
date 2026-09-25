@@ -1,0 +1,58 @@
+// REEMPLAZA completamente cargarSoportesPropietario(gastosBase: Gasto[])
+// por este método dentro de app/movil/propietarios/resumen-financiero/page.tsx.
+// También cambia su llamada a: cargarSoportesPropietario(gastosBase, s, p).
+
+async function cargarSoportesPropietario(
+  gastosBase: Gasto[],
+  sesion: PropietarioActual,
+  periodoConsultado: string,
+) {
+  if (gastosBase.length === 0) return gastosBase;
+
+  try {
+    const token = localStorage.getItem("propietario_token") || "";
+    if (!token) throw new Error("Sesión del propietario no disponible.");
+
+    const respuesta = await fetch("/api/propietarios/soportes-gastos", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+      body: JSON.stringify({
+        condominio_id: sesion.condominio_id,
+        unidad_id: sesion.unidad_id,
+        periodo: periodoConsultado,
+      }),
+    });
+    const datos = await respuesta.json();
+    if (!respuesta.ok || datos?.ok !== true) {
+      throw new Error(datos?.mensaje || "No fue posible consultar los soportes.");
+    }
+
+    const documentos = datos.documentos || {};
+    return gastosBase.map((gasto) => {
+      const soportes = documentos[String(gasto.id)] || {};
+      return {
+        ...gasto,
+        // Mantener compatibilidad con documentos públicos antiguos del gasto.
+        factura_url: soportes.factura_url ||
+          (esUrlPublica(gasto.factura_url) ? gasto.factura_url : null),
+        cheque_url: soportes.cheque_url ||
+          (esUrlPublica(gasto.cheque_url) ? gasto.cheque_url : null),
+        recibo_url: soportes.recibo_url || null,
+      };
+    });
+  } catch (error) {
+    console.error("Error al consultar los soportes de gastos:", error);
+    setError(error instanceof Error ? error.message : "No se pudieron cargar los soportes.");
+    // Ante errores de autenticación o conexión, no exponer soportes antiguos.
+    return gastosBase.map((gasto) => ({
+      ...gasto,
+      factura_url: null,
+      cheque_url: null,
+      recibo_url: null,
+    }));
+  }
+}
