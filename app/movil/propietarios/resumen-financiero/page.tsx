@@ -86,6 +86,11 @@ const periodName = (p: string) => {
   });
 };
 
+const currentPeriod = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
+
 const range = (p: string) => {
   const [y, m] = p.split("-").map(Number);
   const from = `${y}-${String(m).padStart(2, "0")}-01`;
@@ -108,7 +113,7 @@ export default function TransparenciaFinancieraPage() {
   const [cierres, setCierres] = useState<CierreBancario[]>([]);
   const [cierre, setCierre] = useState<CierreBancario | null>(null);
   const [gastos, setGastos] = useState<Gasto[]>([]);
-  const [periodo, setPeriodo] = useState("");
+  const [periodo, setPeriodo] = useState(currentPeriod());
   const [loading, setLoading] = useState(true);
   const [consultando, setConsultando] = useState(false);
   const [error, setError] = useState("");
@@ -144,7 +149,7 @@ export default function TransparenciaFinancieraPage() {
 
       setPropietario(s);
 
-      const [{ data: cuentaData }, { data: cierresData }] = await Promise.all([
+      const [cuentaResp, cierresResp] = await Promise.all([
         supabase
           .from("cuentas_bancarias")
           .select("id,nombre_banco,numero_cuenta")
@@ -162,9 +167,19 @@ export default function TransparenciaFinancieraPage() {
           .order("periodo", { ascending: false }),
       ]);
 
-      setCuenta((cuentaData as CuentaBancaria) || null);
+      if (cuentaResp.error) {
+        console.warn("Cuenta bancaria:", cuentaResp.error);
+      }
 
-      const cierresCerrados = ((cierresData || []) as CierreBancario[]).filter(
+      if (cierresResp.error) {
+        throw new Error(
+          `No se pudieron consultar los cierres financieros: ${cierresResp.error.message}`,
+        );
+      }
+
+      setCuenta((cuentaResp.data as CuentaBancaria) || null);
+
+      const cierresCerrados = ((cierresResp.data || []) as CierreBancario[]).filter(
         (x) => esPeriodoCerrado(x.estado),
       );
 
@@ -173,7 +188,8 @@ export default function TransparenciaFinancieraPage() {
       if (cierresCerrados.length > 0) {
         setPeriodo(cierresCerrados[0].periodo);
       } else {
-        setPeriodo("");
+        // Mantener el filtro visible aunque todavía no existan cierres publicados.
+        setPeriodo(currentPeriod());
         setCierre(null);
         setGastos([]);
       }
@@ -361,6 +377,7 @@ export default function TransparenciaFinancieraPage() {
                 Transparencia financiera
               </p>
               <h1 className="truncate text-base font-black">Resumen mensual</h1>
+              <p className="mt-0.5 text-[9px] text-blue-200">Resumen financiero · v1.1</p>
             </div>
 
             <button
@@ -420,36 +437,65 @@ export default function TransparenciaFinancieraPage() {
             )}
           </div>
 
-          {periodos.length > 0 ? (
-            <div className="mt-4">
-              <label
-                htmlFor="periodo-financiero"
-                className="mb-1.5 block text-xs font-extrabold text-slate-700"
-              >
-                Mes disponible
-              </label>
-              <select
+          <div className="mt-4">
+            <label
+              htmlFor="periodo-financiero"
+              className="mb-1.5 block text-xs font-extrabold text-slate-700"
+            >
+              Mes a consultar
+            </label>
+
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <input
                 id="periodo-financiero"
+                type="month"
                 value={periodo}
                 onChange={(e) => setPeriodo(e.target.value)}
-                className="h-12 w-full rounded-xl border border-blue-300 bg-white px-3 text-sm font-black text-slate-800 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                className="h-12 min-w-0 rounded-xl border border-blue-300 bg-white px-3 text-sm font-black text-slate-800 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+              />
+
+              <button
+                type="button"
+                onClick={() => cargarPeriodo(propietario, periodo)}
+                disabled={!periodo || consultando}
+                className="h-12 rounded-xl bg-blue-800 px-4 text-xs font-extrabold text-white disabled:bg-slate-300"
               >
-                {periodos.map((p) => (
-                  <option key={p} value={p}>
-                    {periodName(p)}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-2 text-[10px] leading-4 text-slate-500">
-                Solo se muestran los meses que ya fueron cerrados oficialmente por
-                la administración.
+                {consultando ? "..." : "Consultar"}
+              </button>
+            </div>
+
+            {periodos.length > 0 ? (
+              <>
+                <p className="mt-3 text-[10px] font-bold text-slate-500">
+                  Meses cerrados disponibles
+                </p>
+                <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                  {periodos.slice(0, 12).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setPeriodo(p)}
+                      className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-extrabold ${
+                        periodo === p
+                          ? "border-blue-700 bg-blue-700 text-white"
+                          : "border-slate-200 bg-slate-50 text-slate-600"
+                      }`}
+                    >
+                      {periodName(p)}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-[10px] leading-4 text-amber-800">
+                Todavía no hay meses cerrados publicados. Puede seleccionar un mes para verificar su estado.
               </p>
-            </div>
-          ) : (
-            <div className="mt-4 rounded-xl bg-slate-100 px-3 py-4 text-center text-xs text-slate-500">
-              No hay estados financieros cerrados disponibles.
-            </div>
-          )}
+            )}
+
+            <p className="mt-2 text-[10px] leading-4 text-slate-500">
+              La información financiera solo se publica cuando el mes ha sido cerrado oficialmente por la administración.
+            </p>
+          </div>
 
           <p className="mt-3 flex items-center gap-1 text-[10px] text-slate-400">
             <Landmark size={12} />

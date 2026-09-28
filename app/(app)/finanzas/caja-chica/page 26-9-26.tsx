@@ -6,11 +6,9 @@ import {
   BarChart3,
   Coins,
   FileSpreadsheet,
-  Pencil,
   Plus,
   ReceiptText,
   Save,
-  X,
   WalletCards,
 } from "lucide-react";
 
@@ -82,14 +80,6 @@ function fechaCorta(valor?: string | null) {
   return String(valor).split("T")[0];
 }
 
-function hoyLocalISO() {
-  const hoy = new Date();
-  const year = hoy.getFullYear();
-  const month = String(hoy.getMonth() + 1).padStart(2, "0");
-  const day = String(hoy.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 export default function CajaChicaPage() {
   const [gastos, setGastos] = useState<CajaChica[]>([]);
   const [fondos, setFondos] = useState<CajaChicaFondo[]>([]);
@@ -108,10 +98,6 @@ export default function CajaChicaPage() {
   const [responsable, setResponsable] = useState("");
   const [comprobante, setComprobante] = useState("");
   const [facturaArchivo, setFacturaArchivo] = useState<File | null>(null);
-
-  const [editandoGastoId, setEditandoGastoId] = useState<number | null>(null);
-  const [montoOriginalEdicion, setMontoOriginalEdicion] = useState(0);
-  const [facturaActualEdicion, setFacturaActualEdicion] = useState("");
 
   const [tipoFondo, setTipoFondo] = useState<"fondo_inicial" | "reposicion">(
     "fondo_inicial",
@@ -135,7 +121,7 @@ export default function CajaChicaPage() {
       return;
     }
 
-    const hoy = hoyLocalISO();
+    const hoy = new Date().toISOString().split("T")[0];
 
     setCondominioId(idGuardado);
     setCondominio(nombreGuardado || `Condominio ID ${idGuardado}`);
@@ -393,7 +379,7 @@ export default function CajaChicaPage() {
           "Fondo de caja chica y egreso bancario registrados correctamente.",
       );
 
-      const hoy = hoyLocalISO();
+      const hoy = new Date().toISOString().split("T")[0];
 
       setFechaFondo(hoy);
       setMontoFondo("");
@@ -509,48 +495,6 @@ export default function CajaChicaPage() {
     }
   }
 
-  function iniciarEdicionGasto(gasto: CajaChica) {
-    setEditandoGastoId(gasto.id);
-    setMontoOriginalEdicion(Number(gasto.monto || 0));
-    setFacturaActualEdicion(gasto.factura_url || "");
-
-    setFecha(fechaCorta(gasto.fecha));
-    setConcepto(gasto.concepto || "");
-    setDetalleGasto(gasto.detalle_gasto || "");
-    setMonto(String(Number(gasto.monto || 0)));
-    setResponsable(gasto.responsable || "");
-    setComprobante(gasto.comprobante || "");
-    setFacturaArchivo(null);
-
-    const inputFile = document.getElementById(
-      "facturaArchivo",
-    ) as HTMLInputElement | null;
-
-    if (inputFile) inputFile.value = "";
-
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function cancelarEdicionGasto() {
-    setEditandoGastoId(null);
-    setMontoOriginalEdicion(0);
-    setFacturaActualEdicion("");
-
-    setFecha(hoyLocalISO());
-    setConcepto("");
-    setDetalleGasto("");
-    setMonto("");
-    setResponsable("");
-    setComprobante("");
-    setFacturaArchivo(null);
-
-    const inputFile = document.getElementById(
-      "facturaArchivo",
-    ) as HTMLInputElement | null;
-
-    if (inputFile) inputFile.value = "";
-  }
-
   async function guardarGasto(e: React.FormEvent) {
     e.preventDefault();
 
@@ -561,22 +505,13 @@ export default function CajaChicaPage() {
 
     const montoNumerico = Number(monto || 0);
 
-    if (montoNumerico <= 0) {
-      alert("El monto del gasto debe ser mayor que cero.");
-      return;
-    }
-
-    const disponibleParaValidar =
-      disponibleCajaChica +
-      (editandoGastoId ? montoOriginalEdicion : 0);
-
-    if (montoNumerico > disponibleParaValidar) {
+    if (montoNumerico > disponibleCajaChica) {
       alert(
-        `No se puede ${editandoGastoId ? "modificar" : "registrar"} este gasto porque supera el disponible de caja chica.\n\nDisponible para esta operación: RD$ ${dinero(
-          disponibleParaValidar,
+        `No se puede registrar este gasto porque supera el disponible de caja chica.\n\nDisponible: RD$ ${dinero(
+          disponibleCajaChica
         )}\nMonto gasto: RD$ ${dinero(montoNumerico)}\nDiferencia: RD$ ${dinero(
-          montoNumerico - disponibleParaValidar,
-        )}`,
+          montoNumerico - disponibleCajaChica
+        )}`
       );
       return;
     }
@@ -584,57 +519,56 @@ export default function CajaChicaPage() {
     try {
       setGuardando(true);
 
-      let facturaUrl = facturaActualEdicion || "";
+      let facturaUrl = "";
 
       if (facturaArchivo) {
         facturaUrl = await subirFactura();
       }
 
-      const payload = {
-        condominio,
-        fecha,
-        concepto: concepto.trim(),
-        detalle_gasto: detalleGasto.trim(),
-        monto: montoNumerico,
-        responsable: responsable.trim(),
-        comprobante: comprobante.trim(),
-        factura_url: facturaUrl,
-        estado: "registrado",
-        condominio_id: Number(condominioId),
-      };
+      const { error } = await supabase.from("caja_chica").insert([
+        {
+          condominio,
+          fecha,
+          concepto,
+          detalle_gasto: detalleGasto,
+          monto: montoNumerico,
+          responsable,
+          comprobante,
+          factura_url: facturaUrl,
+          estado: "registrado",
+          condominio_id: Number(condominioId),
+        },
+      ]);
 
-      const respuesta = editandoGastoId
-        ? await supabase
-            .from("caja_chica")
-            .update(payload)
-            .eq("id", editandoGastoId)
-        : await supabase
-            .from("caja_chica")
-            .insert([payload]);
+      setGuardando(false);
 
-      if (respuesta.error) {
-        alert(
-          `${editandoGastoId ? "Error modificando" : "Error guardando"} gasto: ` +
-            respuesta.error.message,
-        );
+      if (error) {
+        alert("Error guardando gasto: " + error.message);
         return;
       }
 
-      alert(
-        editandoGastoId
-          ? "Gasto de caja chica modificado correctamente."
-          : "Gasto de caja chica registrado correctamente.",
-      );
+      alert("Gasto de caja chica registrado correctamente.");
 
-      cancelarEdicionGasto();
-      await cargarGastos(condominio);
+      const hoy = new Date().toISOString().split("T")[0];
+
+      setFecha(hoy);
+      setConcepto("");
+      setDetalleGasto("");
+      setMonto("");
+      setResponsable("");
+      setComprobante("");
+      setFacturaArchivo(null);
+
+      const inputFile = document.getElementById(
+        "facturaArchivo"
+      ) as HTMLInputElement | null;
+
+      if (inputFile) inputFile.value = "";
+
+      cargarGastos(condominio);
     } catch (err: any) {
-      alert(
-        err?.message ||
-          `Error ${editandoGastoId ? "modificando" : "guardando"} el gasto.`,
-      );
-    } finally {
       setGuardando(false);
+      alert("Error subiendo factura: " + err.message);
     }
   }
 
@@ -669,8 +603,6 @@ export default function CajaChicaPage() {
     0,
   );
   const disponibleCajaChica = totalFondos - totalGastos;
-  const disponibleOperacionGasto =
-    disponibleCajaChica + (editandoGastoId ? montoOriginalEdicion : 0);
 
   const ultimosGastos = useMemo(() => gastos.slice(0, 6), [gastos]);
   const ultimoFondo = fondos[0];
@@ -714,12 +646,8 @@ export default function CajaChicaPage() {
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <section className="xl:col-span-2">
           <SectionCard
-            title={editandoGastoId ? "Editar gasto" : "Registrar gasto"}
-            subtitle={
-              editandoGastoId
-                ? `Modificando gasto No. ${editandoGastoId}. Los cambios se guardarán sobre el mismo registro.`
-                : "Formulario principal para uso diario."
-            }
+            title="Registrar gasto"
+            subtitle="Formulario principal para uso diario."
             action={
               <div
                 className={`rounded-xl px-4 py-2 text-sm font-black ${
@@ -728,7 +656,7 @@ export default function CajaChicaPage() {
                     : "bg-red-50 text-red-700"
                 }`}
               >
-                Disponible: RD$ {dinero(disponibleOperacionGasto)}
+                Disponible: RD$ {dinero(disponibleCajaChica)}
               </div>
             }
           >
@@ -754,21 +682,20 @@ export default function CajaChicaPage() {
                   value={monto}
                   onChange={(e) => setMonto(e.target.value)}
                   className={`w-full rounded-xl border px-4 py-3 ${
-                    Number(monto || 0) > disponibleOperacionGasto
+                    Number(monto || 0) > disponibleCajaChica
                       ? "border-red-300 bg-red-50"
                       : ""
                   }`}
                   placeholder="0.00"
                 />
 
-                {Number(monto || 0) > disponibleOperacionGasto && (
+                {Number(monto || 0) > disponibleCajaChica && (
                   <div className="mt-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                     <p className="font-black">Monto supera el disponible</p>
                     <p className="mt-1">
-                      {editandoGastoId ? "Disponible para edición" : "Disponible"}: RD${" "}
-                  {dinero(disponibleOperacionGasto)} · Monto:
+                      Disponible: RD$ {dinero(disponibleCajaChica)} · Monto:
                       RD$ {dinero(Number(monto || 0))} · Diferencia: RD${" "}
-                      {dinero(Number(monto || 0) - disponibleOperacionGasto)}
+                      {dinero(Number(monto || 0) - disponibleCajaChica)}
                     </p>
                   </div>
                 )}
@@ -820,20 +747,6 @@ export default function CajaChicaPage() {
                   onChange={(e) => setFacturaArchivo(e.target.files?.[0] || null)}
                   className="w-full rounded-xl border bg-white px-4 py-3"
                 />
-
-                {editandoGastoId && facturaActualEdicion && !facturaArchivo && (
-                  <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-                    <span>Se conservará la factura actual si no selecciona un archivo nuevo.</span>
-                    <a
-                      href={facturaActualEdicion}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-black underline"
-                    >
-                      Ver actual
-                    </a>
-                  </div>
-                )}
               </div>
 
               <div className="md:col-span-2">
@@ -849,35 +762,15 @@ export default function CajaChicaPage() {
                 />
               </div>
 
-              <div className="md:col-span-2 flex flex-wrap gap-2">
+              <div className="md:col-span-2">
                 <button
                   type="submit"
                   disabled={guardando}
-                  className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 font-bold text-white disabled:opacity-50 ${
-                    editandoGastoId
-                      ? "bg-emerald-700 hover:bg-emerald-800"
-                      : "bg-blue-700 hover:bg-blue-800"
-                  }`}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:opacity-50"
                 >
                   <Save className="h-4 w-4" />
-                  {guardando
-                    ? "Guardando..."
-                    : editandoGastoId
-                      ? "Guardar cambios"
-                      : "Guardar gasto"}
+                  {guardando ? "Guardando..." : "Guardar gasto"}
                 </button>
-
-                {editandoGastoId && (
-                  <button
-                    type="button"
-                    onClick={cancelarEdicionGasto}
-                    disabled={guardando}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border bg-white px-5 py-3 font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    <X className="h-4 w-4" />
-                    Cancelar edición
-                  </button>
-                )}
               </div>
             </form>
           </SectionCard>
@@ -910,7 +803,7 @@ export default function CajaChicaPage() {
 
           <SectionCard
             title="Fondo de Caja"
-            subtitle="Registra la entrada a caja chica y el egreso correspondiente en Control Bancario. Los fondos ya aplicados al banco no se editan directamente; deben manejarse mediante una corrección controlada."
+            subtitle="Registra la entrada a caja chica y el egreso correspondiente en Control Bancario."
           >
             {fondoInicialPendienteBanco && (
               <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
@@ -1136,7 +1029,6 @@ export default function CajaChicaPage() {
                 <th className="px-4 py-3 text-left">Responsable</th>
                 <th className="px-4 py-3 text-right">Monto</th>
                 <th className="px-4 py-3 text-center">Factura</th>
-                <th className="px-4 py-3 text-center">Editar</th>
                 <th className="px-4 py-3 text-center">Adjuntar / Cambiar</th>
                 <th className="px-4 py-3 text-center">Reporte</th>
               </tr>
@@ -1172,18 +1064,6 @@ export default function CajaChicaPage() {
                       <span className="text-xs text-slate-400">Sin factura</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      type="button"
-                      onClick={() => iniciarEdicionGasto(g)}
-                      disabled={guardando}
-                      className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1 text-xs font-bold text-white hover:bg-amber-600 disabled:opacity-50"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      Editar
-                    </button>
-                  </td>
-
                   <td className="px-4 py-3 text-center">
                     <label className="inline-block cursor-pointer rounded-lg bg-blue-700 px-3 py-1 text-xs font-bold text-white hover:bg-blue-800">
                       {g.factura_url ? "Cambiar factura" : "Adjuntar factura"}

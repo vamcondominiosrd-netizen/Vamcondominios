@@ -319,26 +319,11 @@ export default function ReporteSolicitudPagoPage() {
           body {
             width: 8.5in;
             height: 11in;
-            max-height: 11in;
             margin: 0;
             padding: 0;
-            overflow: hidden !important;
+            overflow: hidden;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
-          }
-
-          main {
-            width: 8.5in !important;
-            height: 11in !important;
-            min-height: 0 !important;
-            max-height: 11in !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-            break-after: avoid-page !important;
-            page-break-after: avoid !important;
           }
 
           * {
@@ -351,9 +336,9 @@ export default function ReporteSolicitudPagoPage() {
 
           .pagina-carta {
             width: 8.5in !important;
-            height: 10.95in !important;
-            min-height: 10.95in !important;
-            max-height: 10.95in !important;
+            height: 11in !important;
+            min-height: 11in !important;
+            max-height: 11in !important;
             padding-top: 0.32in !important;
             padding-right: 0.42in !important;
             padding-bottom: 0.32in !important;
@@ -372,20 +357,20 @@ export default function ReporteSolicitudPagoPage() {
           }
 
           .espacio-blanco-final {
-            height: 3.88in !important;
-            min-height: 3.88in !important;
-            max-height: 3.88in !important;
+            height: 4.03in !important;
+            min-height: 4.03in !important;
+            max-height: 4.03in !important;
             overflow: hidden !important;
           }
 
           .cheque-final {
-            height: 3.75in !important;
-            max-height: 3.75in !important;
+            height: 3.88in !important;
+            max-height: 3.88in !important;
             overflow: hidden !important;
           }
 
           .imagen-cheque-final {
-            max-height: 3.05in !important;
+            max-height: 3.15in !important;
             max-width: 7.2in !important;
             object-fit: contain !important;
           }
@@ -605,7 +590,7 @@ export default function ReporteSolicitudPagoPage() {
 
         </div>
 
-        <div className="espacio-blanco-final h-[3.88in]">
+        <div className="espacio-blanco-final h-[4.03in]">
           {chequeUrlFinal ? (
             <div className="cheque-final border rounded-lg p-2 mt-2">
               <div className="flex items-center justify-between border-b pb-1 mb-2">

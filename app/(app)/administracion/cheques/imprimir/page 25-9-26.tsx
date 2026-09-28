@@ -48,7 +48,7 @@ type DatosChequePago = {
 };
 
 const CONFIG_INICIAL: Configuracion = {
-  // LOTE 9 - CALIBRACIÓN FINAL APROBADA con Epson L4160 + cheque Banco Popular.
+  // Calibración física validada con Epson L4160 + cheque Banco Popular.
   fecha: { x: 147, y: 30.5, fontSize: 18 },
   beneficiario: { x: -11, y: 53.5, fontSize: 16 },
   monto: { x: 128, y: 52.5, fontSize: 16 },
@@ -67,8 +67,8 @@ const AJUSTES_HORIZONTALES_INICIALES: AjustesHorizontales = {
 const CHEQUE_ANCHO_MM = 215;
 const CHEQUE_ALTO_MM = 95;
 
-const PLANTILLA_ID = "BANCO_POPULAR_LOTE9_EPSON_L4160_215X95_FINAL_V2";
-const PLANTILLA_NOMBRE = "Banco Popular · Lote 9 · Epson L4160 · 215 × 95 mm";
+const PLANTILLA_ID = "BANCO_POPULAR_EPSON_L4160_215X95_V1";
+const PLANTILLA_NOMBRE = "Banco Popular · Epson L4160";
 const PLANTILLA_STORAGE_KEY = `vam-cheque-plantilla:${PLANTILLA_ID}`;
 const DATOS_PAGO_STORAGE_KEY = "vam_cheque_impresion_actual";
 
@@ -657,7 +657,7 @@ export default function PruebaImpresionChequesPage() {
   const copiarConfiguracion = async () => {
     const payload = {
       banco: "Banco Popular",
-      plantilla: "Banco Popular - Lote 9 - 215x95 - FINAL",
+      plantilla: "Popular - Colinas del Oeste",
       ancho_mm: CHEQUE_ANCHO_MM,
       alto_mm: CHEQUE_ALTO_MM,
       ...config,

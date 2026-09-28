@@ -319,26 +319,11 @@ export default function ReporteSolicitudPagoPage() {
           body {
             width: 8.5in;
             height: 11in;
-            max-height: 11in;
             margin: 0;
             padding: 0;
-            overflow: hidden !important;
+            overflow: hidden;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
-          }
-
-          main {
-            width: 8.5in !important;
-            height: 11in !important;
-            min-height: 0 !important;
-            max-height: 11in !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-            break-after: avoid-page !important;
-            page-break-after: avoid !important;
           }
 
           * {
@@ -351,9 +336,9 @@ export default function ReporteSolicitudPagoPage() {
 
           .pagina-carta {
             width: 8.5in !important;
-            height: 10.95in !important;
-            min-height: 10.95in !important;
-            max-height: 10.95in !important;
+            height: 11in !important;
+            min-height: 11in !important;
+            max-height: 11in !important;
             padding-top: 0.32in !important;
             padding-right: 0.42in !important;
             padding-bottom: 0.32in !important;
@@ -366,27 +351,27 @@ export default function ReporteSolicitudPagoPage() {
           }
 
           .contenido-reporte {
-            height: 6.25in !important;
-            max-height: 6.25in !important;
+            height: 7.28in !important;
+            max-height: 7.28in !important;
             overflow: visible !important;
           }
 
           .espacio-blanco-final {
-            height: 3.88in !important;
-            min-height: 3.88in !important;
-            max-height: 3.88in !important;
+            height: 3in !important;
+            min-height: 3in !important;
+            max-height: 3in !important;
             overflow: hidden !important;
           }
 
           .cheque-final {
-            height: 3.75in !important;
-            max-height: 3.75in !important;
+            height: 2.85in !important;
+            max-height: 2.85in !important;
             overflow: hidden !important;
           }
 
           .imagen-cheque-final {
-            max-height: 3.05in !important;
-            max-width: 7.2in !important;
+            max-height: 2.15in !important;
+            max-width: 6.8in !important;
             object-fit: contain !important;
           }
 
@@ -603,9 +588,37 @@ export default function ReporteSolicitudPagoPage() {
             </div>
           </div>
 
+          <div className="border rounded-lg p-2 mt-2">
+            <h3 className="font-black uppercase border-b pb-1 mb-1">
+              Datos del pago
+            </h3>
+
+            <div className="grid grid-cols-4 gap-x-2 gap-y-1">
+              <p className="font-bold">Pagado:</p>
+              <p>{pagadoFinal ? "Sí" : "No"}</p>
+
+              <p className="font-bold">Fecha pago:</p>
+              <p>{formatoFecha(fechaPagoFinal)}</p>
+
+              <p className="font-bold">No. cheque/ref.:</p>
+              <p>{numeroChequeFinal}</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6 mt-3">
+              <div>
+                <p className="font-bold">Recibido por:</p>
+                <div className="border-b border-slate-900 h-5" />
+              </div>
+
+              <div>
+                <p className="font-bold">Firma recibido:</p>
+                <div className="border-b border-slate-900 h-5" />
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="espacio-blanco-final h-[3.88in]">
+        <div className="espacio-blanco-final h-[3in]">
           {chequeUrlFinal ? (
             <div className="cheque-final border rounded-lg p-2 mt-2">
               <div className="flex items-center justify-between border-b pb-1 mb-2">

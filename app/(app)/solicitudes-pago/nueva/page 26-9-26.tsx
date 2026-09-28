@@ -135,11 +135,6 @@ export default function NuevaSolicitudPagoPage() {
   const [metodoPago, setMetodoPago] = useState("");
   const [cuentaBanco, setCuentaBanco] = useState("");
   const [prioridad, setPrioridad] = useState("Normal");
-
-  // Trazabilidad documental de la solicitud.
-  const [numeroCotizacion, setNumeroCotizacion] = useState("");
-  const [fechaCotizacion, setFechaCotizacion] = useState("");
-  const [cotizacionArchivo, setCotizacionArchivo] = useState<File | null>(null);
   const [soporteArchivo, setSoporteArchivo] = useState<File | null>(null);
   const [alcanceGasto, setAlcanceGasto] = useState<
     "" | "COMUN" | "EDIFICIOS"
@@ -825,22 +820,21 @@ export default function NuevaSolicitudPagoPage() {
     }
   }
 
-  async function subirDocumentoSolicitud(
-    archivo: File,
-    solicitudId: number,
-    tipoDocumento: "COTIZACION" | "FACTURA" | "SOPORTE",
-  ) {
-    const extension = archivo.name.split(".").pop() || "file";
+  async function subirSoporte() {
+    if (!soporteArchivo) {
+      return { publicUrl: "", rutaArchivo: "" };
+    }
+
+    const extension = soporteArchivo.name.split(".").pop() || "file";
     const nombreArchivo = `${Date.now()}-${Math.random()
       .toString(36)
       .substring(2)}.${extension}`;
 
-    const carpetaTipo = tipoDocumento.toLowerCase();
-    const rutaArchivo = `${condominioId || "general"}/solicitudes/${solicitudId}/${carpetaTipo}/${nombreArchivo}`;
+    const rutaArchivo = `${condominioId || "general"}/${nombreArchivo}`;
 
     const { error } = await supabase.storage
       .from("soportes-solicitudes-pago")
-      .upload(rutaArchivo, archivo, { upsert: false });
+      .upload(rutaArchivo, soporteArchivo, { upsert: false });
 
     if (error) throw new Error(error.message);
 
@@ -848,56 +842,7 @@ export default function NuevaSolicitudPagoPage() {
       .from("soportes-solicitudes-pago")
       .getPublicUrl(rutaArchivo);
 
-    return {
-      publicUrl: data.publicUrl,
-      rutaArchivo,
-      nombreArchivoOriginal: archivo.name,
-    };
-  }
-
-  async function registrarDocumentoSolicitud(params: {
-    solicitudId: number;
-    tipoDocumento: "COTIZACION" | "FACTURA" | "SOPORTE";
-    numeroDocumento?: string;
-    fechaDocumento?: string;
-    archivo: File;
-    userEmail?: string | null;
-  }) {
-    const archivoSubido = await subirDocumentoSolicitud(
-      params.archivo,
-      params.solicitudId,
-      params.tipoDocumento,
-    );
-
-    const { error } = await supabase
-      .from("solicitudes_pago_documentos")
-      .insert({
-        solicitud_pago_id: params.solicitudId,
-        tipo_documento: params.tipoDocumento,
-        numero_documento: params.numeroDocumento?.trim() || null,
-        fecha_documento: params.fechaDocumento || null,
-        nombre_archivo: archivoSubido.nombreArchivoOriginal,
-        ruta_storage: archivoSubido.rutaArchivo,
-        archivo_url: archivoSubido.publicUrl,
-        version: 1,
-        estado: "ACTIVO",
-        creado_por:
-          params.userEmail ||
-          localStorage.getItem("usuario_nombre") ||
-          "Usuario del sistema",
-      });
-
-    if (error) {
-      await supabase.storage
-        .from("soportes-solicitudes-pago")
-        .remove([archivoSubido.rutaArchivo]);
-
-      throw new Error(
-        `No se pudo registrar el documento ${params.tipoDocumento}: ${error.message}`,
-      );
-    }
-
-    return archivoSubido;
+    return { publicUrl: data.publicUrl, rutaArchivo };
   }
 
   async function obtenerNumeroSolicitud() {
@@ -928,9 +873,6 @@ export default function NuevaSolicitudPagoPage() {
     setMetodoPago("");
     setCuentaBanco("");
     setPrioridad("Normal");
-    setNumeroCotizacion("");
-    setFechaCotizacion("");
-    setCotizacionArchivo(null);
     setSoporteArchivo(null);
     setAlcanceGasto("");
     setDistribucionEdificios([]);
@@ -942,11 +884,6 @@ export default function NuevaSolicitudPagoPage() {
     setTotalReposicionesCajaChica(0);
     setDisponibleRealCajaChica(0);
     setMensajeCajaChica("");
-
-    const inputCotizacion = document.getElementById(
-      "cotizacionSolicitudPago",
-    ) as HTMLInputElement | null;
-    if (inputCotizacion) inputCotizacion.value = "";
 
     const inputFile = document.getElementById(
       "soporteSolicitudPago",
@@ -973,12 +910,17 @@ export default function NuevaSolicitudPagoPage() {
     }
 
     let nuevaSolicitudIdParaRollback = 0;
-    const rutasDocumentosSubidos: string[] = [];
+    let rutaSoporteSubido = "";
 
     try {
       setGuardando(true);
 
       const numeroSolicitud = await obtenerNumeroSolicitud();
+      const soporte = soporteArchivo
+        ? await subirSoporte()
+        : { publicUrl: "", rutaArchivo: "" };
+      const soporteUrl = soporte.publicUrl;
+      rutaSoporteSubido = soporte.rutaArchivo;
 
       const {
         data: { user },
@@ -1003,7 +945,7 @@ export default function NuevaSolicitudPagoPage() {
             ncf: ncf.trim(),
             metodo_pago: metodoPago,
             cuenta_banco: cuentaBanco.trim(),
-            soporte_url: "",
+            soporte_url: soporteUrl,
             prioridad,
             estado: "Pendiente aprobación tesorero",
             created_by:
@@ -1019,50 +961,6 @@ export default function NuevaSolicitudPagoPage() {
 
       const nuevaSolicitudId = Number(solicitudCreada?.id || 0);
       nuevaSolicitudIdParaRollback = nuevaSolicitudId;
-
-      let soporteLegacyUrl = "";
-
-      if (cotizacionArchivo) {
-        const cotizacion = await registrarDocumentoSolicitud({
-          solicitudId: nuevaSolicitudId,
-          tipoDocumento: "COTIZACION",
-          numeroDocumento: numeroCotizacion,
-          fechaDocumento: fechaCotizacion,
-          archivo: cotizacionArchivo,
-          userEmail: user?.email,
-        });
-
-        rutasDocumentosSubidos.push(cotizacion.rutaArchivo);
-        soporteLegacyUrl = cotizacion.publicUrl;
-      }
-
-      if (soporteArchivo) {
-        const factura = await registrarDocumentoSolicitud({
-          solicitudId: nuevaSolicitudId,
-          tipoDocumento: noFactura.trim() ? "FACTURA" : "SOPORTE",
-          numeroDocumento: noFactura,
-          fechaDocumento: "",
-          archivo: soporteArchivo,
-          userEmail: user?.email,
-        });
-
-        rutasDocumentosSubidos.push(factura.rutaArchivo);
-        soporteLegacyUrl = factura.publicUrl;
-      }
-
-      if (soporteLegacyUrl) {
-        const { error: soporteLegacyError } = await supabase
-          .from("solicitudes_pago")
-          .update({ soporte_url: soporteLegacyUrl })
-          .eq("id", nuevaSolicitudId);
-
-        if (soporteLegacyError) {
-          throw new Error(
-            "No se pudo actualizar el soporte principal de la solicitud: " +
-              soporteLegacyError.message,
-          );
-        }
-      }
 
       const distribucionRpc =
         alcanceGasto === "EDIFICIOS"
@@ -1088,7 +986,7 @@ export default function NuevaSolicitudPagoPage() {
       }
 
       nuevaSolicitudIdParaRollback = 0;
-      rutasDocumentosSubidos.length = 0;
+      rutaSoporteSubido = "";
 
       setSolicitudCreadaId(nuevaSolicitudId || null);
       setSolicitudCreadaNumero(
@@ -1121,10 +1019,10 @@ export default function NuevaSolicitudPagoPage() {
           .eq("id", nuevaSolicitudIdParaRollback);
       }
 
-      if (rutasDocumentosSubidos.length > 0) {
+      if (rutaSoporteSubido) {
         await supabase.storage
           .from("soportes-solicitudes-pago")
-          .remove(rutasDocumentosSubidos);
+          .remove([rutaSoporteSubido]);
       }
 
       setAviso({
@@ -1165,7 +1063,7 @@ export default function NuevaSolicitudPagoPage() {
 
       <ModuleToolbar
         title="Nueva Solicitud de Pago"
-        subtitle="Registra la solicitud, su cotización y/o factura para mantener trazabilidad documental antes de la aprobación."
+        subtitle="Registra la factura o soporte del proveedor para aprobación del tesorero y presidente."
         icon={ShieldCheck}
         actions={
           <ModuleActions
@@ -1952,89 +1850,10 @@ export default function NuevaSolicitudPagoPage() {
             </SectionCard>
 
             <SectionCard
-              title="Documentos y observación"
-              subtitle="Registre la cotización cuando aplique y la factura cuando sea recibida. Cada documento queda identificado por separado para mantener trazabilidad."
+              title="Soporte y observación"
+              subtitle="Adjunte factura, cotización o soporte del proveedor. El cheque se carga luego al procesar el pago."
             >
               <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-                <div className="md:col-span-12">
-                  <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
-                    <div className="flex items-start gap-3">
-                      <FileText className="mt-0.5 h-5 w-5 shrink-0 text-blue-700" />
-                      <div>
-                        <p className="font-black text-blue-900">
-                          Cotización del servicio
-                        </p>
-                        <p className="mt-1 text-xs font-semibold text-blue-800">
-                          Opcional. Úsela cuando la solicitud se origine con una cotización y la factura sea recibida posteriormente.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-12">
-                      <div className="md:col-span-3">
-                        <label className="mb-1 block text-sm font-bold text-slate-700">
-                          No. cotización
-                        </label>
-                        <input
-                          type="text"
-                          value={numeroCotizacion}
-                          onChange={(e) => setNumeroCotizacion(e.target.value)}
-                          className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"
-                          placeholder="Ej. COT-2026-015"
-                        />
-                      </div>
-
-                      <div className="md:col-span-3">
-                        <label className="mb-1 block text-sm font-bold text-slate-700">
-                          Fecha cotización
-                        </label>
-                        <input
-                          type="date"
-                          value={fechaCotizacion}
-                          onChange={(e) => setFechaCotizacion(e.target.value)}
-                          className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"
-                        />
-                      </div>
-
-                      <div className="md:col-span-6">
-                        <label className="mb-1 flex items-center gap-2 text-sm font-bold text-slate-700">
-                          <FileUp className="h-4 w-4" />
-                          Archivo de cotización
-                        </label>
-                        <input
-                          id="cotizacionSolicitudPago"
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png,.webp"
-                          onChange={(e) =>
-                            setCotizacionArchivo(e.target.files?.[0] || null)
-                          }
-                          className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"
-                        />
-                      </div>
-                    </div>
-
-                    {cotizacionArchivo && (
-                      <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
-                        <span className="truncate">{cotizacionArchivo.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCotizacionArchivo(null);
-                            const inputFile = document.getElementById(
-                              "cotizacionSolicitudPago",
-                            ) as HTMLInputElement | null;
-                            if (inputFile) inputFile.value = "";
-                          }}
-                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-red-700 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Quitar
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
                 <div className="md:col-span-5">
                   <label className="mb-1 flex items-center gap-2 text-sm font-bold text-slate-700">
                     <FileUp className="h-4 w-4" />
@@ -2050,7 +1869,7 @@ export default function NuevaSolicitudPagoPage() {
                     className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm"
                   />
                   <p className="mt-1 text-xs font-semibold text-slate-500">
-                    PDF o imagen. Si indica No. factura, este archivo se registra como FACTURA; de lo contrario queda como SOPORTE.
+                    PDF o imagen. Este soporte queda asociado a la solicitud.
                   </p>
 
                   {soporteArchivo && (
@@ -2124,13 +1943,6 @@ export default function NuevaSolicitudPagoPage() {
                     value={edificiosSeleccionadosTexto() || "Pendiente"}
                   />
                 )}
-                <ResumenLinea
-                  label="Cotización"
-                  value={
-                    numeroCotizacion ||
-                    (cotizacionArchivo ? "Archivo adjunto" : "No indicada")
-                  }
-                />
                 <ResumenLinea
                   label="Factura"
                   value={noFactura || "No indicada"}
