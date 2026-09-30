@@ -62,7 +62,6 @@ type Gasto = {
   no_factura: string | null;
   tiene_factura?: boolean;
   tiene_cheque?: boolean;
-  tiene_recibo?: boolean;
   numero_cheque: string | null;
   fecha_pago: string | null;
 };
@@ -104,9 +103,6 @@ const esPeriodoCerrado = (estado?: string | null) =>
       .trim()
       .toLowerCase()
   );
-
-const API_SOPORTES_GASTO = "/api/propietarios/soportes-gastos";
-const MODULO_VERSION = "2.3";
 
 function extraerRespuesta(data: unknown): RespuestaFinanciera {
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -376,88 +372,6 @@ export default function TransparenciaFinancieraPage() {
       setConsultando(false);
     }
   }
-
-  async function abrirSoporte(
-    gasto: Gasto,
-    tipo: "factura" | "cheque" | "recibo"
-  ) {
-    if (!propietario || !gasto?.id) return;
-
-    const token = leerToken();
-
-    if (!token) {
-      sesionInvalida();
-      return;
-    }
-
-    setError("");
-
-    const ventana = window.open("", "_blank");
-
-    try {
-      const params = new URLSearchParams({
-        gasto_id: String(gasto.id),
-        condominio_id: String(propietario.condominio_id),
-        unidad_id: String(propietario.unidad_id),
-        tipo,
-      });
-
-      const response = await fetch(
-        `${API_SOPORTES_GASTO}?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        }
-      );
-
-      const resultado = await response.json().catch(() => ({}));
-
-      if (
-        response.status === 401 ||
-        [
-          "SESION_INVALIDA",
-          "SESION_VENCIDA",
-          "CUENTA_INACTIVA",
-          "CAMBIO_CLAVE_PENDIENTE",
-          "SIN_ACCESO",
-        ].includes(String(resultado?.codigo || ""))
-      ) {
-        if (ventana) ventana.close();
-
-        sesionInvalida(
-          resultado?.mensaje ||
-            "La sesión ha vencido. Inicie sesión nuevamente."
-        );
-        return;
-      }
-
-      if (!response.ok || resultado?.ok !== true || !resultado?.url) {
-        if (ventana) ventana.close();
-
-        setError(
-          resultado?.mensaje ||
-            "El documento no está disponible."
-        );
-        return;
-      }
-
-      if (ventana) {
-        ventana.opener = null;
-        ventana.location.href = resultado.url;
-      } else {
-        window.location.href = resultado.url;
-      }
-    } catch (e) {
-      if (ventana) ventana.close();
-
-      console.error("Error abriendo soporte del gasto:", e);
-      setError("No se pudo abrir el documento en este momento.");
-    }
-  }
-
 
   const periodos = useMemo(
     () =>
@@ -949,8 +863,7 @@ export default function TransparenciaFinancieraPage() {
                         />
 
                         {g.tiene_factura ||
-                        g.tiene_cheque ||
-                        g.tiene_recibo
+                        g.tiene_cheque
                           ? "Ver detalle y soportes"
                           : "Ver detalle"}
 
@@ -962,41 +875,7 @@ export default function TransparenciaFinancieraPage() {
 
                     </Link>
 
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => abrirSoporte(g, "factura")}
-                        disabled={!g.tiene_factura}
-                        className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-2 py-2 text-[10px] font-extrabold text-blue-800 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
-                      >
-                        <FileText size={15} />
-                        Factura
-                      </button>
 
-                      <button
-                        type="button"
-                        onClick={() => abrirSoporte(g, "cheque")}
-                        disabled={!g.tiene_cheque}
-                        className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-2 py-2 text-[10px] font-extrabold text-emerald-800 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
-                      >
-                        <Landmark size={15} />
-                        Cheque
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => abrirSoporte(g, "recibo")}
-                        disabled={!g.tiene_recibo}
-                        className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border border-violet-200 bg-violet-50 px-2 py-2 text-[10px] font-extrabold text-violet-800 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
-                      >
-                        <ReceiptText size={15} />
-                        Recibo
-                      </button>
-                    </div>
-
-                    <p className="text-[9px] leading-4 text-slate-400">
-                      Los documentos en gris no están vinculados a este gasto.
-                    </p>
 
                   </div>
 
@@ -1011,7 +890,7 @@ export default function TransparenciaFinancieraPage() {
         </section>
 
         <p className="pb-2 text-center text-[9px] text-slate-400">
-          Transparencia financiera · v2.3
+          Transparencia financiera · v2.2
         </p>
 
       </div>

@@ -46,7 +46,6 @@ type Gasto = {
   tiene_factura?: boolean;
   estado: string | null;
   tiene_cheque?: boolean;
-  tiene_recibo?: boolean;
   numero_cheque: string | null;
   fecha_pago: string | null;
   pagado: boolean | null;
@@ -63,7 +62,7 @@ type RespuestaDetalleGasto = {
 
 const RPC_DETALLE_GASTO = "vam_propietario_detalle_gasto";
 const API_SOPORTES_GASTO = "/api/propietarios/soportes-gastos";
-const MODULO_VERSION = "2.1";
+const MODULO_VERSION = "2.0";
 
 function normalizarRespuesta(data: unknown): RespuestaDetalleGasto {
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -231,7 +230,7 @@ export default function DetalleGastoPropietarioPage() {
     }
   }
 
-  async function abrirSoporte(tipo: "factura" | "cheque" | "recibo") {
+  async function abrirSoporte(tipo: "factura" | "cheque") {
     if (!propietario || !gasto?.id) return;
 
     const token = String(
@@ -511,23 +510,7 @@ export default function DetalleGastoPropietarioPage() {
               </button>
             )}
 
-            {gasto.tiene_recibo && (
-              <button
-                type="button"
-                onClick={() => abrirSoporte("recibo")}
-                className="flex h-11 w-full items-center justify-between rounded-xl border border-violet-200 bg-violet-50 px-3 text-xs font-extrabold text-violet-800"
-              >
-                <span className="flex items-center gap-2">
-                  <ReceiptText size={16} />
-                  Ver recibo del suplidor
-                </span>
-                <ExternalLink size={14} />
-              </button>
-            )}
-
-            {!gasto.tiene_factura &&
-              !gasto.tiene_cheque &&
-              !gasto.tiene_recibo && (
+            {!gasto.tiene_factura && !gasto.tiene_cheque && (
               <div className="rounded-xl bg-slate-100 px-3 py-4 text-center text-xs text-slate-500">
                 Este gasto no tiene documentos anexos disponibles.
               </div>

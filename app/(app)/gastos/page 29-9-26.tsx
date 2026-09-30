@@ -618,11 +618,7 @@ export default function GastosPage() {
           mime_type: archivoDocumento.type || null,
           tamano_bytes: archivoDocumento.size,
           observaciones: documentoForm.observaciones.trim() || null,
-          visible_propietarios: [
-            "RECIBO_SUPLIDOR",
-            "FACTURA_PAGADA",
-            "CERTIFICACION_PAGO",
-          ].includes(documentoForm.tipo_documento),
+          visible_propietarios: false,
           es_principal: false,
           estado: "ACTIVO",
         })

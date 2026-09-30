@@ -8,21 +8,13 @@ const BUCKET = "gastos-documentos";
 
 type TipoSoporte = "factura" | "cheque" | "recibo";
 
-const TIPOS_RECIBO = [
-  "RECIBO_SUPLIDOR",
-  "RECIBO",
-  "RECIBO_PAGO",
-  "CONSTANCIA_PAGO",
-  "FACTURA_PAGADA",
-  "CERTIFICACION_PAGO",
-];
-
 function getAdminClient() {
   const url =
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
     process.env.SUPABASE_URL;
 
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !serviceRoleKey) {
     throw new Error(
@@ -69,8 +61,51 @@ function respuestaRpc(data: unknown) {
   return {};
 }
 
+function primerTexto(
+  row: Record<string, unknown>,
+  campos: string[]
+) {
+  for (const campo of campos) {
+    const valor = String(row[campo] ?? "").trim();
+    if (valor) return valor;
+  }
+
+  return "";
+}
+
+function valorSoporte(
+  row: Record<string, unknown>,
+  tipo: TipoSoporte
+) {
+  if (tipo === "factura") {
+    return primerTexto(row, [
+      "factura_url",
+      "factura_path",
+      "factura_documento_url",
+      "factura",
+    ]);
+  }
+
+  if (tipo === "cheque") {
+    return primerTexto(row, [
+      "cheque_url",
+      "cheque_path",
+      "cheque_documento_url",
+      "cheque",
+    ]);
+  }
+
+  return primerTexto(row, [
+    "recibo_url",
+    "recibo_path",
+    "recibo_documento_url",
+    "recibo_pago_url",
+    "recibo",
+  ]);
+}
+
 function extraerRutaStorage(valor: string) {
-  const texto = String(valor || "").trim();
+  const texto = valor.trim();
 
   if (!texto) return "";
 
@@ -99,30 +134,6 @@ function extraerRutaStorage(valor: string) {
     }
   } catch {
     return "";
-  }
-
-  return "";
-}
-
-async function urlSegura(
-  supabase: ReturnType<typeof getAdminClient>,
-  almacenado: string
-) {
-  const ruta = extraerRutaStorage(almacenado);
-
-  if (ruta) {
-    const { data, error } = await supabase.storage
-      .from(BUCKET)
-      .createSignedUrl(ruta, 600);
-
-    if (!error && data?.signedUrl) {
-      return data.signedUrl;
-    }
-  }
-
-  // Compatibilidad con archivos históricos externos/públicos.
-  if (/^https?:\/\//i.test(almacenado)) {
-    return almacenado;
   }
 
   return "";
@@ -177,7 +188,6 @@ export async function GET(request: NextRequest) {
 
     const supabase = getAdminClient();
 
-    // Revalidar propietario + unidad + gasto + periodo cerrado.
     const { data: accesoData, error: accesoError } =
       await supabase.rpc("vam_propietario_detalle_gasto", {
         p_token: token,
@@ -187,8 +197,6 @@ export async function GET(request: NextRequest) {
       });
 
     if (accesoError) {
-      console.error("RPC vam_propietario_detalle_gasto:", accesoError);
-
       return NextResponse.json(
         {
           ok: false,
@@ -226,116 +234,92 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    let almacenado = "";
+    // Solo en servidor. No se devuelve la fila al navegador.
+    const { data: gasto, error: gastoError } = await supabase
+      .from("gastos")
+      .select("*")
+      .eq("id", gastoId)
+      .eq("condominio_id", condominioId)
+      .maybeSingle();
 
-    if (tipo === "recibo") {
-      // FUENTE REAL DEL RECIBO:
-      // gastos_documentos.archivo_url
-      // bucket privado: gastos-documentos
-      const { data: recibo, error: reciboError } = await supabase
-        .from("gastos_documentos")
-        .select(
-          "id,gasto_id,tipo_documento,archivo_url,visible_propietarios,estado,created_at"
-        )
-        .eq("gasto_id", gastoId)
-        .eq("condominio_id", condominioId)
-        .eq("estado", "ACTIVO")
-        .eq("visible_propietarios", true)
-        .in("tipo_documento", TIPOS_RECIBO)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (reciboError) {
-        console.error("Error consultando recibo del gasto:", reciboError);
-
-        return NextResponse.json(
-          {
-            ok: false,
-            codigo: "ERROR_DOCUMENTO",
-            mensaje: "No se pudo consultar el recibo del gasto.",
-          },
-          { status: 500 }
-        );
-      }
-
-      if (!recibo?.archivo_url) {
-        return NextResponse.json(
-          {
-            ok: false,
-            codigo: "RECIBO_NO_DISPONIBLE",
-            mensaje:
-              "Este gasto no tiene un recibo publicado para propietarios.",
-          },
-          { status: 404 }
-        );
-      }
-
-      almacenado = String(recibo.archivo_url).trim();
-    } else {
-      const { data: gasto, error: gastoError } = await supabase
-        .from("gastos")
-        .select("id,condominio_id,factura_url,cheque_url")
-        .eq("id", gastoId)
-        .eq("condominio_id", condominioId)
-        .maybeSingle();
-
-      if (gastoError || !gasto) {
-        return NextResponse.json(
-          {
-            ok: false,
-            codigo: "DOCUMENTO_NO_DISPONIBLE",
-            mensaje: "El documento no está disponible.",
-          },
-          { status: 404 }
-        );
-      }
-
-      almacenado =
-        tipo === "factura"
-          ? String(gasto.factura_url || "").trim()
-          : String(gasto.cheque_url || "").trim();
-
-      if (!almacenado) {
-        return NextResponse.json(
-          {
-            ok: false,
-            codigo: "DOCUMENTO_NO_DISPONIBLE",
-            mensaje:
-              tipo === "factura"
-                ? "Este gasto no tiene factura disponible."
-                : "Este gasto no tiene cheque disponible.",
-          },
-          { status: 404 }
-        );
-      }
-    }
-
-    const url = await urlSegura(supabase, almacenado);
-
-    if (!url) {
+    if (gastoError || !gasto) {
       return NextResponse.json(
         {
           ok: false,
           codigo: "DOCUMENTO_NO_DISPONIBLE",
-          mensaje: "No se pudo abrir el documento.",
+          mensaje: "El documento no está disponible.",
         },
         { status: 404 }
       );
     }
 
+    const almacenado = valorSoporte(
+      gasto as Record<string, unknown>,
+      tipo
+    );
+
+    if (!almacenado) {
+      const etiqueta =
+        tipo === "factura"
+          ? "factura"
+          : tipo === "cheque"
+          ? "cheque o comprobante"
+          : "recibo";
+
+      return NextResponse.json(
+        {
+          ok: false,
+          codigo: "SIN_DOCUMENTO",
+          mensaje: `Este gasto no tiene ${etiqueta} disponible.`,
+        },
+        { status: 404 }
+      );
+    }
+
+    const ruta = extraerRutaStorage(almacenado);
+
+    if (ruta) {
+      const { data: signed, error: signedError } =
+        await supabase.storage
+          .from(BUCKET)
+          .createSignedUrl(ruta, 600);
+
+      if (!signedError && signed?.signedUrl) {
+        return NextResponse.json(
+          {
+            ok: true,
+            codigo: "OK",
+            url: signed.signedUrl,
+          },
+          {
+            status: 200,
+            headers: { "Cache-Control": "no-store" },
+          }
+        );
+      }
+    }
+
+    if (/^https?:\/\//i.test(almacenado)) {
+      return NextResponse.json(
+        {
+          ok: true,
+          codigo: "OK",
+          url: almacenado,
+        },
+        {
+          status: 200,
+          headers: { "Cache-Control": "no-store" },
+        }
+      );
+    }
+
     return NextResponse.json(
       {
-        ok: true,
-        codigo: "OK",
-        url,
+        ok: false,
+        codigo: "DOCUMENTO_NO_DISPONIBLE",
+        mensaje: "No se pudo abrir el documento.",
       },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store",
-        },
-      }
+      { status: 404 }
     );
   } catch (error) {
     console.error("GET soporte gasto propietario:", error);

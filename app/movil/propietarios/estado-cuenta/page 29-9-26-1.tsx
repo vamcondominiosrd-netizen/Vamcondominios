@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
-import { ArrowLeft, ExternalLink, FileText, Landmark, ReceiptText } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 type PropietarioActual = {
   propietario_id: number;
@@ -45,9 +45,6 @@ type Pago = {
   metodo_pago: string | null;
   origen: string | null;
   tiene_comprobante: boolean;
-  tiene_factura?: boolean;
-  tiene_cheque?: boolean;
-  tiene_recibo?: boolean;
   periodos_aplicados: string[];
   aplicaciones: AplicacionPago[];
 };
@@ -60,16 +57,16 @@ type RespuestaEstadoCuenta = {
   pagos?: Pago[];
 };
 
-type RespuestaDocumentoPago = {
+type RespuestaComprobante = {
   ok?: boolean;
   codigo?: string;
   mensaje?: string;
-  url?: string | null;
+  comprobante_url?: string | null;
 };
 
 const RPC_ESTADO_CUENTA = "vam_propietario_estado_cuenta";
-const API_DOCUMENTO_PAGO = "/api/propietarios/estado-cuenta/documento";
-const MODULO_VERSION = "2.1";
+const RPC_COMPROBANTE_PAGO = "vam_propietario_pago_comprobante_url";
+const MODULO_VERSION = "2.0";
 
 function normalizarRespuesta<T>(data: unknown): T {
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -317,10 +314,7 @@ export default function EstadoCuentaPropietarioPage() {
     }
   }
 
-  async function abrirDocumentoPago(
-    pago: Pago,
-    tipo: "factura" | "cheque" | "comprobante"
-  ) {
+  async function abrirComprobantePago(pago: Pago) {
     if (!propietario || !pago?.id) return;
 
     setMensaje("");
@@ -334,74 +328,55 @@ export default function EstadoCuentaPropietarioPage() {
       return;
     }
 
-    // Abrimos la ventana antes del await para evitar bloqueo del navegador.
-    const ventana = window.open("", "_blank");
-
     try {
-      const params = new URLSearchParams({
-        pago_id: String(pago.id),
-        condominio_id: String(propietario.condominio_id),
-        unidad_id: String(propietario.unidad_id),
-        tipo,
-      });
-
-      const response = await fetch(
-        `${API_DOCUMENTO_PAGO}?${params.toString()}`,
+      const { data, error } = await supabase.rpc(
+        RPC_COMPROBANTE_PAGO,
         {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
+          p_token: token,
+          p_condominio_id: Number(propietario.condominio_id),
+          p_unidad_id: Number(propietario.unidad_id),
+          p_pago_id: Number(pago.id),
         }
       );
 
-      const respuesta =
-        (await response.json().catch(() => ({}))) as RespuestaDocumentoPago;
-
-      if (
-        response.status === 401 ||
-        codigoSesionInvalida(respuesta.codigo)
-      ) {
-        if (ventana) ventana.close();
-
-        enviarALogin(
-          respuesta.mensaje ||
-            "La sesión ha vencido. Inicie sesión nuevamente."
-        );
+      if (error) {
+        console.error("Error obteniendo comprobante:", error);
+        setMensaje("No se pudo abrir el comprobante en este momento.");
         return;
       }
 
-      if (!response.ok || respuesta.ok !== true || !respuesta.url) {
-        if (ventana) ventana.close();
+      const respuesta =
+        normalizarRespuesta<RespuestaComprobante>(data);
+
+      if (respuesta.ok !== true) {
+        if (codigoSesionInvalida(respuesta.codigo)) {
+          enviarALogin(
+            respuesta.mensaje ||
+              "La sesión ha vencido. Inicie sesión nuevamente."
+          );
+          return;
+        }
 
         setMensaje(
           respuesta.mensaje ||
-            "El documento no está disponible."
+            "El comprobante no está disponible."
         );
         return;
       }
 
-      if (ventana) {
-        ventana.opener = null;
-        ventana.location.href = respuesta.url;
-      } else {
-        window.location.href = respuesta.url;
-      }
-    } catch (error) {
-      if (ventana) ventana.close();
+      const url = String(respuesta.comprobante_url || "").trim();
 
-      console.error("Error abriendo documento del pago:", error);
-      setMensaje("No se pudo abrir el documento en este momento.");
+      if (!url) {
+        setMensaje("El comprobante no está disponible.");
+        return;
+      }
+
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      console.error("Error inesperado abriendo comprobante:", error);
+      setMensaje("No se pudo abrir el comprobante en este momento.");
     }
   }
-
-  function abrirReciboPago(pago: Pago) {
-    if (!pago?.id) return;
-
-    router.push(`/movil/propietarios/recibos/${pago.id}`);
-  }
-
 
   const totalFacturado = cargos.reduce(
     (sum, c) => sum + Number(c.monto || 0),
@@ -569,22 +544,13 @@ export default function EstadoCuentaPropietarioPage() {
                   <td>${escapeHtml(periodos)}</td>
                   <td>${escapeHtml(pago.referencia || "-")}</td>
                   <td>${escapeHtml(etiquetaMetodo(pago))}</td>
-                  <td>${escapeHtml(
-                    [
-                      pago.tiene_factura ? "Factura" : "",
-                      pago.tiene_cheque ? "Cheque" : "",
-                      "Recibo",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
-                  )}</td>
                 </tr>
               `;
             })
             .join("")
         : `
             <tr>
-              <td colspan="6" class="sin-datos">
+              <td colspan="5" class="sin-datos">
                 No hay pagos vinculados para mostrar en este período.
               </td>
             </tr>
@@ -951,7 +917,6 @@ export default function EstadoCuentaPropietarioPage() {
                   <th>Períodos</th>
                   <th>Referencia</th>
                   <th>Método</th>
-                  <th>Documentos</th>
                 </tr>
               </thead>
               <tbody>
@@ -1158,56 +1123,20 @@ export default function EstadoCuentaPropietarioPage() {
               )}
             </div>
 
-            <div className="mt-4 border-t border-slate-100 pt-3">
-              <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
-                Documentos del pago
-              </p>
-
-              <div className="grid grid-cols-3 gap-2">
+            <div className="mt-4">
+              {pago.tiene_comprobante ? (
                 <button
                   type="button"
-                  onClick={() => abrirDocumentoPago(pago, "factura")}
-                  disabled={!pago.tiene_factura}
-                  className="flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 py-2 text-[10px] font-extrabold text-blue-800 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+                  onClick={() => abrirComprobantePago(pago)}
+                  className="w-full rounded-xl bg-blue-600 text-white font-semibold py-3 text-sm active:scale-[0.99]"
                 >
-                  <FileText size={17} />
-                  Factura
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => abrirDocumentoPago(pago, "cheque")}
-                  disabled={!pago.tiene_cheque}
-                  className="flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-2 py-2 text-[10px] font-extrabold text-emerald-800 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
-                >
-                  <Landmark size={17} />
-                  Cheque
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => abrirReciboPago(pago)}
-                  className="flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-2 py-2 text-[10px] font-extrabold text-violet-800"
-                >
-                  <ReceiptText size={17} />
-                  Recibo
-                </button>
-              </div>
-
-              {pago.tiene_comprobante && !pago.tiene_cheque && (
-                <button
-                  type="button"
-                  onClick={() => abrirDocumentoPago(pago, "comprobante")}
-                  className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700"
-                >
-                  <ExternalLink size={14} />
                   Ver volante bancario
                 </button>
+              ) : (
+                <div className="w-full rounded-xl bg-slate-100 text-slate-500 py-3 px-3 text-center text-sm">
+                  Comprobante no disponible
+                </div>
               )}
-
-              <p className="mt-2 text-[9px] leading-4 text-slate-400">
-                Los botones en gris indican que ese documento no está vinculado al pago.
-              </p>
             </div>
           </div>
         ))}
