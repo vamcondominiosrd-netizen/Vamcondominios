@@ -43,43 +43,13 @@ type Gasto = {
   ncf: string | null;
   metodo_pago: string | null;
   cuenta_banco: string | null;
-  tiene_factura?: boolean;
+  factura_url: string | null;
   estado: string | null;
-  tiene_cheque?: boolean;
+  cheque_url: string | null;
   numero_cheque: string | null;
   fecha_pago: string | null;
   pagado: boolean | null;
-  periodo?: string | null;
 };
-
-type RespuestaDetalleGasto = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  propietario?: PropietarioActual | null;
-  gasto?: Gasto | null;
-};
-
-const RPC_DETALLE_GASTO = "vam_propietario_detalle_gasto";
-const API_SOPORTES_GASTO = "/api/propietarios/soportes-gastos";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta(data: unknown): RespuestaDetalleGasto {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaDetalleGasto;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaDetalleGasto;
-  }
-
-  return {};
-}
 
 const money = (v: unknown) =>
   new Intl.NumberFormat("es-DO", {
@@ -93,6 +63,15 @@ const fmt = (v?: string | null) => {
   const [y, m, d] = String(v).slice(0, 10).split("-");
   return y && m && d ? `${d}/${m}/${y}` : String(v);
 };
+
+const periodoFecha = (v?: string | null) => (v ? String(v).slice(0, 7) : "");
+
+const esPeriodoCerrado = (estado?: string | null) =>
+  ["cerrado", "cerrada"].includes(
+    String(estado || "")
+      .trim()
+      .toLowerCase()
+  );
 
 const RUTA_RESUMEN =
   "/movil/propietarios/resumen-financiero";
@@ -111,196 +90,84 @@ export default function DetalleGastoPropietarioPage() {
     void cargar();
   }, [params?.id]);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-    localStorage.removeItem("condominio_id");
-    localStorage.removeItem("condominio_nombre");
-    localStorage.removeItem("condominio_logo_url");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) setError(mensaje);
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
   async function cargar() {
     setLoading(true);
     setError("");
-    setGasto(null);
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
-        enviarALogin();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
-      const contexto = JSON.parse(raw) as PropietarioActual;
+      const s = JSON.parse(raw) as PropietarioActual;
 
-      if (
-        !contexto?.propietario_id ||
-        !contexto?.condominio_id ||
-        !contexto?.unidad_id
-      ) {
-        enviarALogin();
+      if (!s?.propietario_id || !s?.condominio_id || !s?.unidad_id) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       const id = Number(params?.id);
 
       if (!Number.isFinite(id) || id <= 0) {
-        setPropietario(contexto);
         setError("El gasto indicado no es válido.");
         return;
       }
 
-      const { data, error: rpcError } = await supabase.rpc(
-        RPC_DETALLE_GASTO,
-        {
-          p_token: token,
-          p_condominio_id: Number(contexto.condominio_id),
-          p_unidad_id: Number(contexto.unidad_id),
-          p_gasto_id: id,
-        }
-      );
+      setPropietario(s);
 
-      if (rpcError) {
-        console.error("Error cargando detalle del gasto:", rpcError);
-        setPropietario(contexto);
-        setError("No se pudo cargar el gasto en este momento.");
+      const { data, error: gastoError } = await supabase
+        .from("gastos")
+        .select(
+          "id,condominio_id,fecha,categoria,descripcion,proveedor,monto,concepto,detalle_gasto,itbis,total,no_factura,ncf,metodo_pago,cuenta_banco,factura_url,estado,cheque_url,numero_cheque,fecha_pago,pagado"
+        )
+        .eq("id", id)
+        .eq("condominio_id", s.condominio_id)
+        .maybeSingle();
+
+      if (gastoError) throw gastoError;
+
+      if (!data) {
+        setError("No se encontró el gasto o no pertenece a este condominio.");
         return;
       }
 
-      const respuesta = normalizarRespuesta(data);
+      const gastoEncontrado = data as Gasto;
+      const periodo = periodoFecha(
+        gastoEncontrado.fecha_pago || gastoEncontrado.fecha
+      );
 
-      if (
-        respuesta.ok !== true ||
-        !respuesta.propietario ||
-        !respuesta.gasto
-      ) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setPropietario(contexto);
+      if (!periodo) {
         setError(
-          respuesta.mensaje ||
-            "No se encontró el gasto o no está disponible para propietarios."
+          "El gasto no tiene una fecha válida para verificar el cierre mensual."
         );
         return;
       }
 
-      setPropietario(respuesta.propietario);
-      setGasto(respuesta.gasto);
+      const { data: cierreData, error: cierreError } = await supabase
+        .from("banco_cierres_mensuales")
+        .select("periodo,estado")
+        .eq("condominio_id", s.condominio_id)
+        .eq("periodo", periodo)
+        .limit(1)
+        .maybeSingle();
 
-      localStorage.setItem(
-        "propietario_actual",
-        JSON.stringify(respuesta.propietario)
-      );
+      if (cierreError) throw cierreError;
+
+      if (!cierreData || !esPeriodoCerrado(cierreData.estado)) {
+        setError(
+          "Este gasto pertenece a un periodo que todavía no está cerrado y no puede ser consultado por propietarios."
+        );
+        return;
+      }
+
+      setGasto(gastoEncontrado);
     } catch (e: any) {
-      console.error("Error inesperado cargando gasto:", e);
       setError(e?.message || "No se pudo cargar el gasto.");
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function abrirSoporte(tipo: "factura" | "cheque") {
-    if (!propietario || !gasto?.id) return;
-
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-      return;
-    }
-
-    setError("");
-
-    const ventana = window.open("", "_blank");
-
-    try {
-      const paramsSoporte = new URLSearchParams({
-        gasto_id: String(gasto.id),
-        condominio_id: String(propietario.condominio_id),
-        unidad_id: String(propietario.unidad_id),
-        tipo,
-      });
-
-      const response = await fetch(
-        `${API_SOPORTES_GASTO}?${paramsSoporte.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        }
-      );
-
-      const resultado = await response.json().catch(() => ({}));
-
-      if (
-        response.status === 401 ||
-        codigoSesionInvalida(resultado?.codigo)
-      ) {
-        if (ventana) ventana.close();
-
-        enviarALogin(
-          resultado?.mensaje ||
-            "La sesión ha vencido. Inicie sesión nuevamente."
-        );
-        return;
-      }
-
-      if (!response.ok || resultado?.ok !== true || !resultado?.url) {
-        if (ventana) ventana.close();
-
-        setError(
-          resultado?.mensaje ||
-            "El documento no está disponible."
-        );
-        return;
-      }
-
-      if (ventana) {
-        ventana.opener = null;
-        ventana.location.href = resultado.url;
-      } else {
-        window.location.href = resultado.url;
-      }
-    } catch (e) {
-      if (ventana) ventana.close();
-
-      console.error("Error abriendo soporte del gasto:", e);
-      setError("No se pudo abrir el documento en este momento.");
     }
   }
 
@@ -482,47 +349,43 @@ export default function DetalleGastoPropietarioPage() {
           </p>
 
           <div className="mt-4 space-y-2">
-            {gasto.tiene_factura && (
-              <button
-                type="button"
-                onClick={() => abrirSoporte("factura")}
-                className="flex h-11 w-full items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-3 text-xs font-extrabold text-blue-800"
+            {gasto.factura_url && (
+              <a
+                href={gasto.factura_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-11 items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-3 text-xs font-extrabold text-blue-800"
               >
                 <span className="flex items-center gap-2">
                   <FileImage size={16} />
                   Ver factura
                 </span>
                 <ExternalLink size={14} />
-              </button>
+              </a>
             )}
 
-            {gasto.tiene_cheque && (
-              <button
-                type="button"
-                onClick={() => abrirSoporte("cheque")}
-                className="flex h-11 w-full items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-extrabold text-emerald-800"
+            {gasto.cheque_url && (
+              <a
+                href={gasto.cheque_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-11 items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-extrabold text-emerald-800"
               >
                 <span className="flex items-center gap-2">
                   <FileText size={16} />
                   Ver cheque o comprobante
                 </span>
                 <ExternalLink size={14} />
-              </button>
+              </a>
             )}
 
-            {!gasto.tiene_factura && !gasto.tiene_cheque && (
+            {!gasto.factura_url && !gasto.cheque_url && (
               <div className="rounded-xl bg-slate-100 px-3 py-4 text-center text-xs text-slate-500">
                 Este gasto no tiene documentos anexos disponibles.
               </div>
             )}
           </div>
         </section>
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Detalle Gasto Propietario V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );

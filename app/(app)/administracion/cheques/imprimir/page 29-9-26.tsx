@@ -43,91 +43,34 @@ type DatosChequePago = {
   banco: string;
   cuenta_bancaria_id: number;
   numero_cuenta: string;
-  condominio_id?: number | null;
   condominio: string;
   es_reimpresion?: boolean;
 };
 
-type PlantillaCheque = {
-  codigo: "LOTE4" | "LOTE9";
-  id: string;
-  nombre: string;
-  config: Configuracion;
-  ajustesHorizontales: AjustesHorizontales;
-  chequeAnchoMm: number;
-  chequeAltoMm: number;
-  papelAnchoMm: number;
-  papelAltoMm: number;
-  etiquetaPapel: string;
+const CONFIG_INICIAL: Configuracion = {
+  // LOTE 9 - CALIBRACIÓN FINAL APROBADA con Epson L4160 + cheque Banco Popular.
+  fecha: { x: 147, y: 30.5, fontSize: 18 },
+  beneficiario: { x: -11, y: 53.5, fontSize: 16 },
+  monto: { x: 128, y: 52.5, fontSize: 16 },
+  letras: { x: -20, y: 65.5, fontSize: 16 },
+
+  // Comentario opcional: zona inferior izquierda del cheque.
+  // Se deja calibrable porque algunas impresoras pueden variar algunos mm.
+  comentario: { x: -80, y: 105, fontSize: 10.5 },
 };
 
-// ============================================================
-// LOTE 9 - calibración final aprobada. NO MODIFICAR.
-// ============================================================
-const PLANTILLA_LOTE9: PlantillaCheque = {
-  codigo: "LOTE9",
-  id: "BANCO_POPULAR_LOTE9_EPSON_L4160_215X95_FINAL_V2",
-  nombre: "Banco Popular · Lote 9 · Epson L4160 · 215 × 95 mm",
-  config: {
-    fecha: { x: 147, y: 30.5, fontSize: 18 },
-    beneficiario: { x: -11, y: 53.5, fontSize: 16 },
-    monto: { x: 128, y: 52.5, fontSize: 16 },
-    letras: { x: -20, y: 65.5, fontSize: 16 },
-    comentario: { x: -80, y: 105, fontSize: 10.5 },
-  },
-  ajustesHorizontales: { beneficiario: -22, letras: -50 },
-  chequeAnchoMm: 215,
-  chequeAltoMm: 95,
-  papelAnchoMm: 95,
-  papelAltoMm: 215,
-  etiquetaPapel: "Banco Popular · entrada vertical 95 × 215 mm",
+const AJUSTES_HORIZONTALES_INICIALES: AjustesHorizontales = {
+  beneficiario: -22,
+  letras: -50,
 };
 
-// ============================================================
-// LOTE 4 - calibración recibida 29-09-2026.
-// ============================================================
-const PLANTILLA_LOTE4: PlantillaCheque = {
-  codigo: "LOTE4",
-  id: "BANCO_POPULAR_LOTE4_EPSON_L4160_215X95_FINAL_V1",
-  nombre: "Banco Popular · Lote 4 · Epson L4160 · 215 × 95 mm",
-  config: {
-    fecha: { x: 147, y: 30.5, fontSize: 18 },
-    beneficiario: { x: -11, y: 53.5, fontSize: 16 },
-    monto: { x: 135, y: 55, fontSize: 16 },
-    letras: { x: -20, y: 68, fontSize: 16 },
-    comentario: { x: -74, y: 107, fontSize: 10.5 },
-  },
-  ajustesHorizontales: { beneficiario: -22, letras: -50 },
-  chequeAnchoMm: 215,
-  chequeAltoMm: 95,
-  papelAnchoMm: 95,
-  papelAltoMm: 215,
-  etiquetaPapel: "Banco Popular · entrada vertical 95 × 215 mm",
-};
+const CHEQUE_ANCHO_MM = 215;
+const CHEQUE_ALTO_MM = 95;
 
+const PLANTILLA_ID = "BANCO_POPULAR_LOTE9_EPSON_L4160_215X95_FINAL_V2";
+const PLANTILLA_NOMBRE = "Banco Popular · Lote 9 · Epson L4160 · 215 × 95 mm";
+const PLANTILLA_STORAGE_KEY = `vam-cheque-plantilla:${PLANTILLA_ID}`;
 const DATOS_PAGO_STORAGE_KEY = "vam_cheque_impresion_actual";
-
-function detectarPlantillaPorCondominio(
-  datos: DatosChequePago | null,
-): "LOTE4" | "LOTE9" {
-  const id =
-    Number(datos?.condominio_id || 0) ||
-    (typeof window !== "undefined"
-      ? Number(localStorage.getItem("condominio_id") || 0)
-      : 0);
-
-  const nombre = String(datos?.condominio || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
-  if (id === 15 || nombre.includes("lote 4") || nombre.includes("lote4")) {
-    return "LOTE4";
-  }
-
-  return "LOTE9";
-}
 
 function dosDigitos(n: number) {
   return String(n).padStart(2, "0");
@@ -386,15 +329,9 @@ export default function PruebaImpresionChequesPage() {
   const [concepto, setConcepto] = useState("Limpieza de trampas de grasa");
   const [mostrarGuia, setMostrarGuia] = useState(true);
   const [modoPapel, setModoPapel] = useState<"cheque" | "carta">("cheque");
-  const [plantillaCodigo, setPlantillaCodigo] =
-    useState<"LOTE4" | "LOTE9">("LOTE9");
-
-  const plantillaActiva =
-    plantillaCodigo === "LOTE4" ? PLANTILLA_LOTE4 : PLANTILLA_LOTE9;
-
-  const [config, setConfig] = useState<Configuracion>(PLANTILLA_LOTE9.config);
+  const [config, setConfig] = useState<Configuracion>(CONFIG_INICIAL);
   const [ajustesHorizontales, setAjustesHorizontales] =
-    useState<AjustesHorizontales>(PLANTILLA_LOTE9.ajustesHorizontales);
+    useState<AjustesHorizontales>(AJUSTES_HORIZONTALES_INICIALES);
   const [modoCalibracion, setModoCalibracion] = useState(false);
   const [plantillaGuardada, setPlantillaGuardada] = useState(false);
   const [datosPago, setDatosPago] = useState<DatosChequePago | null>(null);
@@ -409,8 +346,6 @@ export default function PruebaImpresionChequesPage() {
       if (!raw) return;
 
       const datos = JSON.parse(raw) as DatosChequePago;
-
-      setPlantillaCodigo(detectarPlantillaPorCondominio(datos));
 
       if (datos.beneficiario) {
         setBeneficiario(String(datos.beneficiario).toUpperCase());
@@ -453,44 +388,28 @@ export default function PruebaImpresionChequesPage() {
   }, []);
 
   useEffect(() => {
-    const plantilla =
-      plantillaCodigo === "LOTE4" ? PLANTILLA_LOTE4 : PLANTILLA_LOTE9;
-    const storageKey = `vam-cheque-plantilla:${plantilla.id}`;
-
     try {
-      const guardada = localStorage.getItem(storageKey);
-
-      if (!guardada) {
-        setConfig(plantilla.config);
-        setAjustesHorizontales(plantilla.ajustesHorizontales);
-        setPlantillaGuardada(false);
-        return;
-      }
+      const guardada = localStorage.getItem(PLANTILLA_STORAGE_KEY);
+      if (!guardada) return;
 
       const parsed = JSON.parse(guardada) as PlantillaGuardada;
       if (parsed?.config && parsed?.ajustesHorizontales) {
         setConfig({
-          fecha: parsed.config.fecha || plantilla.config.fecha,
+          fecha: parsed.config.fecha || CONFIG_INICIAL.fecha,
           beneficiario:
-            parsed.config.beneficiario || plantilla.config.beneficiario,
-          monto: parsed.config.monto || plantilla.config.monto,
-          letras: parsed.config.letras || plantilla.config.letras,
+            parsed.config.beneficiario || CONFIG_INICIAL.beneficiario,
+          monto: parsed.config.monto || CONFIG_INICIAL.monto,
+          letras: parsed.config.letras || CONFIG_INICIAL.letras,
           comentario:
-            parsed.config.comentario || plantilla.config.comentario,
+            parsed.config.comentario || CONFIG_INICIAL.comentario,
         });
         setAjustesHorizontales(parsed.ajustesHorizontales);
         setPlantillaGuardada(true);
-      } else {
-        setConfig(plantilla.config);
-        setAjustesHorizontales(plantilla.ajustesHorizontales);
-        setPlantillaGuardada(false);
       }
     } catch {
-      setConfig(plantilla.config);
-      setAjustesHorizontales(plantilla.ajustesHorizontales);
-      setPlantillaGuardada(false);
+      // Si hay una plantilla local dañada, usamos la calibración validada por defecto.
     }
-  }, [plantillaCodigo]);
+  }, []);
 
   const beneficiarioCheque = useMemo(() => {
     const manual = beneficiarioManual.trim();
@@ -710,44 +629,37 @@ export default function PruebaImpresionChequesPage() {
   }
 
   const restablecer = () => {
-    setConfig(plantillaActiva.config);
-    setAjustesHorizontales(plantillaActiva.ajustesHorizontales);
+    setConfig(CONFIG_INICIAL);
+    setAjustesHorizontales(AJUSTES_HORIZONTALES_INICIALES);
   };
 
   const guardarPlantilla = () => {
     const payload: PlantillaGuardada = {
-      id: plantillaActiva.id,
-      nombre: plantillaActiva.nombre,
+      id: PLANTILLA_ID,
+      nombre: PLANTILLA_NOMBRE,
       config,
       ajustesHorizontales,
       actualizadoEn: new Date().toISOString(),
     };
 
-    const storageKey = `vam-cheque-plantilla:${plantillaActiva.id}`;
-    localStorage.setItem(storageKey, JSON.stringify(payload));
+    localStorage.setItem(PLANTILLA_STORAGE_KEY, JSON.stringify(payload));
     setPlantillaGuardada(true);
-    alert(
-      `Plantilla ${plantillaActiva.codigo === "LOTE4" ? "Lote 4" : "Lote 9"} guardada en este equipo.`,
-    );
+    alert("Plantilla de impresión guardada en este equipo.");
   };
 
   const restaurarPlantillaValidada = () => {
-    setConfig(plantillaActiva.config);
-    setAjustesHorizontales(plantillaActiva.ajustesHorizontales);
-    const storageKey = `vam-cheque-plantilla:${plantillaActiva.id}`;
-    localStorage.removeItem(storageKey);
+    setConfig(CONFIG_INICIAL);
+    setAjustesHorizontales(AJUSTES_HORIZONTALES_INICIALES);
+    localStorage.removeItem(PLANTILLA_STORAGE_KEY);
     setPlantillaGuardada(false);
   };
 
   const copiarConfiguracion = async () => {
     const payload = {
       banco: "Banco Popular",
-      plantilla: plantillaActiva.nombre,
-      codigo: plantillaActiva.id,
-      ancho_mm: plantillaActiva.chequeAnchoMm,
-      alto_mm: plantillaActiva.chequeAltoMm,
-      papel_ancho_mm: plantillaActiva.papelAnchoMm,
-      papel_alto_mm: plantillaActiva.papelAltoMm,
+      plantilla: "Banco Popular - Lote 9 - 215x95 - FINAL",
+      ancho_mm: CHEQUE_ANCHO_MM,
+      alto_mm: CHEQUE_ALTO_MM,
       ...config,
       ajustes_horizontales_mm: ajustesHorizontales,
     };
@@ -770,7 +682,7 @@ export default function PruebaImpresionChequesPage() {
 
         @media print {
           @page {
-            size: ${modoPapel === "cheque" ? `${plantillaActiva.papelAnchoMm}mm ${plantillaActiva.papelAltoMm}mm` : "Letter"};
+            size: ${modoPapel === "cheque" ? "95mm 215mm" : "Letter"};
             margin: 0;
           }
 
@@ -793,14 +705,14 @@ export default function PruebaImpresionChequesPage() {
             position: absolute !important;
             /*
               ORIENTACIÓN FÍSICA EPSON:
-              - Papel en driver: configuración de la plantilla activa (Portrait).
+              - Papel en driver: 95 mm ancho x 215 mm alto (Portrait).
               - El lado DERECHO del cheque (fecha / monto) entra primero.
               - Por eso el diseño horizontal se rota 90° antihorario al imprimir.
             */
             left: 0 !important;
-            top: ${plantillaActiva.papelAltoMm}mm !important;
-            width: ${plantillaActiva.chequeAnchoMm}mm !important;
-            height: ${plantillaActiva.chequeAltoMm}mm !important;
+            top: 215mm !important;
+            width: 215mm !important;
+            height: 95mm !important;
             margin: 0 !important;
             box-shadow: none !important;
             border: none !important;
@@ -837,7 +749,7 @@ export default function PruebaImpresionChequesPage() {
 
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                 <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
-                  Plantilla: {plantillaActiva.nombre}
+                  Plantilla: {PLANTILLA_NOMBRE}
                 </span>
                 <span
                   className={`rounded-full px-2.5 py-1 font-semibold ${
@@ -1011,7 +923,7 @@ export default function PruebaImpresionChequesPage() {
                       }
                       className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
                     >
-                      <option value="cheque">{plantillaActiva.etiquetaPapel}</option>
+                      <option value="cheque">Banco Popular · entrada vertical 95 × 215 mm</option>
                       <option value="carta">Carta 8.5 × 11 pulgadas</option>
                     </select>
                   </label>
@@ -1042,7 +954,7 @@ export default function PruebaImpresionChequesPage() {
                       Vista previa
                     </h2>
                     <p className="text-xs text-slate-500">
-                      Cheque físico: {plantillaActiva.chequeAnchoMm} × {plantillaActiva.chequeAltoMm} mm · entrada a impresora: {plantillaActiva.papelAnchoMm} × {plantillaActiva.papelAltoMm} mm
+                      Cheque físico: 215 × 95 mm · entrada a impresora: 95 × 215 mm
                     </p>
                   </div>
                   <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
@@ -1061,10 +973,10 @@ export default function PruebaImpresionChequesPage() {
                       <div
                         className="relative bg-white shadow-sm"
                         style={{
-                          width: `${plantillaActiva.chequeAnchoMm}mm`,
-                          height: `${plantillaActiva.chequeAltoMm}mm`,
-                          minWidth: `${plantillaActiva.chequeAnchoMm}mm`,
-                          minHeight: `${plantillaActiva.chequeAltoMm}mm`,
+                          width: `${CHEQUE_ANCHO_MM}mm`,
+                          height: `${CHEQUE_ALTO_MM}mm`,
+                          minWidth: `${CHEQUE_ANCHO_MM}mm`,
+                          minHeight: `${CHEQUE_ALTO_MM}mm`,
                           border: mostrarGuia ? "1px solid #94a3b8" : "none",
                         }}
                       >
@@ -1329,7 +1241,7 @@ export default function PruebaImpresionChequesPage() {
                   </div>
 
                   <p className="mt-2 text-center text-[11px] text-slate-400">
-                    Vista visual adaptada a la pantalla. La impresión conserva exactamente la calibración de {plantillaActiva.codigo === "LOTE4" ? "Lote 4" : "Lote 9"} / Banco Popular / Epson L4160.
+                    Vista visual adaptada a la pantalla. La impresión conserva exactamente la calibración Banco Popular / Epson L4160.
                   </p>
                 </div>
                 )}
@@ -1338,10 +1250,10 @@ export default function PruebaImpresionChequesPage() {
                   id="zona-impresion"
                   className="solo-impresion relative mx-auto overflow-visible bg-white shadow-md"
                   style={{
-                    width: `${plantillaActiva.chequeAnchoMm}mm`,
-                    height: `${plantillaActiva.chequeAltoMm}mm`,
-                    minWidth: `${plantillaActiva.chequeAnchoMm}mm`,
-                    minHeight: `${plantillaActiva.chequeAltoMm}mm`,
+                    width: `${CHEQUE_ANCHO_MM}mm`,
+                    height: `${CHEQUE_ALTO_MM}mm`,
+                    minWidth: `${CHEQUE_ANCHO_MM}mm`,
+                    minHeight: `${CHEQUE_ALTO_MM}mm`,
                     border: mostrarGuia ? "1px solid #94a3b8" : "none",
                   }}
                 >
@@ -1626,7 +1538,7 @@ export default function PruebaImpresionChequesPage() {
               <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5 text-sm leading-6 text-blue-900">
                 <div className="font-semibold">Configuración operativa</div>
                 <ul className="mt-2 list-disc space-y-1 pl-5">
-                  <li>Papel personalizado: {plantillaActiva.papelAnchoMm} × {plantillaActiva.papelAltoMm} mm.</li>
+                  <li>Papel personalizado: 95 × 215 mm.</li>
                   <li>Orientación: Vertical / Portrait.</li>
                   <li>Escala: 100% / Tamaño real.</li>
                   <li>Sin “Ajustar a página / Fit to page”.</li>

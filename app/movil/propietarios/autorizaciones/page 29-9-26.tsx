@@ -24,47 +24,6 @@ type Catalogo = {
   nombre: string;
 };
 
-
-type RespuestaCatalogos = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  tipos_solicitud?: Catalogo[];
-  tipos_trabajo?: Catalogo[];
-  tipos_servicio?: Catalogo[];
-  tipos_visitantes?: Catalogo[];
-  areas_acceso?: Catalogo[];
-};
-
-type RespuestaCrearAutorizacion = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  autorizacion_id?: number;
-  codigo_autorizacion?: string;
-};
-
-const RPC_CATALOGOS = "vam_propietario_catalogos_autorizaciones";
-const RPC_CREAR_AUTORIZACION = "vam_propietario_crear_autorizacion";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta<T>(data: unknown): T {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as T;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as T;
-  }
-
-  return {} as T;
-}
-
 type PropietarioActual = {
   propietario_id: number;
   condominio_id: number;
@@ -142,6 +101,15 @@ function fechaMinima() {
   return `${year}-${month}-${day}`;
 }
 
+function generarCodigo() {
+  const fecha = new Date();
+  const year = fecha.getFullYear();
+  const month = String(fecha.getMonth() + 1).padStart(2, "0");
+  const day = String(fecha.getDate()).padStart(2, "0");
+  const random = Math.floor(100000 + Math.random() * 900000);
+
+  return `ACC-${year}${month}${day}-${random}`;
+}
 
 export default function NuevaAutorizacionPropietarioPage() {
   const router = useRouter();
@@ -166,46 +134,14 @@ export default function NuevaAutorizacionPropietarioPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-  }
-
-  function sesionInvalida(mensaje?: string) {
-    setMensajeTipo("error");
-    setMensaje(
-      mensaje || "La sesión ha vencido. Inicie sesión nuevamente."
-    );
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, 700);
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
   async function inicializar() {
     setCargando(true);
     setMensaje("");
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
+      if (!raw) {
         router.replace("/movil/propietarios/login");
         return;
       }
@@ -222,9 +158,8 @@ export default function NuevaAutorizacionPropietarioPage() {
       }
 
       setPropietario(sesion);
-      await cargarCatalogos(sesion, token);
-    } catch (error) {
-      console.error("Error inicializando autorizaciones:", error);
+      await cargarCatalogos();
+    } catch {
       setMensajeTipo("error");
       setMensaje("No se pudo cargar la información del propietario.");
     } finally {
@@ -232,72 +167,58 @@ export default function NuevaAutorizacionPropietarioPage() {
     }
   }
 
-  async function cargarCatalogos(
-    sesion: PropietarioActual,
-    tokenRecibido?: string
-  ) {
-    const token = String(
-      tokenRecibido ||
-        localStorage.getItem("propietario_token") ||
-        ""
-    ).trim();
+  async function cargarCatalogos() {
+    const [
+      solicitudRes,
+      trabajoRes,
+      servicioRes,
+      visitanteRes,
+      areasRes,
+    ] = await Promise.all([
+      supabase
+        .from("autorizaciones_tipos_solicitud")
+        .select("id, nombre")
+        .eq("activo", true)
+        .order("nombre"),
+      supabase
+        .from("autorizaciones_tipos_trabajo")
+        .select("id, nombre")
+        .eq("activo", true)
+        .order("nombre"),
+      supabase
+        .from("autorizaciones_tipos_servicio")
+        .select("id, nombre")
+        .eq("activo", true)
+        .order("nombre"),
+      supabase
+        .from("autorizaciones_tipos_visitantes")
+        .select("id, nombre")
+        .eq("activo", true)
+        .order("nombre"),
+      supabase
+        .from("autorizaciones_areas_acceso")
+        .select("id, nombre")
+        .eq("activo", true)
+        .order("nombre"),
+    ]);
 
-    if (!token) {
-      sesionInvalida();
-      return;
-    }
+    const errores = [
+      solicitudRes.error,
+      trabajoRes.error,
+      servicioRes.error,
+      visitanteRes.error,
+      areasRes.error,
+    ].filter(Boolean);
 
-    const { data, error } = await supabase.rpc(RPC_CATALOGOS, {
-      p_token: token,
-      p_condominio_id: Number(sesion.condominio_id),
-      p_unidad_id: Number(sesion.unidad_id),
-    });
-
-    if (error) {
-      console.error("Error cargando catálogos:", error);
+    if (errores.length > 0) {
       throw new Error("No se pudieron cargar los catálogos de autorizaciones.");
     }
 
-    const respuesta =
-      normalizarRespuesta<RespuestaCatalogos>(data);
-
-    if (respuesta.ok !== true) {
-      if (codigoSesionInvalida(respuesta.codigo)) {
-        sesionInvalida(respuesta.mensaje);
-        return;
-      }
-
-      throw new Error(
-        respuesta.mensaje ||
-          "No se pudieron cargar los catálogos de autorizaciones."
-      );
-    }
-
-    setTiposSolicitud(
-      Array.isArray(respuesta.tipos_solicitud)
-        ? respuesta.tipos_solicitud
-        : []
-    );
-    setTiposTrabajo(
-      Array.isArray(respuesta.tipos_trabajo)
-        ? respuesta.tipos_trabajo
-        : []
-    );
-    setTiposServicio(
-      Array.isArray(respuesta.tipos_servicio)
-        ? respuesta.tipos_servicio
-        : []
-    );
-    setTiposVisitantes(
-      Array.isArray(respuesta.tipos_visitantes)
-        ? respuesta.tipos_visitantes
-        : []
-    );
-    setAreasAcceso(
-      Array.isArray(respuesta.areas_acceso)
-        ? respuesta.areas_acceso
-        : []
-    );
+    setTiposSolicitud(solicitudRes.data || []);
+    setTiposTrabajo(trabajoRes.data || []);
+    setTiposServicio(servicioRes.data || []);
+    setTiposVisitantes(visitanteRes.data || []);
+    setAreasAcceso(areasRes.data || []);
   }
 
   function cambiarCampo(campo: keyof Formulario, valor: string) {
@@ -339,137 +260,96 @@ export default function NuevaAutorizacionPropietarioPage() {
       return;
     }
 
-    const cantidadPersonas = Math.max(
-      1,
-      Number(form.cantidad_personas || 1)
-    );
-
-    if (!Number.isFinite(cantidadPersonas)) {
-      setMensajeTipo("error");
-      setMensaje("La cantidad de personas no es válida.");
-      return;
-    }
-
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      sesionInvalida();
-      return;
-    }
-
     setEnviando(true);
     setMensaje("");
 
-    try {
-      const { data, error } = await supabase.rpc(
-        RPC_CREAR_AUTORIZACION,
-        {
-          p_token: token,
-          p_condominio_id: Number(propietario.condominio_id),
-          p_unidad_id: Number(propietario.unidad_id),
+    const codigo = generarCodigo();
 
-          p_tipo_solicitud_id: Number(form.tipo_solicitud_id),
-          p_tipo_trabajo_id: form.tipo_trabajo_id
-            ? Number(form.tipo_trabajo_id)
-            : null,
-          p_tipo_servicio_id: form.tipo_servicio_id
-            ? Number(form.tipo_servicio_id)
-            : null,
-          p_tipo_visitante_id: form.tipo_visitante_id
-            ? Number(form.tipo_visitante_id)
-            : null,
-          p_area_acceso_id: form.area_acceso_id
-            ? Number(form.area_acceso_id)
-            : null,
+    const { error } = await supabase.from("autorizaciones").insert({
+      condominio_id: propietario.condominio_id,
+      condominio: propietario.condominio_nombre || null,
 
-          p_fecha_programada: form.fecha_programada,
-          p_hora_entrada: form.hora_entrada || null,
-          p_hora_salida_estimada:
-            form.hora_salida_estimada || null,
+      codigo_autorizacion: codigo,
 
-          p_nombre_visitante: form.nombre_visitante.trim(),
-          p_cedula_visitante:
-            form.cedula_visitante.trim() || null,
-          p_telefono_visitante:
-            form.telefono_visitante.trim() || null,
+      propietario_id: propietario.propietario_id,
+      propietario: propietario.nombre_propietario || null,
 
-          p_empresa: form.empresa.trim() || null,
+      unidad_id: propietario.unidad_id,
+      unidad: propietario.no_apartamento || null,
 
-          p_vehiculo_marca:
-            form.vehiculo_marca.trim() || null,
-          p_vehiculo_modelo:
-            form.vehiculo_modelo.trim() || null,
-          p_vehiculo_color:
-            form.vehiculo_color.trim() || null,
-          p_vehiculo_placa:
-            form.vehiculo_placa.trim()
-              ? form.vehiculo_placa.trim().toUpperCase()
-              : null,
+      tipo_solicitud_id: Number(form.tipo_solicitud_id),
+      tipo_solicitud: form.tipo_solicitud || null,
 
-          p_cantidad_personas: cantidadPersonas,
+      tipo_trabajo_id: form.tipo_trabajo_id
+        ? Number(form.tipo_trabajo_id)
+        : null,
+      tipo_trabajo: form.tipo_trabajo || null,
 
-          p_articulos_entran:
-            form.articulos_entran.trim() || null,
-          p_articulos_salen:
-            form.articulos_salen.trim() || null,
-          p_descripcion:
-            form.descripcion.trim() || null,
-        }
-      );
+      tipo_servicio_id: form.tipo_servicio_id
+        ? Number(form.tipo_servicio_id)
+        : null,
+      tipo_servicio: form.tipo_servicio || null,
 
-      if (error) {
-        console.error("Error enviando autorización:", error);
-        setMensajeTipo("error");
-        setMensaje(
-          "No se pudo enviar la solicitud en este momento."
-        );
-        return;
-      }
+      tipo_visitante_id: form.tipo_visitante_id
+        ? Number(form.tipo_visitante_id)
+        : null,
+      tipo_visitante: form.tipo_visitante || null,
 
-      const respuesta =
-        normalizarRespuesta<RespuestaCrearAutorizacion>(data);
+      area_acceso_id: form.area_acceso_id
+        ? Number(form.area_acceso_id)
+        : null,
+      area_acceso: form.area_acceso || null,
 
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          sesionInvalida(respuesta.mensaje);
-          return;
-        }
+      fecha_solicitud: fechaMinima(),
+      fecha_programada: form.fecha_programada,
+      hora_entrada: form.hora_entrada || null,
+      hora_salida_estimada: form.hora_salida_estimada || null,
 
-        setMensajeTipo("error");
-        setMensaje(
-          respuesta.mensaje ||
-            "No se pudo enviar la solicitud."
-        );
-        return;
-      }
+      nombre_visitante: form.nombre_visitante.trim(),
+      cedula_visitante: form.cedula_visitante || null,
+      telefono_visitante: form.telefono_visitante || null,
 
-      const codigo =
-        respuesta.codigo_autorizacion || respuesta.codigo || "";
+      empresa: form.empresa || null,
 
-      setMensajeTipo("exito");
-      setMensaje(
-        codigo
-          ? `Solicitud enviada correctamente. Código: ${codigo}`
-          : "Solicitud enviada correctamente."
-      );
-      setForm(formularioInicial);
+      vehiculo_marca: form.vehiculo_marca || null,
+      vehiculo_modelo: form.vehiculo_modelo || null,
+      vehiculo_color: form.vehiculo_color || null,
+      vehiculo_placa: form.vehiculo_placa
+        ? form.vehiculo_placa.toUpperCase()
+        : null,
 
-      window.setTimeout(() => {
-        router.push(
-          "/movil/propietarios/autorizaciones/mis-solicitudes"
-        );
-      }, 1400);
-    } catch (error) {
-      console.error("Error inesperado enviando autorización:", error);
+      cantidad_personas: Math.max(
+        1,
+        Number(form.cantidad_personas || 1)
+      ),
+
+      articulos_entran: form.articulos_entran || null,
+      articulos_salen: form.articulos_salen || null,
+      descripcion: form.descripcion || null,
+
+      estado: "Pendiente",
+      estado_financiero: "Pendiente de validar",
+      qr_code: codigo,
+    });
+
+    setEnviando(false);
+
+    if (error) {
+      console.error("Error enviando autorización:", error);
       setMensajeTipo("error");
       setMensaje(
-        "No se pudo enviar la solicitud en este momento."
+        `No se pudo enviar la solicitud: ${error.message}`
       );
-    } finally {
-      setEnviando(false);
+      return;
     }
+
+    setMensajeTipo("exito");
+    setMensaje(`Solicitud enviada correctamente. Código: ${codigo}`);
+    setForm(formularioInicial);
+
+    window.setTimeout(() => {
+      router.push("/movil/propietarios/autorizaciones");
+    }, 1400);
   }
 
   if (cargando) {
@@ -831,10 +711,6 @@ export default function NuevaAutorizacionPropietarioPage() {
               </>
             )}
           </button>
-
-          <p className="pb-1 text-center text-[10px] text-slate-400">
-            Nueva autorización · V{MODULO_VERSION}
-          </p>
         </form>
       </div>
     </main>

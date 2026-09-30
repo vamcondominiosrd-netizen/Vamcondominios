@@ -60,8 +60,8 @@ type Gasto = {
   detalle_gasto: string | null;
   total: number | string | null;
   no_factura: string | null;
-  tiene_factura?: boolean;
-  tiene_cheque?: boolean;
+  factura_url: string | null;
+  cheque_url: string | null;
   numero_cheque: string | null;
   fecha_pago: string | null;
 };
@@ -239,7 +239,6 @@ export default function TransparenciaFinancieraPage() {
             "SESION_INVALIDA",
             "SESION_VENCIDA",
             "CUENTA_INACTIVA",
-            "CAMBIO_CLAVE_PENDIENTE",
             "SIN_ACCESO",
           ].includes(String(respuesta.codigo || ""))
         ) {
@@ -309,7 +308,6 @@ export default function TransparenciaFinancieraPage() {
             "SESION_INVALIDA",
             "SESION_VENCIDA",
             "CUENTA_INACTIVA",
-            "CAMBIO_CLAVE_PENDIENTE",
             "SIN_ACCESO",
           ].includes(String(respuesta.codigo || ""))
         ) {
@@ -348,11 +346,7 @@ export default function TransparenciaFinancieraPage() {
       }
 
       if (Array.isArray(respuesta.cierres)) {
-        setCierres(
-          respuesta.cierres
-            .filter((item) => esPeriodoCerrado(item.estado))
-            .sort((a, b) => b.periodo.localeCompare(a.periodo))
-        );
+        setCierres(respuesta.cierres);
       }
 
       setCierre(cierreValidado);
@@ -862,8 +856,8 @@ export default function TransparenciaFinancieraPage() {
                           size={15}
                         />
 
-                        {g.tiene_factura ||
-                        g.tiene_cheque
+                        {g.factura_url ||
+                        g.cheque_url
                           ? "Ver detalle y soportes"
                           : "Ver detalle"}
 
@@ -875,7 +869,56 @@ export default function TransparenciaFinancieraPage() {
 
                     </Link>
 
+                    {(g.factura_url ||
+                      g.cheque_url) && (
 
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+
+                        {g.factura_url && (
+
+                          <a
+                            href={
+                              g.factura_url
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700"
+                          >
+
+                            <FileText
+                              size={14}
+                            />
+
+                            Abrir factura
+
+                          </a>
+
+                        )}
+
+                        {g.cheque_url && (
+
+                          <a
+                            href={
+                              g.cheque_url
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-extrabold text-emerald-800"
+                          >
+
+                            <FileText
+                              size={14}
+                            />
+
+                            Abrir comprobante
+
+                          </a>
+
+                        )}
+
+                      </div>
+
+                    )}
 
                   </div>
 
@@ -890,7 +933,7 @@ export default function TransparenciaFinancieraPage() {
         </section>
 
         <p className="pb-2 text-center text-[9px] text-slate-400">
-          Transparencia financiera · v2.2
+          Transparencia financiera · v2.1
         </p>
 
       </div>

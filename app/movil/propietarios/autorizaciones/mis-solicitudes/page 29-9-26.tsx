@@ -49,34 +49,6 @@ type Autorizacion = {
   created_at: string | null;
 };
 
-
-type RespuestaSolicitudes = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  solicitudes?: Autorizacion[];
-};
-
-const RPC_LISTAR_SOLICITUDES = "vam_propietario_listar_autorizaciones";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta(data: unknown): RespuestaSolicitudes {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaSolicitudes;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaSolicitudes;
-  }
-
-  return {};
-}
-
 type FiltroEstado = "TODAS" | "PENDIENTE" | "APROBADA" | "RECHAZADA" | "FINALIZADA";
 
 function normalizarEstado(valor: string | null | undefined) {
@@ -175,44 +147,14 @@ export default function AutorizacionesPropietarioPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-  }
-
-  function sesionInvalida(mensaje?: string) {
-    setError(
-      mensaje || "La sesión ha vencido. Inicie sesión nuevamente."
-    );
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, 700);
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
   async function inicializar() {
     setCargando(true);
     setError("");
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
+      if (!raw) {
         router.replace("/movil/propietarios/login");
         return;
       }
@@ -229,9 +171,8 @@ export default function AutorizacionesPropietarioPage() {
       }
 
       setPropietario(sesion);
-      await cargarSolicitudes(sesion, token);
-    } catch (error) {
-      console.error("Error inicializando Mis solicitudes:", error);
+      await cargarSolicitudes(sesion);
+    } catch {
       setError("No se pudo cargar la información del propietario.");
     } finally {
       setCargando(false);
@@ -240,68 +181,46 @@ export default function AutorizacionesPropietarioPage() {
 
   async function cargarSolicitudes(
     sesion: PropietarioActual,
-    tokenRecibido?: string,
     modoActualizacion = false
   ) {
     if (modoActualizacion) setActualizando(true);
     setError("");
 
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
+    const { data, error: consultaError } = await supabase
+      .from("autorizaciones")
+      .select(`
+        id,
+        codigo_autorizacion,
+        tipo_solicitud,
+        tipo_trabajo,
+        fecha_solicitud,
+        fecha_programada,
+        hora_entrada,
+        hora_salida_estimada,
+        nombre_visitante,
+        empresa,
+        estado,
+        estado_financiero,
+        motivo_rechazo,
+        observacion_admin,
+        fecha_aprobacion,
+        fecha_rechazo,
+        qr_generado,
+        created_at
+      `)
+      .eq("condominio_id", sesion.condominio_id)
+      .eq("propietario_id", sesion.propietario_id)
+      .eq("unidad_id", sesion.unidad_id)
+      .order("created_at", { ascending: false });
 
-      if (!token) {
-        sesionInvalida();
-        return;
-      }
-
-      const { data, error: consultaError } = await supabase.rpc(
-        RPC_LISTAR_SOLICITUDES,
-        {
-          p_token: token,
-          p_condominio_id: Number(sesion.condominio_id),
-          p_unidad_id: Number(sesion.unidad_id),
-        }
-      );
-
-      if (consultaError) {
-        console.error("Error cargando solicitudes:", consultaError);
-        setError("No se pudieron cargar las solicitudes en este momento.");
-        setSolicitudes([]);
-        return;
-      }
-
-      const respuesta = normalizarRespuesta(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          sesionInvalida(respuesta.mensaje);
-          return;
-        }
-
-        setError(
-          respuesta.mensaje ||
-            "No se pudieron cargar las solicitudes."
-        );
-        setSolicitudes([]);
-        return;
-      }
-
-      setSolicitudes(
-        Array.isArray(respuesta.solicitudes)
-          ? respuesta.solicitudes
-          : []
-      );
-    } catch (error) {
-      console.error("Error inesperado cargando solicitudes:", error);
-      setError("No se pudieron cargar las solicitudes en este momento.");
+    if (consultaError) {
+      setError(`No se pudieron cargar las solicitudes: ${consultaError.message}`);
       setSolicitudes([]);
-    } finally {
-      if (modoActualizacion) setActualizando(false);
+    } else {
+      setSolicitudes((data || []) as Autorizacion[]);
     }
+
+    if (modoActualizacion) setActualizando(false);
   }
 
   const solicitudesFiltradas = useMemo(() => {
@@ -398,7 +317,7 @@ export default function AutorizacionesPropietarioPage() {
 
             <button
               type="button"
-              onClick={() => cargarSolicitudes(propietario, undefined, true)}
+              onClick={() => cargarSolicitudes(propietario, true)}
               disabled={actualizando}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60"
               aria-label="Actualizar"
@@ -596,12 +515,6 @@ export default function AutorizacionesPropietarioPage() {
             })
           )}
         </section>
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            Mis solicitudes · V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );

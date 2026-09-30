@@ -37,42 +37,21 @@ type Comunicacion = {
   leida_at?: string | null;
 };
 
-type RespuestaComunicaciones = {
-  ok?: boolean;
-  mensaje?: string;
-  comunicaciones?: Comunicacion[];
-  data?: Comunicacion[];
-};
-
 const RPC_LISTAR_COMUNICACIONES = "listar_comunicaciones_propietario";
-const MODULO_VERSION = "2.1";
 
-function normalizarRespuesta(data: unknown): RespuestaComunicaciones {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaComunicaciones;
-  }
+function normalizarComunicaciones(data: unknown): Comunicacion[] {
+  if (Array.isArray(data)) return data as Comunicacion[];
 
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaComunicaciones;
-  }
+  if (data && typeof data === "object") {
+    const objeto = data as Record<string, unknown>;
 
-  return {};
-}
+    if (Array.isArray(objeto.comunicaciones)) {
+      return objeto.comunicaciones as Comunicacion[];
+    }
 
-function normalizarComunicaciones(
-  respuesta: RespuestaComunicaciones
-): Comunicacion[] {
-  if (Array.isArray(respuesta.comunicaciones)) {
-    return respuesta.comunicaciones;
-  }
-
-  if (Array.isArray(respuesta.data)) {
-    return respuesta.data;
+    if (Array.isArray(objeto.data)) {
+      return objeto.data as Comunicacion[];
+    }
   }
 
   return [];
@@ -113,140 +92,59 @@ export default function ComunicacionesPropietarioPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    void inicializar();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
-
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) setError(mensaje);
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
-  async function inicializar() {
-    setCargando(true);
-    setError("");
-
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
+      const token = localStorage.getItem("propietario_token");
 
       if (!raw || !token) {
-        enviarALogin();
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       const sesion = JSON.parse(raw) as PropietarioActual;
 
-      if (
-        !sesion?.propietario_id ||
-        !sesion?.condominio_id ||
-        !sesion?.unidad_id
-      ) {
-        enviarALogin();
+      if (!sesion?.propietario_id || !sesion?.condominio_id || !sesion?.unidad_id) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       setPropietario(sesion);
-      await cargarComunicaciones(sesion, token);
-    } catch (error) {
-      console.error("Error inicializando comunicaciones:", error);
-      setError("No se pudo cargar la información del propietario.");
-      setComunicaciones([]);
-    } finally {
-      setCargando(false);
+      void cargarComunicaciones(sesion, token);
+    } catch {
+      router.replace("/movil/propietarios/login");
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
-  async function cargarComunicaciones(
-    prop: PropietarioActual,
-    tokenRecibido?: string
-  ) {
+  async function cargarComunicaciones(prop: PropietarioActual, token: string) {
+    setCargando(true);
     setError("");
 
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
-
-      if (!token) {
-        enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-        return;
+    const { data, error: errorRpc } = await supabase.rpc(
+      RPC_LISTAR_COMUNICACIONES,
+      {
+        p_token: token,
+        p_condominio_id: prop.condominio_id,
+        p_unidad_id: prop.unidad_id,
       }
+    );
 
-      const { data, error: errorRpc } = await supabase.rpc(
-        RPC_LISTAR_COMUNICACIONES,
-        {
-          p_token: token,
-          p_condominio_id: Number(prop.condominio_id),
-          p_unidad_id: Number(prop.unidad_id),
-        }
-      );
-
-      if (errorRpc) {
-        console.error("Error cargando comunicaciones:", errorRpc);
-        setError("No se pudieron cargar las comunicaciones en este momento.");
-        setComunicaciones([]);
-        return;
-      }
-
-      const respuesta = normalizarRespuesta(data);
-
-      if (respuesta.ok !== true) {
-        const mensaje =
-          respuesta.mensaje ||
-          "No se pudieron cargar las comunicaciones.";
-
-        const mensajeNormalizado = mensaje
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase();
-
-        if (
-          mensajeNormalizado.includes("sesion") ||
-          mensajeNormalizado.includes("no tiene acceso") ||
-          mensajeNormalizado.includes("propiedad")
-        ) {
-          enviarALogin(mensaje);
-          return;
-        }
-
-        setError(mensaje);
-        setComunicaciones([]);
-        return;
-      }
-
-      const lista = normalizarComunicaciones(respuesta)
-        .filter(
-          (item) =>
-            String(item.estado || "").toUpperCase() !== "ANULADA"
-        )
-        .sort((a, b) =>
-          String(b.enviada_at || "").localeCompare(
-            String(a.enviada_at || "")
-          )
-        );
-
-      setComunicaciones(lista);
-    } catch (error) {
-      console.error("Error inesperado cargando comunicaciones:", error);
+    if (errorRpc) {
+      console.error("Error cargando comunicaciones:", errorRpc);
       setError("No se pudieron cargar las comunicaciones en este momento.");
       setComunicaciones([]);
+      setCargando(false);
+      return;
     }
+
+    const lista = normalizarComunicaciones(data)
+      .filter((item) => String(item.estado || "").toUpperCase() !== "ANULADA")
+      .sort((a, b) =>
+        String(b.enviada_at || "").localeCompare(String(a.enviada_at || ""))
+      );
+
+    setComunicaciones(lista);
+    setCargando(false);
   }
 
   function abrirComunicacion(item: Comunicacion) {
@@ -424,7 +322,7 @@ export default function ComunicacionesPropietarioPage() {
 
         <footer className="pb-2 pt-1 text-center">
           <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Comunicaciones V{MODULO_VERSION}
+            VAM Administración de Condominios
           </p>
         </footer>
       </div>

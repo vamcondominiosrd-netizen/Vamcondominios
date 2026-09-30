@@ -43,47 +43,24 @@ type AreaSocial = {
 
 type Reserva = {
   id: number;
-  area_social_id?: number | null;
-  nombre_area?: string | null;
   fecha_reserva: string;
   hora_inicio?: string | null;
   hora_fin?: string | null;
   motivo?: string | null;
   cantidad_personas?: number | null;
   monto_pagado?: number | null;
-  tiene_comprobante?: boolean;
+  comprobante_url?: string | null;
   estado?: string | null;
   created_at?: string | null;
+  areas_sociales?:
+    | {
+        nombre_area?: string | null;
+      }
+    | {
+        nombre_area?: string | null;
+      }[]
+    | null;
 };
-
-type RespuestaReservas = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  areas?: AreaSocial[];
-  reservas?: Reserva[];
-};
-
-const RPC_RESERVAS_CONTEXTO = "vam_propietario_reservas_contexto";
-const API_RESERVA = "/api/propietarios/reservas";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta(data: unknown): RespuestaReservas {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaReservas;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaReservas;
-  }
-
-  return {};
-}
 
 function formatoMoneda(valor: number | string | null | undefined) {
   return new Intl.NumberFormat("es-DO", {
@@ -148,60 +125,15 @@ export default function ReservasPropietariosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-    localStorage.removeItem("condominio_id");
-    localStorage.removeItem("condominio_nombre");
-    localStorage.removeItem("condominio_logo_url");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) {
-      setMensaje(mensaje);
-      setExito(false);
-    }
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
-  function fechaLocalHoy() {
-    const hoy = new Date();
-
-    return [
-      hoy.getFullYear(),
-      String(hoy.getMonth() + 1).padStart(2, "0"),
-      String(hoy.getDate()).padStart(2, "0"),
-    ].join("-");
-  }
-
   async function inicializar() {
     setLoadingReservas(true);
     setMensaje("");
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
-        enviarALogin();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
@@ -212,26 +144,43 @@ export default function ReservasPropietariosPage() {
         !sesion?.condominio_id ||
         !sesion?.unidad_id
       ) {
-        enviarALogin();
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       setPropietario(sesion);
-      await cargarContextoReservas(sesion, token);
-    } catch (error) {
-      console.error("Error inicializando reservas:", error);
+
+      await Promise.all([
+        cargarAreas(sesion),
+        cargarReservas(sesion),
+      ]);
+    } catch {
       setMensaje("No se pudo cargar la información del propietario.");
       setExito(false);
-      setAreas([]);
-      setReservas([]);
     } finally {
       setLoadingReservas(false);
     }
   }
 
-  async function cargarContextoReservas(
+  async function cargarAreas(prop: PropietarioActual) {
+    const { data, error } = await supabase
+      .from("areas_sociales")
+      .select("id, nombre_area, costo_reserva")
+      .eq("condominio", prop.condominio_nombre)
+      .eq("estado", "activa")
+      .order("nombre_area");
+
+    if (error) {
+      setMensaje(`No se pudieron cargar las áreas sociales: ${error.message}`);
+      setAreas([]);
+      return;
+    }
+
+    setAreas((data || []) as AreaSocial[]);
+  }
+
+  async function cargarReservas(
     prop: PropietarioActual,
-    tokenRecibido?: string,
     modoActualizacion = false,
     conservarMensaje = false
   ) {
@@ -242,76 +191,63 @@ export default function ReservasPropietariosPage() {
       setExito(false);
     }
 
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
+    const { data, error } = await supabase
+      .from("reservas_areas_sociales")
+      .select(`
+        id,
+        fecha_reserva,
+        hora_inicio,
+        hora_fin,
+        motivo,
+        cantidad_personas,
+        monto_pagado,
+        comprobante_url,
+        estado,
+        created_at,
+        areas_sociales (
+          nombre_area
+        )
+      `)
+      .eq("propietario_id", prop.propietario_id)
+      .order("created_at", { ascending: false });
 
-      if (!token) {
-        enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-        return;
-      }
-
-      const { data, error } = await supabase.rpc(
-        RPC_RESERVAS_CONTEXTO,
-        {
-          p_token: token,
-          p_condominio_id: Number(prop.condominio_id),
-          p_unidad_id: Number(prop.unidad_id),
-        }
-      );
-
-      if (error) {
-        console.error("Error cargando reservas:", error);
-        setAreas([]);
-        setReservas([]);
-        setMensaje("No se pudieron cargar las reservas en este momento.");
-        setExito(false);
-        return;
-      }
-
-      const respuesta = normalizarRespuesta(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setAreas([]);
-        setReservas([]);
-        setMensaje(
-          respuesta.mensaje ||
-            "No se pudieron cargar las reservas."
-        );
-        setExito(false);
-        return;
-      }
-
-      setAreas(
-        Array.isArray(respuesta.areas)
-          ? respuesta.areas
-          : []
-      );
-      setReservas(
-        Array.isArray(respuesta.reservas)
-          ? respuesta.reservas
-          : []
-      );
-    } catch (error) {
-      console.error("Error inesperado cargando reservas:", error);
-      setAreas([]);
-      setReservas([]);
-      setMensaje("No se pudieron cargar las reservas en este momento.");
+    if (error) {
+      setMensaje(`No se pudieron cargar las reservas: ${error.message}`);
       setExito(false);
-    } finally {
-      if (modoActualizacion) setActualizando(false);
+      setReservas([]);
+    } else {
+      setReservas((data || []) as Reserva[]);
     }
+
+    if (modoActualizacion) setActualizando(false);
+  }
+
+  async function subirComprobante() {
+    if (!comprobante) return "";
+
+    const extension =
+      comprobante.name.split(".").pop()?.toLowerCase() || "pdf";
+
+    const nombreArchivo = `reservas/${propietario?.condominio_id || 0}/${
+      propietario?.unidad_id || 0
+    }-${Date.now()}.${extension}`;
+
+    const { error } = await supabase.storage
+      .from("comprobantes-reservas")
+      .upload(nombreArchivo, comprobante, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+
+    if (error) {
+      throw new Error(`Error subiendo comprobante: ${error.message}`);
+    }
+
+    const { data } = supabase.storage
+      .from("comprobantes-reservas")
+      .getPublicUrl(nombreArchivo);
+
+    return data.publicUrl;
   }
 
   function limpiarFormulario() {
@@ -326,82 +262,6 @@ export default function ReservasPropietariosPage() {
 
     if (inputComprobanteRef.current) {
       inputComprobanteRef.current.value = "";
-    }
-  }
-
-  async function abrirComprobanteReserva(reserva: Reserva) {
-    if (!propietario || !reserva?.id || !reserva.tiene_comprobante) return;
-
-    setMensaje("");
-    setExito(false);
-
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-      return;
-    }
-
-    const ventana = window.open("", "_blank");
-
-    try {
-      const params = new URLSearchParams({
-        reserva_id: String(reserva.id),
-        condominio_id: String(propietario.condominio_id),
-        unidad_id: String(propietario.unidad_id),
-      });
-
-      const response = await fetch(
-        `${API_RESERVA}?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        }
-      );
-
-      const resultado = await response.json().catch(() => ({}));
-
-      if (
-        response.status === 401 ||
-        codigoSesionInvalida(resultado?.codigo)
-      ) {
-        if (ventana) ventana.close();
-
-        enviarALogin(
-          resultado?.mensaje ||
-            "La sesión ha vencido. Inicie sesión nuevamente."
-        );
-        return;
-      }
-
-      if (!response.ok || resultado?.ok !== true || !resultado?.url) {
-        if (ventana) ventana.close();
-
-        setMensaje(
-          resultado?.mensaje ||
-            "El comprobante no está disponible."
-        );
-        setExito(false);
-        return;
-      }
-
-      if (ventana) {
-        ventana.opener = null;
-        ventana.location.href = resultado.url;
-      } else {
-        window.location.href = resultado.url;
-      }
-    } catch (error) {
-      if (ventana) ventana.close();
-
-      console.error("Error abriendo comprobante de reserva:", error);
-      setMensaje("No se pudo abrir el comprobante en este momento.");
-      setExito(false);
     }
   }
 
@@ -421,11 +281,6 @@ export default function ReservasPropietariosPage() {
       return;
     }
 
-    if (fechaReserva < fechaLocalHoy()) {
-      setMensaje("La fecha de la reserva no puede ser anterior a hoy.");
-      return;
-    }
-
     if (!horaInicio || !horaFin) {
       setMensaje("Debe indicar la hora de inicio y la hora de fin.");
       return;
@@ -441,113 +296,45 @@ export default function ReservasPropietariosPage() {
       return;
     }
 
-    const cantidad = Number(cantidadPersonas || 0);
-    const monto = Number(montoPagado || 0);
-
-    if (!Number.isFinite(cantidad) || cantidad < 0 || cantidad > 10000) {
-      setMensaje("La cantidad de personas no es válida.");
-      return;
-    }
-
-    if (!Number.isFinite(monto) || monto < 0 || monto > 10000000) {
-      setMensaje("El monto pagado no es válido.");
-      return;
-    }
-
-    if (comprobante) {
-      const tiposPermitidos = [
-        "application/pdf",
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-      ];
-
-      if (!tiposPermitidos.includes(comprobante.type)) {
-        setMensaje("El comprobante debe ser PDF, JPG, PNG o WEBP.");
-        return;
-      }
-
-      if (comprobante.size <= 0 || comprobante.size > 10 * 1024 * 1024) {
-        setMensaje("El comprobante no puede superar 10 MB.");
-        return;
-      }
-    }
-
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("condominio_id", String(propietario.condominio_id));
-    formData.append("unidad_id", String(propietario.unidad_id));
-    formData.append("area_social_id", areaId);
-    formData.append("fecha_reserva", fechaReserva);
-    formData.append("hora_inicio", horaInicio);
-    formData.append("hora_fin", horaFin);
-    formData.append("motivo", motivo.trim());
-    formData.append("cantidad_personas", String(cantidad));
-    formData.append("monto_pagado", String(monto));
-
-    if (comprobante) {
-      formData.append("file", comprobante);
-    }
+    setLoading(true);
 
     try {
-      setLoading(true);
+      const comprobanteUrl = await subirComprobante();
 
-      const response = await fetch(API_RESERVA, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-        cache: "no-store",
-      });
+      const { error } = await supabase
+        .from("reservas_areas_sociales")
+        .insert([
+          {
+            area_social_id: Number(areaId),
+            propietario_id: propietario.propietario_id,
+            condominio: propietario.condominio_nombre,
+            no_apartamento: propietario.no_apartamento,
+            nombre_propietario: propietario.nombre_propietario,
+            cedula: propietario.cedula,
+            telefono: propietario.telefono || "",
+            fecha_reserva: fechaReserva,
+            hora_inicio: horaInicio,
+            hora_fin: horaFin,
+            motivo: motivo.trim(),
+            cantidad_personas: Number(cantidadPersonas || 0),
+            monto_pagado: Number(montoPagado || 0),
+            comprobante_url: comprobanteUrl,
+            estado: "Pendiente aprobación",
+          },
+        ]);
 
-      const resultado = await response.json().catch(() => ({}));
-
-      if (
-        response.status === 401 ||
-        codigoSesionInvalida(resultado?.codigo)
-      ) {
-        enviarALogin(
-          resultado?.mensaje ||
-            "La sesión ha vencido. Inicie sesión nuevamente."
-        );
-        return;
-      }
-
-      if (!response.ok || resultado?.ok !== true) {
-        throw new Error(
-          resultado?.mensaje ||
-            "No se pudo registrar la reserva."
-        );
-      }
+      if (error) throw error;
 
       limpiarFormulario();
       setExito(true);
       setMensaje(
-        resultado?.mensaje ||
-          "Reserva enviada correctamente. Quedará pendiente de aprobación."
+        "Reserva enviada correctamente. Quedará pendiente de aprobación."
       );
 
-      await cargarContextoReservas(
-        propietario,
-        token,
-        false,
-        true
-      );
+      await cargarReservas(propietario, false, true);
     } catch (error: any) {
-      console.error("Error registrando reserva:", error);
       setExito(false);
-      setMensaje(
-        error?.message || "Error registrando reserva."
-      );
+      setMensaje(error?.message || "Error registrando reserva.");
     } finally {
       setLoading(false);
     }
@@ -621,7 +408,7 @@ export default function ReservasPropietariosPage() {
 
             <button
               type="button"
-              onClick={() => cargarContextoReservas(propietario, undefined, true)}
+              onClick={() => cargarReservas(propietario, true)}
               disabled={actualizando}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60"
               aria-label="Actualizar"
@@ -778,7 +565,7 @@ export default function ReservasPropietariosPage() {
                 type="date"
                 value={fechaReserva}
                 onChange={(event) => setFechaReserva(event.target.value)}
-                min={fechaLocalHoy()}
+                min={new Date().toISOString().slice(0, 10)}
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
             </Campo>
@@ -948,6 +735,10 @@ export default function ReservasPropietariosPage() {
           ) : (
             <div className="space-y-3">
               {reservas.map((reserva) => {
+                const area = Array.isArray(reserva.areas_sociales)
+                  ? reserva.areas_sociales[0]
+                  : reserva.areas_sociales;
+
                 return (
                   <article
                     key={reserva.id}
@@ -960,7 +751,7 @@ export default function ReservasPropietariosPage() {
                         </p>
 
                         <h3 className="mt-1 text-sm font-black leading-5 text-slate-900">
-                          {reserva.nombre_area || "Área social"}
+                          {area?.nombre_area || "Área social"}
                         </h3>
                       </div>
 
@@ -1024,16 +815,17 @@ export default function ReservasPropietariosPage() {
                       </div>
                     </div>
 
-                    {reserva.tiene_comprobante && (
-                      <button
-                        type="button"
-                        onClick={() => abrirComprobanteReserva(reserva)}
+                    {reserva.comprobante_url && (
+                      <a
+                        href={reserva.comprobante_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 text-xs font-extrabold text-blue-800"
                       >
                         <FileText size={15} />
                         Ver comprobante
                         <ExternalLink size={13} />
-                      </button>
+                      </a>
                     )}
                   </article>
                 );
@@ -1041,12 +833,6 @@ export default function ReservasPropietariosPage() {
             </div>
           )}
         </section>
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Reservas Propietario V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );

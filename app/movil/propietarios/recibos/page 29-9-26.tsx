@@ -38,38 +38,22 @@ type Pago = {
   metodo: string | null;
   descripcion: string | null;
   periodo: string | null;
-  periodos_aplicados?: string[];
-  tiene_comprobante?: boolean;
+  comprobante_url: string | null;
   created_at: string | null;
 };
 
-type RespuestaRecibos = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  pagos?: Pago[];
+type PagoAplicacion = {
+  pago_id: number | null;
+  monto_aplicado: number | string | null;
+  cargos_periodicos:
+    | {
+        periodo: string | null;
+      }
+    | {
+        periodo: string | null;
+      }[]
+    | null;
 };
-
-const RPC_LISTAR_RECIBOS = "vam_propietario_listar_recibos";
-const API_COMPROBANTE_RECIBO = "/api/propietarios/recibos/comprobante";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta(data: unknown): RespuestaRecibos {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaRecibos;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaRecibos;
-  }
-
-  return {};
-}
 
 const meses: Record<number, string> = {
   1: "Enero",
@@ -141,67 +125,28 @@ export default function RecibosPropietarioPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-    localStorage.removeItem("condominio_id");
-    localStorage.removeItem("condominio_nombre");
-    localStorage.removeItem("condominio_logo_url");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) setError(mensaje);
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
   async function inicializar() {
     setCargando(true);
     setError("");
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
-        enviarALogin();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       const sesion = JSON.parse(raw) as PropietarioActual;
 
-      if (
-        !sesion?.propietario_id ||
-        !sesion?.condominio_id ||
-        !sesion?.unidad_id
-      ) {
-        enviarALogin();
+      if (!sesion?.condominio_id || !sesion?.unidad_id) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       setPropietario(sesion);
-      await cargarPagos(sesion, token);
-    } catch (error) {
-      console.error("Error inicializando recibos:", error);
-      setPagos([]);
-      setPeriodosPorPago({});
+      await cargarPagos(sesion);
+    } catch {
       setError("No se pudo cargar la información del propietario.");
     } finally {
       setCargando(false);
@@ -210,167 +155,84 @@ export default function RecibosPropietarioPage() {
 
   async function cargarPagos(
     sesion: PropietarioActual,
-    tokenRecibido?: string,
     modoActualizacion = false
   ) {
     if (modoActualizacion) setActualizando(true);
     setError("");
 
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
+    const { data, error: pagosError } = await supabase
+      .from("pagos")
+      .select(`
+        id,
+        condominio_id,
+        unidad_id,
+        monto,
+        fecha_pago,
+        referencia,
+        metodo_pago,
+        metodo,
+        descripcion,
+        periodo,
+        comprobante_url,
+        created_at
+      `)
+      .eq("condominio_id", sesion.condominio_id)
+      .eq("unidad_id", sesion.unidad_id)
+      .order("fecha_pago", { ascending: false })
+      .order("id", { ascending: false });
 
-      if (!token) {
-        enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-        return;
-      }
-
-      const { data, error: rpcError } = await supabase.rpc(
-        RPC_LISTAR_RECIBOS,
-        {
-          p_token: token,
-          p_condominio_id: Number(sesion.condominio_id),
-          p_unidad_id: Number(sesion.unidad_id),
-        }
-      );
-
-      if (rpcError) {
-        console.error("Error cargando recibos:", rpcError);
-        setPagos([]);
-        setPeriodosPorPago({});
-        setError("No se pudieron cargar los recibos en este momento.");
-        return;
-      }
-
-      const respuesta = normalizarRespuesta(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setPagos([]);
-        setPeriodosPorPago({});
-        setError(
-          respuesta.mensaje ||
-            "No se pudieron cargar los recibos."
-        );
-        return;
-      }
-
-      const pagosData = Array.isArray(respuesta.pagos)
-        ? respuesta.pagos
-        : [];
-
-      setPagos(pagosData);
-
-      const mapa: Record<number, string> = {};
-
-      pagosData.forEach((pago) => {
-        const periodos = Array.isArray(pago.periodos_aplicados)
-          ? pago.periodos_aplicados
-              .map((item) => String(item || "").trim())
-              .filter(Boolean)
-          : [];
-
-        if (periodos.length > 0) {
-          mapa[pago.id] = Array.from(new Set(periodos))
-            .sort()
-            .join(",");
-        } else if (pago.periodo) {
-          mapa[pago.id] = pago.periodo;
-        }
-      });
-
-      setPeriodosPorPago(mapa);
-    } catch (error) {
-      console.error("Error inesperado cargando recibos:", error);
+    if (pagosError) {
       setPagos([]);
-      setPeriodosPorPago({});
-      setError("No se pudieron cargar los recibos en este momento.");
-    } finally {
+      setError(`No se pudieron cargar los recibos: ${pagosError.message}`);
       if (modoActualizacion) setActualizando(false);
-    }
-  }
-
-  async function abrirComprobante(pago: Pago) {
-    if (!propietario || !pago?.id) return;
-
-    setError("");
-
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
       return;
     }
 
-    const ventana = window.open("", "_blank");
+    const pagosData = (data || []) as Pago[];
+    setPagos(pagosData);
 
-    try {
-      const params = new URLSearchParams({
-        pago_id: String(pago.id),
-        condominio_id: String(propietario.condominio_id),
-        unidad_id: String(propietario.unidad_id),
+    const ids = pagosData.map((pago) => pago.id);
+
+    if (ids.length > 0) {
+      const { data: aplicacionesData } = await supabase
+        .from("pagos_aplicaciones")
+        .select(`
+          pago_id,
+          monto_aplicado,
+          cargos_periodicos (
+            periodo
+          )
+        `)
+        .in("pago_id", ids);
+
+      const mapa: Record<number, string[]> = {};
+
+      ((aplicacionesData || []) as PagoAplicacion[]).forEach((item) => {
+        const pagoId = Number(item.pago_id || 0);
+        if (!pagoId) return;
+
+        const cargo = Array.isArray(item.cargos_periodicos)
+          ? item.cargos_periodicos[0]
+          : item.cargos_periodicos;
+
+        const periodo = cargo?.periodo || "";
+        if (!periodo) return;
+
+        if (!mapa[pagoId]) mapa[pagoId] = [];
+        if (!mapa[pagoId].includes(periodo)) mapa[pagoId].push(periodo);
       });
 
-      const response = await fetch(
-        `${API_COMPROBANTE_RECIBO}?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        }
-      );
+      const normalizado: Record<number, string> = {};
+      Object.entries(mapa).forEach(([id, valores]) => {
+        normalizado[Number(id)] = valores.sort().join(",");
+      });
 
-      const resultado = await response.json().catch(() => ({}));
-
-      if (
-        response.status === 401 ||
-        codigoSesionInvalida(resultado?.codigo)
-      ) {
-        if (ventana) ventana.close();
-
-        enviarALogin(
-          resultado?.mensaje ||
-            "La sesión ha vencido. Inicie sesión nuevamente."
-        );
-        return;
-      }
-
-      if (!response.ok || resultado?.ok !== true || !resultado?.url) {
-        if (ventana) ventana.close();
-
-        setError(
-          resultado?.mensaje ||
-            "El comprobante no está disponible."
-        );
-        return;
-      }
-
-      if (ventana) {
-        ventana.opener = null;
-        ventana.location.href = resultado.url;
-      } else {
-        window.location.href = resultado.url;
-      }
-    } catch (error) {
-      if (ventana) ventana.close();
-
-      console.error("Error abriendo comprobante:", error);
-      setError("No se pudo abrir el comprobante en este momento.");
+      setPeriodosPorPago(normalizado);
+    } else {
+      setPeriodosPorPago({});
     }
+
+    if (modoActualizacion) setActualizando(false);
   }
 
   const pagosFiltrados = useMemo(() => {
@@ -445,7 +307,7 @@ export default function RecibosPropietarioPage() {
 
             <button
               type="button"
-              onClick={() => cargarPagos(propietario, undefined, true)}
+              onClick={() => cargarPagos(propietario, true)}
               disabled={actualizando}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60"
               aria-label="Actualizar"
@@ -599,15 +461,16 @@ export default function RecibosPropietarioPage() {
                       Ver recibo
                     </button>
 
-                    {pago.tiene_comprobante ? (
-                      <button
-                        type="button"
-                        onClick={() => abrirComprobante(pago)}
+                    {pago.comprobante_url ? (
+                      <a
+                        href={pago.comprobante_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700"
                       >
                         <ExternalLink size={15} />
                         Comprobante
-                      </button>
+                      </a>
                     ) : (
                       <button
                         type="button"
@@ -623,12 +486,6 @@ export default function RecibosPropietarioPage() {
             })
           )}
         </section>
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Recibos Propietario V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );

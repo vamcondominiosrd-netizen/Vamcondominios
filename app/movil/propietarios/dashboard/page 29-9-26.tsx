@@ -68,70 +68,21 @@ function formatoMoneda(valor: number) {
   }).format(valor || 0);
 }
 
-type RespuestaBalance = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  balance?: number | string | null;
-};
-
-type RespuestaComunicaciones = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  comunicaciones?: ComunicacionPendiente[];
-  data?: ComunicacionPendiente[];
-};
-
-const RPC_DASHBOARD_BALANCE = "vam_propietario_dashboard_balance";
-const RPC_LISTAR_COMUNICACIONES = "listar_comunicaciones_propietario";
-const MODULO_VERSION = "2.1";
-
-function normalizarRespuestaBalance(data: unknown): RespuestaBalance {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaBalance;
+function normalizarComunicaciones(data: unknown): ComunicacionPendiente[] {
+  if (Array.isArray(data)) {
+    return data as ComunicacionPendiente[];
   }
 
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaBalance;
-  }
+  if (data && typeof data === "object") {
+    const objeto = data as Record<string, unknown>;
 
-  return {};
-}
+    if (Array.isArray(objeto.comunicaciones)) {
+      return objeto.comunicaciones as ComunicacionPendiente[];
+    }
 
-function normalizarRespuestaComunicaciones(
-  data: unknown
-): RespuestaComunicaciones {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaComunicaciones;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaComunicaciones;
-  }
-
-  return {};
-}
-
-function normalizarComunicaciones(
-  respuesta: RespuestaComunicaciones
-): ComunicacionPendiente[] {
-  if (Array.isArray(respuesta.comunicaciones)) {
-    return respuesta.comunicaciones;
-  }
-
-  if (Array.isArray(respuesta.data)) {
-    return respuesta.data;
+    if (Array.isArray(objeto.data)) {
+      return objeto.data as ComunicacionPendiente[];
+    }
   }
 
   return [];
@@ -152,29 +103,11 @@ export default function DashboardPropietariosPage() {
   const [cargandoComunicaciones, setCargandoComunicaciones] = useState(true);
 
   useEffect(() => {
-    void inicializar();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  async function inicializar() {
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
-        cerrarSesion();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
@@ -191,101 +124,67 @@ export default function DashboardPropietariosPage() {
 
       setPropietario(sesion);
 
-      await Promise.all([
-        cargarBalance(sesion, token),
-        cargarComunicaciones(sesion, token),
-      ]);
-    } catch (error) {
-      console.error("Error inicializando dashboard propietario:", error);
+      void cargarBalance(sesion);
+      void cargarComunicaciones(sesion);
+    } catch {
       cerrarSesion();
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
-  async function cargarBalance(
-    prop: PropietarioActual,
-    tokenRecibido?: string
-  ) {
+  async function cargarBalance(prop: PropietarioActual) {
     setCargandoBalance(true);
     setMensajeBalance("");
 
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
+    const { data, error } = await supabase
+      .from("cargos_periodicos")
+      .select("balance")
+      .eq("condominio_id", prop.condominio_id)
+      .eq("unidad_id", prop.unidad_id);
 
-      if (!token) {
-        cerrarSesion();
-        return;
-      }
-
-      const { data, error } = await supabase.rpc(
-        RPC_DASHBOARD_BALANCE,
-        {
-          p_token: token,
-          p_condominio_id: Number(prop.condominio_id),
-          p_unidad_id: Number(prop.unidad_id),
-        }
-      );
-
-      if (error) {
-        console.error("Error cargando balance del dashboard:", error);
-        setMensajeBalance("No se pudo cargar el balance en este momento.");
-        setBalanceActual(0);
-        return;
-      }
-
-      const respuesta = normalizarRespuestaBalance(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          cerrarSesion();
-          return;
-        }
-
-        setMensajeBalance(
-          respuesta.mensaje ||
-            "No se pudo cargar el balance en este momento."
-        );
-        setBalanceActual(0);
-        return;
-      }
-
-      setBalanceActual(Number(respuesta.balance || 0));
-    } catch (error) {
-      console.error("Error inesperado cargando balance:", error);
+    if (error) {
       setMensajeBalance("No se pudo cargar el balance en este momento.");
-      setBalanceActual(0);
-    } finally {
       setCargandoBalance(false);
+      return;
     }
+
+    const total = (data || []).reduce(
+      (acumulado, registro: { balance?: number | string | null }) =>
+        acumulado + Number(registro.balance || 0),
+      0
+    );
+
+    setBalanceActual(total);
+    setCargandoBalance(false);
   }
 
-  async function cargarComunicaciones(
-    prop: PropietarioActual,
-    tokenRecibido?: string
-  ) {
+  async function cargarComunicaciones(prop: PropietarioActual) {
     setCargandoComunicaciones(true);
 
     try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
+      const token = localStorage.getItem("propietario_token");
 
       if (!token) {
-        cerrarSesion();
+        setComunicacionesPendientes(0);
+        setUltimaComunicacion(null);
         return;
       }
 
+      /*
+       * IMPORTANTE:
+       * El portal de propietarios utiliza propietario_token y no una sesión
+       * auth.uid() de Supabase. Por seguridad, las comunicaciones deben
+       * consultarse mediante una RPC que valide ese token.
+       *
+       * Si en tu SQL la función tiene otro nombre, cambia solamente
+       * "listar_comunicaciones_propietario" y/o los nombres de parámetros.
+       */
       const { data, error } = await supabase.rpc(
-        RPC_LISTAR_COMUNICACIONES,
+        "listar_comunicaciones_propietario",
         {
           p_token: token,
-          p_condominio_id: Number(prop.condominio_id),
-          p_unidad_id: Number(prop.unidad_id),
+          p_condominio_id: prop.condominio_id,
+          p_unidad_id: prop.unidad_id,
         }
       );
 
@@ -296,40 +195,17 @@ export default function DashboardPropietariosPage() {
         return;
       }
 
-      const respuesta = normalizarRespuestaComunicaciones(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          cerrarSesion();
-          return;
-        }
-
-        console.warn(
-          "Comunicaciones no disponibles:",
-          respuesta.mensaje || "Respuesta inválida del servidor."
-        );
-        setComunicacionesPendientes(0);
-        setUltimaComunicacion(null);
-        return;
-      }
-
-      const comunicaciones = normalizarComunicaciones(respuesta)
+      const comunicaciones = normalizarComunicaciones(data)
         .filter((item) => {
           const estado = String(item.estado || "").toUpperCase();
           return estado !== "ANULADA" && !item.leida_at;
         })
         .sort((a, b) =>
-          String(b.enviada_at || "").localeCompare(
-            String(a.enviada_at || "")
-          )
+          String(b.enviada_at || "").localeCompare(String(a.enviada_at || ""))
         );
 
       setComunicacionesPendientes(comunicaciones.length);
       setUltimaComunicacion(comunicaciones[0] || null);
-    } catch (error) {
-      console.warn("Error inesperado cargando comunicaciones:", error);
-      setComunicacionesPendientes(0);
-      setUltimaComunicacion(null);
     } finally {
       setCargandoComunicaciones(false);
     }
@@ -732,7 +608,7 @@ export default function DashboardPropietariosPage() {
 
         <footer className="pb-2 pt-1 text-center">
           <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Dashboard Propietario V{MODULO_VERSION}
+            VAM Administración de Condominios
           </p>
         </footer>
       </div>

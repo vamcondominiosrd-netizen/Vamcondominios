@@ -44,46 +44,10 @@ type Pago = {
   metodo: string | null;
   metodo_pago: string | null;
   origen: string | null;
-  tiene_comprobante: boolean;
+  comprobante_url: string | null;
   periodos_aplicados: string[];
   aplicaciones: AplicacionPago[];
 };
-
-type RespuestaEstadoCuenta = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  cargos?: Cargo[];
-  pagos?: Pago[];
-};
-
-type RespuestaComprobante = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  comprobante_url?: string | null;
-};
-
-const RPC_ESTADO_CUENTA = "vam_propietario_estado_cuenta";
-const RPC_COMPROBANTE_PAGO = "vam_propietario_pago_comprobante_url";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta<T>(data: unknown): T {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as T;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as T;
-  }
-
-  return {} as T;
-}
 
 function formatoMoneda(valor: number) {
   return new Intl.NumberFormat("es-DO", {
@@ -154,144 +118,141 @@ export default function EstadoCuentaPropietarioPage() {
   const [periodoReporte, setPeriodoReporte] = useState("");
 
   useEffect(() => {
-    void inicializar();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const raw = localStorage.getItem("propietario_actual");
+
+    if (!raw) {
+      router.push("/movil/propietarios/login");
+      return;
+    }
+
+    const prop = JSON.parse(raw);
+    setPropietario(prop);
+    cargarEstado(prop);
   }, [router]);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-    localStorage.removeItem("condominio_id");
-    localStorage.removeItem("condominio_nombre");
-    localStorage.removeItem("condominio_logo_url");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) setMensaje(mensaje);
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
-  async function inicializar() {
+  async function cargarEstado(prop: PropietarioActual) {
     setLoading(true);
     setMensaje("");
 
     try {
-      const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
+      const { data: cargosData, error: cargosError } = await supabase
+        .from("cargos_periodicos")
+        .select(
+          "id, periodo, concepto, tipo_cargo, monto, monto_pagado, balance, estado"
+        )
+        .eq("condominio_id", prop.condominio_id)
+        .eq("unidad_id", prop.unidad_id)
+        .order("anio", { ascending: true })
+        .order("mes", { ascending: true });
 
-      if (!raw || !token) {
-        enviarALogin();
-        return;
-      }
-
-      const prop = JSON.parse(raw) as PropietarioActual;
-
-      if (
-        !prop?.propietario_id ||
-        !prop?.condominio_id ||
-        !prop?.unidad_id
-      ) {
-        enviarALogin();
-        return;
-      }
-
-      setPropietario(prop);
-      await cargarEstado(prop, token);
-    } catch (error) {
-      console.error("Error inicializando estado de cuenta:", error);
-      setMensaje("No se pudo cargar la información del propietario.");
-      setCargos([]);
-      setPagos([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function cargarEstado(
-    prop: PropietarioActual,
-    tokenRecibido?: string
-  ) {
-    setLoading(true);
-    setMensaje("");
-
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
-
-      if (!token) {
-        enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-        return;
-      }
-
-      const { data, error } = await supabase.rpc(
-        RPC_ESTADO_CUENTA,
-        {
-          p_token: token,
-          p_condominio_id: Number(prop.condominio_id),
-          p_unidad_id: Number(prop.unidad_id),
-        }
-      );
-
-      if (error) {
-        console.error("Error cargando estado de cuenta:", error);
-        setMensaje("No se pudo cargar el estado de cuenta en este momento.");
-        setCargos([]);
-        setPagos([]);
-        return;
-      }
-
-      const respuesta =
-        normalizarRespuesta<RespuestaEstadoCuenta>(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setMensaje(
-          respuesta.mensaje ||
-            "No se pudo cargar el estado de cuenta."
+      if (cargosError) {
+        throw new Error(
+          "Error cargando estado de cuenta: " + cargosError.message
         );
-        setCargos([]);
-        setPagos([]);
-        return;
       }
 
-      const cargosFinales = Array.isArray(respuesta.cargos)
-        ? respuesta.cargos
-        : [];
+      const { data: pagosData, error: pagosError } = await supabase
+        .from("pagos")
+        .select(
+          "id, fecha_pago, periodo, monto, referencia, descripcion, metodo, metodo_pago, origen, comprobante_url"
+        )
+        .eq("condominio_id", prop.condominio_id)
+        .eq("unidad_id", prop.unidad_id)
+        .order("fecha_pago", { ascending: false })
+        .order("id", { ascending: false });
 
-      const pagosFinales = Array.isArray(respuesta.pagos)
-        ? respuesta.pagos
-        : [];
+      if (pagosError) {
+        throw new Error("Error cargando pagos: " + pagosError.message);
+      }
+
+      const pagosBase = (pagosData || []) as Omit<
+        Pago,
+        "periodos_aplicados" | "aplicaciones"
+      >[];
+
+      const pagoIds = pagosBase.map((p) => p.id);
+      const periodosPorPago = new Map<number, string[]>();
+      const aplicacionesPorPago = new Map<number, AplicacionPago[]>();
+
+      if (pagoIds.length > 0) {
+        const { data: aplicacionesData, error: aplicacionesError } =
+          await supabase
+            .from("pagos_aplicaciones")
+            .select("pago_id, cargo_periodico_id, monto_aplicado")
+            .in("pago_id", pagoIds);
+
+        if (aplicacionesError) {
+          throw new Error(
+            "Error cargando aplicaciones de pagos: " +
+              aplicacionesError.message
+          );
+        }
+
+        const aplicaciones = aplicacionesData || [];
+        const cargoIds = Array.from(
+          new Set(
+            aplicaciones
+              .map((a: any) => Number(a.cargo_periodico_id))
+              .filter((id: number) => Number.isFinite(id))
+          )
+        );
+
+        const periodoPorCargo = new Map<number, string>();
+
+        if (cargoIds.length > 0) {
+          const { data: cargosAplicadosData, error: cargosAplicadosError } =
+            await supabase
+              .from("cargos_periodicos")
+              .select("id, periodo")
+              .in("id", cargoIds);
+
+          if (cargosAplicadosError) {
+            throw new Error(
+              "Error cargando períodos aplicados: " +
+                cargosAplicadosError.message
+            );
+          }
+
+          for (const cargo of cargosAplicadosData || []) {
+            periodoPorCargo.set(Number(cargo.id), String(cargo.periodo || ""));
+          }
+        }
+
+        for (const aplicacion of aplicaciones) {
+          const pagoId = Number((aplicacion as any).pago_id);
+          const cargoId = Number((aplicacion as any).cargo_periodico_id);
+          const periodo = periodoPorCargo.get(cargoId);
+
+          if (!periodo) continue;
+
+          const periodosActuales = periodosPorPago.get(pagoId) || [];
+          if (!periodosActuales.includes(periodo)) {
+            periodosActuales.push(periodo);
+            periodosActuales.sort();
+            periodosPorPago.set(pagoId, periodosActuales);
+          }
+
+          const aplicacionesActuales = aplicacionesPorPago.get(pagoId) || [];
+          aplicacionesActuales.push({
+            cargo_periodico_id: cargoId,
+            periodo,
+            monto_aplicado: Number((aplicacion as any).monto_aplicado || 0),
+          });
+          aplicacionesPorPago.set(pagoId, aplicacionesActuales);
+        }
+      }
+
+      const pagosConPeriodos: Pago[] = pagosBase.map((p) => ({
+        ...p,
+        periodos_aplicados:
+          periodosPorPago.get(p.id) || (p.periodo ? [p.periodo] : []),
+        aplicaciones: aplicacionesPorPago.get(p.id) || [],
+      }));
+
+      const cargosFinales = (cargosData || []) as Cargo[];
 
       setCargos(cargosFinales);
-      setPagos(pagosFinales);
+      setPagos(pagosConPeriodos);
 
       const periodoActual = periodoActualLocal();
       const disponibles = cargosFinales
@@ -300,81 +261,14 @@ export default function EstadoCuentaPropietarioPage() {
         .sort();
 
       if (disponibles.length > 0) {
-        setPeriodoReporte(
-          (actual) => actual || disponibles[disponibles.length - 1]
-        );
+        setPeriodoReporte((actual) => actual || disponibles[disponibles.length - 1]);
       }
-    } catch (error) {
-      console.error("Error inesperado cargando estado de cuenta:", error);
-      setMensaje("No se pudo cargar el estado de cuenta.");
+    } catch (error: any) {
+      setMensaje(error?.message || "No se pudo cargar el estado de cuenta.");
       setCargos([]);
       setPagos([]);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function abrirComprobantePago(pago: Pago) {
-    if (!propietario || !pago?.id) return;
-
-    setMensaje("");
-
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase.rpc(
-        RPC_COMPROBANTE_PAGO,
-        {
-          p_token: token,
-          p_condominio_id: Number(propietario.condominio_id),
-          p_unidad_id: Number(propietario.unidad_id),
-          p_pago_id: Number(pago.id),
-        }
-      );
-
-      if (error) {
-        console.error("Error obteniendo comprobante:", error);
-        setMensaje("No se pudo abrir el comprobante en este momento.");
-        return;
-      }
-
-      const respuesta =
-        normalizarRespuesta<RespuestaComprobante>(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setMensaje(
-          respuesta.mensaje ||
-            "El comprobante no está disponible."
-        );
-        return;
-      }
-
-      const url = String(respuesta.comprobante_url || "").trim();
-
-      if (!url) {
-        setMensaje("El comprobante no está disponible.");
-        return;
-      }
-
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch (error) {
-      console.error("Error inesperado abriendo comprobante:", error);
-      setMensaje("No se pudo abrir el comprobante en este momento.");
     }
   }
 
@@ -1124,10 +1018,16 @@ export default function EstadoCuentaPropietarioPage() {
             </div>
 
             <div className="mt-4">
-              {pago.tiene_comprobante ? (
+              {pago.comprobante_url ? (
                 <button
                   type="button"
-                  onClick={() => abrirComprobantePago(pago)}
+                  onClick={() =>
+                    window.open(
+                      pago.comprobante_url as string,
+                      "_blank",
+                      "noopener,noreferrer"
+                    )
+                  }
                   className="w-full rounded-xl bg-blue-600 text-white font-semibold py-3 text-sm active:scale-[0.99]"
                 >
                   Ver volante bancario
@@ -1206,12 +1106,6 @@ export default function EstadoCuentaPropietarioPage() {
           </div>
         )}
       </section>
-
-      <footer className="pb-2 pt-1 text-center">
-        <p className="text-[10px] text-slate-400">
-          VAM Administración de Condominios · Estado de Cuenta Propietario V{MODULO_VERSION}
-        </p>
-      </footer>
     </div>
   );
 }

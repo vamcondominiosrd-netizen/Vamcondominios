@@ -39,16 +39,18 @@ type Pago = {
   metodo: string | null;
   descripcion: string | null;
   periodo: string | null;
-  tiene_comprobante?: boolean;
+  comprobante_url: string | null;
   created_at: string | null;
-};
-
-type CargoAplicado = {
-  periodo: string | null;
-  concepto: string | null;
-  monto: number | string | null;
-  balance: number | string | null;
-  estado: string | null;
+  unidades:
+    | {
+        codigo: string | null;
+        propietario_nombre: string | null;
+      }
+    | {
+        codigo: string | null;
+        propietario_nombre: string | null;
+      }[]
+    | null;
 };
 
 type AplicacionPago = {
@@ -56,38 +58,23 @@ type AplicacionPago = {
   pago_id: number | null;
   monto_aplicado: number | string | null;
   observacion: string | null;
-  cargo: CargoAplicado | null;
+  cargos_periodicos:
+    | {
+        periodo: string | null;
+        concepto: string | null;
+        monto: number | string | null;
+        balance: number | string | null;
+        estado: string | null;
+      }
+    | {
+        periodo: string | null;
+        concepto: string | null;
+        monto: number | string | null;
+        balance: number | string | null;
+        estado: string | null;
+      }[]
+    | null;
 };
-
-type RespuestaDetalleRecibo = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  propietario?: PropietarioActual | null;
-  pago?: Pago | null;
-  aplicaciones?: AplicacionPago[];
-};
-
-const RPC_DETALLE_RECIBO = "vam_propietario_detalle_recibo";
-const API_COMPROBANTE_RECIBO = "/api/propietarios/recibos/comprobante";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta(data: unknown): RespuestaDetalleRecibo {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaDetalleRecibo;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaDetalleRecibo;
-  }
-
-  return {};
-}
 
 const meses: Record<number, string> = {
   1: "Enero",
@@ -155,202 +142,94 @@ export default function ReciboPropietarioMovilPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pagoId]);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-    localStorage.removeItem("condominio_id");
-    localStorage.removeItem("condominio_nombre");
-    localStorage.removeItem("condominio_logo_url");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) setError(mensaje);
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
   async function cargarRecibo() {
     setCargando(true);
     setError("");
-    setPago(null);
-    setAplicaciones([]);
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
-        enviarALogin();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
-      const contexto = JSON.parse(raw) as PropietarioActual;
+      const sesion = JSON.parse(raw) as PropietarioActual;
 
-      if (
-        !contexto?.propietario_id ||
-        !contexto?.condominio_id ||
-        !contexto?.unidad_id
-      ) {
-        enviarALogin();
+      if (!sesion?.condominio_id || !sesion?.unidad_id) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       if (!Number.isFinite(pagoId) || pagoId <= 0) {
-        setPropietario(contexto);
         setError("El recibo indicado no es válido.");
         return;
       }
 
-      const { data, error: rpcError } = await supabase.rpc(
-        RPC_DETALLE_RECIBO,
-        {
-          p_token: token,
-          p_condominio_id: Number(contexto.condominio_id),
-          p_unidad_id: Number(contexto.unidad_id),
-          p_pago_id: Number(pagoId),
-        }
-      );
+      setPropietario(sesion);
 
-      if (rpcError) {
-        console.error("Error cargando detalle del recibo:", rpcError);
-        setPropietario(contexto);
-        setError("No se pudo cargar el recibo en este momento.");
+      const { data, error: pagoError } = await supabase
+        .from("pagos")
+        .select(`
+          id,
+          condominio_id,
+          unidad_id,
+          monto,
+          fecha_pago,
+          referencia,
+          metodo_pago,
+          metodo,
+          descripcion,
+          periodo,
+          comprobante_url,
+          created_at,
+          unidades (
+            codigo,
+            propietario_nombre
+          )
+        `)
+        .eq("id", pagoId)
+        .eq("condominio_id", sesion.condominio_id)
+        .eq("unidad_id", sesion.unidad_id)
+        .maybeSingle();
+
+      if (pagoError) throw pagoError;
+
+      if (!data) {
+        setError("No se encontró el recibo o no pertenece a esta unidad.");
         return;
       }
 
-      const respuesta = normalizarRespuesta(data);
+      setPago(data as Pago);
 
-      if (
-        respuesta.ok !== true ||
-        !respuesta.propietario ||
-        !respuesta.pago
-      ) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
+      const { data: aplicacionesData, error: aplicacionesError } =
+        await supabase
+          .from("pagos_aplicaciones")
+          .select(`
+            id,
+            pago_id,
+            monto_aplicado,
+            observacion,
+            cargos_periodicos (
+              periodo,
+              concepto,
+              monto,
+              balance,
+              estado
+            )
+          `)
+          .eq("pago_id", pagoId)
+          .order("id", { ascending: true });
 
-        setPropietario(contexto);
-        setError(
-          respuesta.mensaje ||
-            "No se encontró el recibo o no pertenece a esta unidad."
-        );
-        return;
+      if (aplicacionesError) {
+        setAplicaciones([]);
+      } else {
+        setAplicaciones((aplicacionesData || []) as AplicacionPago[]);
       }
-
-      const perfilValidado = respuesta.propietario;
-
-      setPropietario(perfilValidado);
-      setPago(respuesta.pago);
-      setAplicaciones(
-        Array.isArray(respuesta.aplicaciones)
-          ? respuesta.aplicaciones
-          : []
-      );
-
-      // Sincroniza el contexto local únicamente después de validar en servidor.
-      localStorage.setItem(
-        "propietario_actual",
-        JSON.stringify(perfilValidado)
-      );
     } catch (err: any) {
-      console.error("Error inesperado cargando recibo:", err);
       setError(err?.message || "No se pudo cargar el recibo.");
     } finally {
       setCargando(false);
-    }
-  }
-
-  async function abrirComprobante() {
-    if (!propietario || !pago?.id || !pago.tiene_comprobante) return;
-
-    setError("");
-
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-      return;
-    }
-
-    const ventana = window.open("", "_blank");
-
-    try {
-      const params = new URLSearchParams({
-        pago_id: String(pago.id),
-        condominio_id: String(propietario.condominio_id),
-        unidad_id: String(propietario.unidad_id),
-      });
-
-      const response = await fetch(
-        `${API_COMPROBANTE_RECIBO}?${params.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        }
-      );
-
-      const resultado = await response.json().catch(() => ({}));
-
-      if (
-        response.status === 401 ||
-        codigoSesionInvalida(resultado?.codigo)
-      ) {
-        if (ventana) ventana.close();
-
-        enviarALogin(
-          resultado?.mensaje ||
-            "La sesión ha vencido. Inicie sesión nuevamente."
-        );
-        return;
-      }
-
-      if (!response.ok || resultado?.ok !== true || !resultado?.url) {
-        if (ventana) ventana.close();
-
-        setError(
-          resultado?.mensaje ||
-            "El comprobante no está disponible."
-        );
-        return;
-      }
-
-      if (ventana) {
-        ventana.opener = null;
-        ventana.location.href = resultado.url;
-      } else {
-        window.location.href = resultado.url;
-      }
-    } catch (err) {
-      if (ventana) ventana.close();
-
-      console.error("Error abriendo comprobante:", err);
-      setError("No se pudo abrir el comprobante en este momento.");
     }
   }
 
@@ -390,8 +269,17 @@ export default function ReciboPropietarioMovilPage() {
     );
   }
 
+  const unidad = Array.isArray(pago.unidades)
+    ? pago.unidades[0]
+    : pago.unidades;
+
   const periodosAplicados = aplicaciones
-    .map((item) => item.cargo?.periodo || "")
+    .map((item) => {
+      const cargo = Array.isArray(item.cargos_periodicos)
+        ? item.cargos_periodicos[0]
+        : item.cargos_periodicos;
+      return cargo?.periodo || "";
+    })
     .filter(Boolean);
 
   const periodoTexto =
@@ -552,7 +440,7 @@ export default function ReciboPropietarioMovilPage() {
             <DatoIcono
               icono={<UserRound size={16} />}
               etiqueta="Unidad"
-              valor={propietario.no_apartamento}
+              valor={unidad?.codigo || propietario.no_apartamento}
             />
             <DatoIcono
               icono={<CalendarDays size={16} />}
@@ -616,7 +504,9 @@ export default function ReciboPropietarioMovilPage() {
               </div>
             ) : (
               aplicaciones.map((item) => {
-                const cargo = item.cargo;
+                const cargo = Array.isArray(item.cargos_periodicos)
+                  ? item.cargos_periodicos[0]
+                  : item.cargos_periodicos;
 
                 return (
                   <article
@@ -676,15 +566,16 @@ export default function ReciboPropietarioMovilPage() {
           </section>
         )}
 
-        {pago.tiene_comprobante && (
-          <button
-            type="button"
-            onClick={abrirComprobante}
+        {pago.comprobante_url && (
+          <a
+            href={pago.comprobante_url}
+            target="_blank"
+            rel="noopener noreferrer"
             className="no-print flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 text-sm font-extrabold text-blue-800"
           >
             <ExternalLink size={17} />
             Ver comprobante cargado
-          </button>
+          </a>
         )}
 
         <section className="print-card rounded-[1.4rem] border border-emerald-200 bg-emerald-50 p-4">
@@ -695,14 +586,14 @@ export default function ReciboPropietarioMovilPage() {
             />
             <p className="text-xs leading-5 text-emerald-800">
               Este recibo confirma que el pago fue registrado para la unidad{" "}
-              <strong>{propietario.no_apartamento}</strong>.
+              <strong>{unidad?.codigo || propietario.no_apartamento}</strong>.
               Para cualquier aclaración, contacte a la administración.
             </p>
           </div>
         </section>
 
         <p className="pb-2 text-center text-[10px] text-slate-400">
-          VAM Administración de Condominios · 829-792-9292 · Recibo Propietario V{MODULO_VERSION}
+          VAM Administración de Condominios · 829-792-9292
         </p>
       </div>
     </main>

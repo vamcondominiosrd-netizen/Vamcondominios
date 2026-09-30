@@ -22,6 +22,36 @@ type BancoNombre = {
   nombre_banco: string;
 };
 
+
+type RespuestaPagosContexto = {
+  ok?: boolean;
+  codigo?: string;
+  mensaje?: string;
+  balance?: number | string | null;
+  bancos?: BancoNombre[];
+};
+
+const RPC_PAGOS_CONTEXTO = "vam_propietario_pagos_contexto";
+const API_REGISTRAR_PAGO = "/api/propietarios/pagos/registrar";
+const MODULO_VERSION = "2.0";
+
+function normalizarRespuesta<T>(data: unknown): T {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    return data as T;
+  }
+
+  if (
+    Array.isArray(data) &&
+    data.length > 0 &&
+    data[0] &&
+    typeof data[0] === "object"
+  ) {
+    return data[0] as T;
+  }
+
+  return {} as T;
+}
+
 function formatoMoneda(valor: number) {
   return new Intl.NumberFormat("es-DO", {
     style: "currency",
@@ -54,105 +84,195 @@ export default function PagosPropietariosPage() {
   const [exito, setExito] = useState(false);
 
   useEffect(() => {
-    const raw = localStorage.getItem("propietario_actual");
-
-    if (!raw) {
-      router.push("/movil/propietarios/login");
-      return;
-    }
-
-    const prop = JSON.parse(raw);
-
-    setPropietario(prop);
-    setFechaPago(new Date().toISOString().slice(0, 10));
-
-    cargarBancos();
-    cargarBalance(prop);
+    void inicializar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
-  async function cargarBancos() {
-    const { data, error } = await supabase
-      .from("banco_nombre")
-      .select("id, nombre_banco")
-      .eq("estado", "activo")
-      .order("orden", { ascending: true })
-      .order("nombre_banco", { ascending: true });
-
-    if (error) {
-      setMensaje("Error cargando bancos: " + error.message);
-      return;
-    }
-
-    setBancos(data || []);
+  function limpiarSesionPropietario() {
+    localStorage.removeItem("propietario_actual");
+    localStorage.removeItem("propietario_token");
+    localStorage.removeItem("propietario_token_expira");
+    localStorage.removeItem("condominio_id");
+    localStorage.removeItem("condominio_nombre");
+    localStorage.removeItem("condominio_logo_url");
   }
 
-  async function cargarBalance(prop: PropietarioActual) {
+  function codigoSesionInvalida(codigo?: string) {
+    return [
+      "SESION_INVALIDA",
+      "SESION_VENCIDA",
+      "CUENTA_INACTIVA",
+      "CAMBIO_CLAVE_PENDIENTE",
+      "SIN_ACCESO",
+    ].includes(String(codigo || ""));
+  }
+
+  function enviarALogin(mensaje?: string) {
+    if (mensaje) {
+      setMensaje(mensaje);
+      setExito(false);
+    }
+
+    limpiarSesionPropietario();
+
+    window.setTimeout(() => {
+      router.replace("/movil/propietarios/login");
+    }, mensaje ? 700 : 0);
+  }
+
+  function fechaLocalHoy() {
+    const hoy = new Date();
+
+    return [
+      hoy.getFullYear(),
+      String(hoy.getMonth() + 1).padStart(2, "0"),
+      String(hoy.getDate()).padStart(2, "0"),
+    ].join("-");
+  }
+
+  async function inicializar() {
+    setCargandoBalance(true);
+    setMensaje("");
+    setExito(false);
+
+    try {
+      const raw = localStorage.getItem("propietario_actual");
+      const token = String(
+        localStorage.getItem("propietario_token") || ""
+      ).trim();
+
+      if (!raw || !token) {
+        enviarALogin();
+        return;
+      }
+
+      const prop = JSON.parse(raw) as PropietarioActual;
+
+      if (
+        !prop?.propietario_id ||
+        !prop?.condominio_id ||
+        !prop?.unidad_id
+      ) {
+        enviarALogin();
+        return;
+      }
+
+      setPropietario(prop);
+      setFechaPago(fechaLocalHoy());
+
+      await cargarContextoPagos(prop, token);
+    } catch (error) {
+      console.error("Error inicializando pagos:", error);
+      setMensaje("No se pudo cargar la información para registrar el pago.");
+      setExito(false);
+      setBancos([]);
+      setBalancePendiente(0);
+    } finally {
+      setCargandoBalance(false);
+    }
+  }
+
+  async function cargarContextoPagos(
+    prop: PropietarioActual,
+    tokenRecibido?: string
+  ) {
     setCargandoBalance(true);
 
-    const { data, error } = await supabase
-      .from("cargos_periodicos")
-      .select("balance")
-      .eq("condominio_id", prop.condominio_id)
-      .eq("unidad_id", prop.unidad_id);
+    try {
+      const token = String(
+        tokenRecibido ||
+          localStorage.getItem("propietario_token") ||
+          ""
+      ).trim();
 
-    if (error) {
-      setMensaje("Error cargando balance: " + error.message);
+      if (!token) {
+        enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
+        return;
+      }
+
+      const { data, error } = await supabase.rpc(
+        RPC_PAGOS_CONTEXTO,
+        {
+          p_token: token,
+          p_condominio_id: Number(prop.condominio_id),
+          p_unidad_id: Number(prop.unidad_id),
+        }
+      );
+
+      if (error) {
+        console.error("Error cargando contexto de pagos:", error);
+        setMensaje("No se pudo cargar el balance en este momento.");
+        setExito(false);
+        setBancos([]);
+        setBalancePendiente(0);
+        return;
+      }
+
+      const respuesta =
+        normalizarRespuesta<RespuestaPagosContexto>(data);
+
+      if (respuesta.ok !== true) {
+        if (codigoSesionInvalida(respuesta.codigo)) {
+          enviarALogin(
+            respuesta.mensaje ||
+              "La sesión ha vencido. Inicie sesión nuevamente."
+          );
+          return;
+        }
+
+        setMensaje(
+          respuesta.mensaje ||
+            "No se pudo cargar la información de pagos."
+        );
+        setExito(false);
+        setBancos([]);
+        setBalancePendiente(0);
+        return;
+      }
+
+      const balance = Number(respuesta.balance || 0);
+
+      setBancos(
+        Array.isArray(respuesta.bancos)
+          ? respuesta.bancos
+          : []
+      );
+      setBalancePendiente(balance);
+
+      if (balance > 0) {
+        setMonto(balance.toFixed(2));
+      }
+    } catch (error) {
+      console.error("Error inesperado cargando pagos:", error);
+      setMensaje("No se pudo cargar la información de pagos.");
+      setExito(false);
+      setBancos([]);
+      setBalancePendiente(0);
+    } finally {
       setCargandoBalance(false);
-      return;
     }
-
-    const balance = (data || []).reduce(
-      (sum, item: any) => sum + Number(item.balance || 0),
-      0
-    );
-
-    setBalancePendiente(balance);
-
-    if (balance > 0) {
-      setMonto(balance.toFixed(2));
-    }
-
-    setCargandoBalance(false);
-  }
-
-  async function subirComprobante() {
-    if (!comprobante || !propietario) return "";
-
-    const extension = comprobante.name.split(".").pop();
-    const nombreArchivo = `pago-${Date.now()}.${extension}`;
-    const ruta = `${propietario.condominio_id}/${propietario.unidad_id}/${nombreArchivo}`;
-
-    const { error } = await supabase.storage
-      .from("comprobantes-pagos")
-      .upload(ruta, comprobante, {
-        cacheControl: "3600",
-        upsert: false,
-      });
-
-    if (error) {
-      throw new Error("Error subiendo comprobante: " + error.message);
-    }
-
-    const { data } = supabase.storage
-      .from("comprobantes-pagos")
-      .getPublicUrl(ruta);
-
-    return data.publicUrl;
   }
 
   async function registrarPago() {
-    if (!propietario) return;
+    if (!propietario || loading) return;
 
     setMensaje("");
     setExito(false);
 
-    if (!monto || Number(monto) <= 0) {
+    const montoNumero = Number(monto);
+
+    if (!Number.isFinite(montoNumero) || montoNumero <= 0) {
       setMensaje("Debe indicar un monto válido.");
       return;
     }
 
     if (!fechaPago) {
       setMensaje("Debe indicar la fecha del pago.");
+      return;
+    }
+
+    if (fechaPago > fechaLocalHoy()) {
+      setMensaje("La fecha del pago no puede ser futura.");
       return;
     }
 
@@ -176,57 +296,109 @@ export default function PagosPropietariosPage() {
       return;
     }
 
+    const tiposPermitidos = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/pdf",
+    ];
+
+    if (!tiposPermitidos.includes(comprobante.type)) {
+      setMensaje("El comprobante debe ser JPG, PNG, WEBP o PDF.");
+      return;
+    }
+
+    if (comprobante.size <= 0 || comprobante.size > 10 * 1024 * 1024) {
+      setMensaje("El comprobante no puede superar 10 MB.");
+      return;
+    }
+
+    const token = String(
+      localStorage.getItem("propietario_token") || ""
+    ).trim();
+
+    if (!token) {
+      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
+      return;
+    }
+
+    const bancoFinal =
+      metodoPago === "Efectivo"
+        ? ""
+        : banco === "Otro banco"
+        ? bancoOtro.trim()
+        : banco;
+
+    const formData = new FormData();
+    formData.append("condominio_id", String(propietario.condominio_id));
+    formData.append("unidad_id", String(propietario.unidad_id));
+    formData.append("concepto", concepto);
+    formData.append("monto", String(montoNumero));
+    formData.append("fecha_pago", fechaPago);
+    formData.append("metodo_pago", metodoPago);
+    formData.append("banco", bancoFinal);
+    formData.append(
+      "referencia",
+      metodoPago === "Efectivo" ? "" : referencia.trim()
+    );
+    formData.append("file", comprobante);
+
     try {
       setLoading(true);
 
-      const comprobanteUrl = await subirComprobante();
-
-      const bancoFinal =
-        metodoPago === "Efectivo"
-          ? ""
-          : banco === "Otro banco"
-          ? bancoOtro.trim()
-          : banco;
-
-      const { error } = await supabase.from("pagos_movil").insert({
-        condominio_id: propietario.condominio_id,
-        condominio: propietario.condominio_nombre,
-        unidad_id: propietario.unidad_id,
-        no_apartamento: propietario.no_apartamento,
-        propietario_id: propietario.propietario_id,
-        nombre_propietario: propietario.nombre_propietario,
-        cedula: propietario.cedula,
-        telefono: propietario.telefono || "",
-
-        concepto,
-        monto: Number(monto),
-        fecha_pago: fechaPago,
-        metodo_pago: metodoPago,
-        banco: bancoFinal,
-        referencia: metodoPago === "Efectivo" ? "" : referencia.trim(),
-        comprobante_url: comprobanteUrl,
-
-        estado: "Pendiente de validación",
+      const response = await fetch(API_REGISTRAR_PAGO, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+        cache: "no-store",
       });
 
-      if (error) {
-        setMensaje("Error registrando pago: " + error.message);
+      const resultado = await response.json().catch(() => ({}));
+
+      if (
+        response.status === 401 ||
+        codigoSesionInvalida(resultado?.codigo)
+      ) {
+        enviarALogin(
+          resultado?.mensaje ||
+            "La sesión ha vencido. Inicie sesión nuevamente."
+        );
         return;
       }
 
+      if (!response.ok || resultado?.ok !== true) {
+        throw new Error(
+          resultado?.mensaje ||
+            "No se pudo registrar el pago."
+        );
+      }
+
       setExito(true);
-      setMensaje("Pago enviado correctamente. Quedará pendiente de validación.");
+      setMensaje(
+        resultado?.mensaje ||
+          "Pago enviado correctamente. Quedará pendiente de validación."
+      );
 
       setConcepto("Pago de mantenimiento");
-      setMonto(balancePendiente > 0 ? balancePendiente.toFixed(2) : "");
-      setFechaPago(new Date().toISOString().slice(0, 10));
+      setMonto(
+        balancePendiente > 0
+          ? balancePendiente.toFixed(2)
+          : ""
+      );
+      setFechaPago(fechaLocalHoy());
       setMetodoPago("Transferencia");
       setBanco("");
       setBancoOtro("");
       setReferencia("");
       setComprobante(null);
     } catch (error: any) {
-      setMensaje(error.message || "Error al registrar el pago.");
+      console.error("Error registrando pago:", error);
+      setMensaje(
+        error?.message || "Error al registrar el pago."
+      );
+      setExito(false);
     } finally {
       setLoading(false);
     }
@@ -482,6 +654,12 @@ export default function PagosPropietariosPage() {
           {loading ? "Enviando pago..." : "Enviar pago"}
         </button>
       </section>
+
+      <footer className="pb-2 pt-1 text-center">
+        <p className="text-[10px] text-slate-400">
+          VAM Administración de Condominios · Pagos Propietario V{MODULO_VERSION}
+        </p>
+      </footer>
     </div>
   );
 }

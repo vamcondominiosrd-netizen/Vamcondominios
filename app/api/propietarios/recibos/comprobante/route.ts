@@ -6,7 +6,10 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const BUCKET = "gastos-documentos";
+const BUCKETS_PRIVADOS = [
+  "comprobantes-pagos-propietarios",
+  "comprobantes-pagos",
+];
 
 function getAdminClient() {
   const url =
@@ -45,44 +48,18 @@ function enteroPositivo(value: string | null) {
   return Number.isInteger(numero) && numero > 0 ? numero : null;
 }
 
-function respuestaRpc(data: unknown) {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as Record<string, unknown>;
-  }
+async function firmarRuta(
+  supabase: ReturnType<typeof getAdminClient>,
+  ruta: string
+) {
+  for (const bucket of BUCKETS_PRIVADOS) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(ruta, 600);
 
-  return {};
-}
-
-function extraerRutaStorage(valor: string) {
-  const texto = valor.trim();
-
-  if (!texto) return "";
-
-  if (!/^https?:\/\//i.test(texto)) {
-    return texto.startsWith(`${BUCKET}/`)
-      ? texto.slice(BUCKET.length + 1)
-      : texto.replace(/^\/+/, "");
-  }
-
-  try {
-    const url = new URL(texto);
-    const marcadores = [
-      `/storage/v1/object/public/${BUCKET}/`,
-      `/storage/v1/object/sign/${BUCKET}/`,
-      `/storage/v1/object/${BUCKET}/`,
-    ];
-
-    for (const marcador of marcadores) {
-      const pos = url.pathname.indexOf(marcador);
-
-      if (pos >= 0) {
-        return decodeURIComponent(
-          url.pathname.slice(pos + marcador.length)
-        );
-      }
+    if (!error && data?.signedUrl) {
+      return data.signedUrl;
     }
-  } catch {
-    return "";
   }
 
   return "";
@@ -103,8 +80,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const gastoId = enteroPositivo(
-      request.nextUrl.searchParams.get("gasto_id")
+    const pagoId = enteroPositivo(
+      request.nextUrl.searchParams.get("pago_id")
     );
     const condominioId = enteroPositivo(
       request.nextUrl.searchParams.get("condominio_id")
@@ -113,23 +90,12 @@ export async function GET(request: NextRequest) {
       request.nextUrl.searchParams.get("unidad_id")
     );
 
-    const tipo = String(
-      request.nextUrl.searchParams.get("tipo") || ""
-    )
-      .trim()
-      .toLowerCase();
-
-    if (
-      !gastoId ||
-      !condominioId ||
-      !unidadId ||
-      !["factura", "cheque"].includes(tipo)
-    ) {
+    if (!pagoId || !condominioId || !unidadId) {
       return NextResponse.json(
         {
           ok: false,
           codigo: "CONTEXTO_INVALIDO",
-          mensaje: "Los datos del documento están incompletos.",
+          mensaje: "Datos del recibo incompletos.",
         },
         { status: 400 }
       );
@@ -137,14 +103,12 @@ export async function GET(request: NextRequest) {
 
     const supabase = getAdminClient();
 
-    // La misma RPC que abre el detalle valida:
-    // token + cuenta + propiedad + gasto + período cerrado.
     const { data: accesoData, error: accesoError } =
-      await supabase.rpc("vam_propietario_detalle_gasto", {
+      await supabase.rpc("vam_propietario_validar_recibo_pago", {
         p_token: token,
         p_condominio_id: condominioId,
         p_unidad_id: unidadId,
-        p_gasto_id: gastoId,
+        p_pago_id: pagoId,
       });
 
     if (accesoError) {
@@ -152,13 +116,18 @@ export async function GET(request: NextRequest) {
         {
           ok: false,
           codigo: "ERROR_VALIDACION",
-          mensaje: "No se pudo validar el acceso al documento.",
+          mensaje: "No se pudo validar el acceso al recibo.",
         },
         { status: 500 }
       );
     }
 
-    const acceso = respuestaRpc(accesoData);
+    const acceso =
+      accesoData &&
+      typeof accesoData === "object" &&
+      !Array.isArray(accesoData)
+        ? (accesoData as Record<string, unknown>)
+        : {};
 
     if (acceso.ok !== true) {
       const codigo = String(
@@ -171,7 +140,7 @@ export async function GET(request: NextRequest) {
           codigo,
           mensaje:
             String(acceso.mensaje || "") ||
-            "No tiene acceso a este documento.",
+            "No tiene acceso a este recibo.",
         },
         {
           status: [
@@ -187,76 +156,45 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Service role únicamente en servidor.
-    const { data: gasto, error: gastoError } = await supabase
-      .from("gastos")
-      .select("factura_url,cheque_url")
-      .eq("id", gastoId)
+    const { data: pago, error: pagoError } = await supabase
+      .from("pagos")
+      .select("comprobante_url")
+      .eq("id", pagoId)
       .eq("condominio_id", condominioId)
+      .eq("unidad_id", unidadId)
       .maybeSingle();
 
-    if (gastoError || !gasto) {
+    if (pagoError || !pago?.comprobante_url) {
       return NextResponse.json(
         {
           ok: false,
-          codigo: "DOCUMENTO_NO_DISPONIBLE",
-          mensaje: "El documento no está disponible.",
+          codigo: "SIN_COMPROBANTE",
+          mensaje: "El comprobante no está disponible.",
         },
         { status: 404 }
       );
     }
 
-    const almacenado = String(
-      tipo === "factura"
-        ? gasto.factura_url || ""
-        : gasto.cheque_url || ""
-    ).trim();
+    const comprobante = String(pago.comprobante_url).trim();
 
-    if (!almacenado) {
+    if (!comprobante) {
       return NextResponse.json(
         {
           ok: false,
-          codigo: "SIN_DOCUMENTO",
-          mensaje:
-            tipo === "factura"
-              ? "Este gasto no tiene factura disponible."
-              : "Este gasto no tiene cheque o comprobante disponible.",
+          codigo: "SIN_COMPROBANTE",
+          mensaje: "El comprobante no está disponible.",
         },
         { status: 404 }
       );
     }
 
-    const ruta = extraerRutaStorage(almacenado);
-
-    if (ruta) {
-      const { data: signed, error: signedError } =
-        await supabase.storage
-          .from(BUCKET)
-          .createSignedUrl(ruta, 600);
-
-      if (!signedError && signed?.signedUrl) {
-        return NextResponse.json(
-          {
-            ok: true,
-            codigo: "OK",
-            url: signed.signedUrl,
-          },
-          {
-            status: 200,
-            headers: { "Cache-Control": "no-store" },
-          }
-        );
-      }
-    }
-
-    // Compatibilidad con documentos históricos que aún estén
-    // registrados como una URL externa/pública.
-    if (/^https?:\/\//i.test(almacenado)) {
+    // Compatibilidad con comprobantes históricos almacenados como URL.
+    if (/^https?:\/\//i.test(comprobante)) {
       return NextResponse.json(
         {
           ok: true,
           codigo: "OK",
-          url: almacenado,
+          url: comprobante,
         },
         {
           status: 200,
@@ -265,22 +203,41 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const signedUrl = await firmarRuta(
+      supabase,
+      comprobante
+    );
+
+    if (!signedUrl) {
+      return NextResponse.json(
+        {
+          ok: false,
+          codigo: "COMPROBANTE_NO_DISPONIBLE",
+          mensaje: "No se pudo abrir el comprobante.",
+        },
+        { status: 404 }
+      );
+    }
+
     return NextResponse.json(
       {
-        ok: false,
-        codigo: "DOCUMENTO_NO_DISPONIBLE",
-        mensaje: "No se pudo abrir el documento.",
+        ok: true,
+        codigo: "OK",
+        url: signedUrl,
       },
-      { status: 404 }
+      {
+        status: 200,
+        headers: { "Cache-Control": "no-store" },
+      }
     );
   } catch (error) {
-    console.error("GET soporte gasto propietario:", error);
+    console.error("GET comprobante recibo propietario:", error);
 
     return NextResponse.json(
       {
         ok: false,
         codigo: "ERROR_INTERNO",
-        mensaje: "Error interno consultando el documento.",
+        mensaje: "Error interno consultando el comprobante.",
       },
       { status: 500 }
     );

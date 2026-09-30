@@ -37,71 +37,25 @@ type Comunicacion = {
   leida_at?: string | null;
 };
 
-type RespuestaComunicaciones = {
-  ok?: boolean;
-  mensaje?: string;
-  comunicaciones?: Comunicacion[];
-  data?: Comunicacion[];
-};
-
-type RespuestaMarcarLeida = {
-  ok?: boolean;
-  mensaje?: string;
-  leida_at?: string | null;
-};
-
 const RPC_LISTAR_COMUNICACIONES = "listar_comunicaciones_propietario";
 const RPC_MARCAR_LEIDA = "marcar_comunicacion_leida_propietario";
-const MODULO_VERSION = "2.1";
 
-function normalizarRespuestaComunicaciones(
-  data: unknown
-): RespuestaComunicaciones {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaComunicaciones;
-  }
+function normalizarComunicaciones(data: unknown): Comunicacion[] {
+  if (Array.isArray(data)) return data as Comunicacion[];
 
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaComunicaciones;
-  }
+  if (data && typeof data === "object") {
+    const objeto = data as Record<string, unknown>;
 
-  return {};
-}
+    if (Array.isArray(objeto.comunicaciones)) {
+      return objeto.comunicaciones as Comunicacion[];
+    }
 
-function normalizarComunicaciones(
-  respuesta: RespuestaComunicaciones
-): Comunicacion[] {
-  if (Array.isArray(respuesta.comunicaciones)) {
-    return respuesta.comunicaciones;
-  }
-
-  if (Array.isArray(respuesta.data)) {
-    return respuesta.data;
+    if (Array.isArray(objeto.data)) {
+      return objeto.data as Comunicacion[];
+    }
   }
 
   return [];
-}
-
-function normalizarRespuestaLectura(data: unknown): RespuestaMarcarLeida {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaMarcarLeida;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaMarcarLeida;
-  }
-
-  return {};
 }
 
 function formatoFecha(valor?: string | null, incluirHora = false) {
@@ -155,151 +109,83 @@ export default function ComunicacionPropietarioDetallePage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    void inicializar();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comunicacionId, router]);
-
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) setError(mensaje);
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
-  function mensajePareceSesionInvalida(mensaje?: string) {
-    const normalizado = String(mensaje || "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase();
-
-    return (
-      normalizado.includes("sesion") ||
-      normalizado.includes("no tiene acceso") ||
-      normalizado.includes("propiedad")
-    );
-  }
-
-  async function inicializar() {
     if (!Number.isFinite(comunicacionId) || comunicacionId <= 0) {
       setError("La comunicación solicitada no es válida.");
       setCargando(false);
       return;
     }
 
-    setCargando(true);
-    setError("");
-    setComunicacion(null);
-
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
+      const token = localStorage.getItem("propietario_token");
 
       if (!raw || !token) {
-        enviarALogin();
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       const sesion = JSON.parse(raw) as PropietarioActual;
 
-      if (
-        !sesion?.propietario_id ||
-        !sesion?.condominio_id ||
-        !sesion?.unidad_id
-      ) {
-        enviarALogin();
+      if (!sesion?.propietario_id || !sesion?.condominio_id || !sesion?.unidad_id) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       setPropietario(sesion);
-      await cargarDetalle(sesion, token);
-    } catch (error) {
-      console.error("Error inicializando detalle de comunicación:", error);
-      setError("No se pudo cargar la comunicación.");
-    } finally {
-      setCargando(false);
+      void cargarDetalle(sesion, token);
+    } catch {
+      router.replace("/movil/propietarios/login");
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comunicacionId, router]);
 
-  async function cargarDetalle(
-    prop: PropietarioActual,
-    token: string
-  ) {
-    /*
-      IMPORTANTE:
-      sessionStorage se usa únicamente como caché de conveniencia.
-      La comunicación SIEMPRE debe existir en la respuesta validada
-      por el servidor antes de mostrarse.
-    */
+  async function cargarDetalle(prop: PropietarioActual, token: string) {
+    setCargando(true);
+    setError("");
+
+    let encontrada: Comunicacion | null = null;
+
+    try {
+      const cache = sessionStorage.getItem(`vam_comunicacion_${comunicacionId}`);
+      if (cache) {
+        encontrada = JSON.parse(cache) as Comunicacion;
+      }
+    } catch {
+      encontrada = null;
+    }
+
+    // Siempre se valida nuevamente contra el servidor para no confiar solamente
+    // en la información guardada en sessionStorage.
     const { data, error: errorRpc } = await supabase.rpc(
       RPC_LISTAR_COMUNICACIONES,
       {
         p_token: token,
-        p_condominio_id: Number(prop.condominio_id),
-        p_unidad_id: Number(prop.unidad_id),
+        p_condominio_id: prop.condominio_id,
+        p_unidad_id: prop.unidad_id,
       }
     );
 
-    // Fail closed: si el servidor no puede validar, NO se muestra el caché.
     if (errorRpc) {
       console.error("Error validando comunicación:", errorRpc);
-      setError("No se pudo validar esta comunicación en este momento.");
-      setComunicacion(null);
-      return;
-    }
 
-    const respuesta = normalizarRespuestaComunicaciones(data);
-
-    if (respuesta.ok !== true) {
-      const mensaje =
-        respuesta.mensaje ||
-        "No se pudo validar esta comunicación.";
-
-      if (mensajePareceSesionInvalida(mensaje)) {
-        enviarALogin(mensaje);
+      if (!encontrada) {
+        setError("No se pudo abrir esta comunicación en este momento.");
+        setCargando(false);
         return;
       }
-
-      setError(mensaje);
-      setComunicacion(null);
-      return;
+    } else {
+      const lista = normalizarComunicaciones(data);
+      encontrada = lista.find((item) => Number(item.id) === comunicacionId) || null;
     }
 
-    const lista = normalizarComunicaciones(respuesta);
-
-    const encontrada =
-      lista.find((item) => Number(item.id) === comunicacionId) || null;
-
-    if (
-      !encontrada ||
-      String(encontrada.estado || "").toUpperCase() === "ANULADA"
-    ) {
+    if (!encontrada || String(encontrada.estado || "").toUpperCase() === "ANULADA") {
       setError("Esta comunicación no está disponible.");
-      setComunicacion(null);
+      setCargando(false);
       return;
-    }
-
-    // Solo después de validar contra el servidor se actualiza el caché.
-    try {
-      sessionStorage.setItem(
-        `vam_comunicacion_${encontrada.id}`,
-        JSON.stringify(encontrada)
-      );
-    } catch {
-      // El caché no es necesario para la seguridad ni para el flujo.
     }
 
     setComunicacion(encontrada);
+    setCargando(false);
 
     if (!encontrada.leida_at) {
       void marcarComoLeida(prop, token, encontrada);
@@ -311,42 +197,21 @@ export default function ComunicacionPropietarioDetallePage() {
     token: string,
     item: Comunicacion
   ) {
-    const {
-      data: respuestaRpc,
-      error: errorLectura,
-    } = await supabase.rpc(RPC_MARCAR_LEIDA, {
+    const { error: errorLectura } = await supabase.rpc(RPC_MARCAR_LEIDA, {
       p_token: token,
       p_comunicacion_id: item.id,
-      p_condominio_id: Number(prop.condominio_id),
-      p_unidad_id: Number(prop.unidad_id),
+      p_condominio_id: prop.condominio_id,
+      p_unidad_id: prop.unidad_id,
     });
 
     if (errorLectura) {
       // La comunicación puede visualizarse aunque falle el registro de lectura.
+      // El error se deja en consola para no bloquear al propietario.
       console.error("No se pudo registrar la lectura:", errorLectura);
       return;
     }
 
-    const respuesta = normalizarRespuestaLectura(respuestaRpc);
-
-    // La RPC puede responder { ok: false } sin error de transporte.
-    // En ese caso NO se marca localmente como leída.
-    if (respuesta.ok !== true) {
-      console.error(
-        "La lectura fue rechazada:",
-        respuesta.mensaje || "Respuesta inválida del servidor."
-      );
-      return;
-    }
-
-    const leidaAt =
-      respuesta.leida_at || new Date().toISOString();
-
-    const comunicacionActualizada = {
-      ...item,
-      estado: "LEIDA",
-      leida_at: leidaAt,
-    };
+    const leidaAt = new Date().toISOString();
 
     setComunicacion((actual) =>
       actual ? { ...actual, estado: "LEIDA", leida_at: leidaAt } : actual
@@ -355,7 +220,7 @@ export default function ComunicacionPropietarioDetallePage() {
     try {
       sessionStorage.setItem(
         `vam_comunicacion_${item.id}`,
-        JSON.stringify(comunicacionActualizada)
+        JSON.stringify({ ...item, estado: "LEIDA", leida_at: leidaAt })
       );
     } catch {
       // No es crítico para el flujo.
@@ -529,7 +394,7 @@ export default function ComunicacionPropietarioDetallePage() {
 
         <footer className="pb-2 pt-1 text-center">
           <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Comunicación V{MODULO_VERSION}
+            VAM Administración de Condominios
           </p>
         </footer>
       </div>

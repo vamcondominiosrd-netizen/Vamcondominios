@@ -4,14 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/app/lib/supabaseClient";
 
 type PerfilUsuario = {
-  propietario_id: number;
-  condominio_id: number;
+  condominio_id: number | null;
   condominio: string | null;
-  condominio_nombre: string;
-  condominio_logo_url?: string;
-  unidad_id: number;
-  no_apartamento: string;
-  nombre_propietario: string;
+  nombre?: string | null;
+  rol?: string | null;
 };
 
 type CondominioInfo = {
@@ -59,6 +55,7 @@ type GastoRelacionado = {
   metodo_pago?: string | null;
   numero_cheque?: string | null;
   fecha_pago?: string | null;
+  cheque_url?: string | null;
 };
 
 type MovimientoBanco = {
@@ -100,39 +97,6 @@ type CargoBanco = {
   referencia: string;
   monto: number;
 };
-
-
-type RespuestaEstadoMes = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  condominio?: CondominioInfo | null;
-  cuentas?: CuentaBancaria[];
-  cierres?: CierreBancario[];
-  cierre?: CierreBancario | null;
-  movimientos?: MovimientoBanco[];
-  gastos?: GastoRelacionado[];
-};
-
-const RPC_ESTADO_MES = "vam_propietario_estado_mes_financiero";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta(data: unknown): RespuestaEstadoMes {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaEstadoMes;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaEstadoMes;
-  }
-
-  return {};
-}
 
 const moneda = new Intl.NumberFormat("es-DO", {
   style: "currency",
@@ -412,19 +376,9 @@ export default function ResumenFinancieroPropietariosPage() {
   const consultaActual = useRef(0);
 
   const periodosDisponibles = useMemo(() => {
-    const existentes = periodos
-      .filter(
-        (p) =>
-          !cuenta?.id ||
-          Number(p.cuenta_bancaria_id || 0) === Number(cuenta.id)
-      )
-      .map((p) => p.periodo)
-      .filter(Boolean);
-
-    return Array.from(new Set(existentes)).sort((a, b) =>
-      b.localeCompare(a)
-    );
-  }, [periodos, cuenta?.id]);
+    const existentes = periodos.map((p) => p.periodo).filter(Boolean);
+    return Array.from(new Set([...existentes, ...generarPeriodosHistoricos(24)])).sort((a, b) => b.localeCompare(a));
+  }, [periodos]);
 
   const ingresos = useMemo(
     () => movimientos.filter((m) => tipoMovimiento(m) === "INGRESO"),
@@ -558,327 +512,289 @@ export default function ResumenFinancieroPropietariosPage() {
   const fechaCierreTexto = formatDate(rangoPeriodo(periodoSeleccionado).cierre);
 
   useEffect(() => {
-    void inicializar();
+    inicializar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!cuenta?.id) return;
-
-    if (
-      periodosDisponibles.length > 0 &&
-      !periodosDisponibles.includes(periodoSeleccionado)
-    ) {
-      setPeriodoSeleccionado(periodosDisponibles[0]);
-    }
-  }, [cuenta?.id, periodosDisponibles, periodoSeleccionado]);
-
-  useEffect(() => {
     if (perfil?.condominio_id && cuenta?.id && periodoSeleccionado) {
-      void consultarPeriodo(
-        periodoSeleccionado,
-        perfil.condominio_id,
-        cuenta.id
-      );
+      consultarPeriodo(periodoSeleccionado, perfil.condominio_id, cuenta.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodoSeleccionado, perfil?.condominio_id, cuenta?.id]);
-
-  function leerToken() {
-    return String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-  }
-
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function sesionInvalida(mensaje?: string) {
-    setError(
-      mensaje || "La sesión ha vencido. Inicie sesión nuevamente."
-    );
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      window.location.href = "/movil/propietarios/login";
-    }, 700);
-  }
-
-  async function consultarRpc(
-    sesion: PerfilUsuario,
-    periodo: string | null,
-    cuentaBancariaId: number | null
-  ): Promise<RespuestaEstadoMes> {
-    const token = leerToken();
-
-    if (!token) {
-      throw new Error("SESION_LOCAL_NO_DISPONIBLE");
-    }
-
-    const { data, error: rpcError } = await supabase.rpc(
-      RPC_ESTADO_MES,
-      {
-        p_token: token,
-        p_condominio_id: Number(sesion.condominio_id),
-        p_unidad_id: Number(sesion.unidad_id),
-        p_periodo: periodo,
-        p_cuenta_bancaria_id: cuentaBancariaId,
-      }
-    );
-
-    if (rpcError) {
-      throw new Error(rpcError.message);
-    }
-
-    return normalizarRespuesta(data);
-  }
 
   async function inicializar() {
     setLoading(true);
     setError(null);
 
     try {
-      let periodoUrl: string | null = null;
-
       if (typeof window !== "undefined") {
         const params = new URLSearchParams(window.location.search);
-        const candidato = params.get("periodo");
-
-        if (candidato && /^\d{4}-\d{2}$/.test(candidato)) {
-          periodoUrl = candidato;
+        const periodoUrl = params.get("periodo");
+        if (periodoUrl && /^\d{4}-\d{2}$/.test(periodoUrl)) {
+          setPeriodoSeleccionado(periodoUrl);
         }
       }
 
-      const raw = localStorage.getItem("propietario_actual");
+      const contexto = await obtenerContextoUsuario();
 
-      if (!raw || !leerToken()) {
-        sesionInvalida();
+      if (!contexto.condominio_id) {
+        setError("No se pudo identificar el condominio activo del usuario logueado.");
+        setLoading(false);
         return;
       }
 
-      const sesionLocal = JSON.parse(raw) as Partial<PerfilUsuario>;
+      setPerfil(contexto);
 
-      if (
-        !sesionLocal?.propietario_id ||
-        !sesionLocal?.condominio_id ||
-        !sesionLocal?.unidad_id
-      ) {
-        sesionInvalida();
-        return;
-      }
-
-      const sesion: PerfilUsuario = {
-        propietario_id: Number(sesionLocal.propietario_id),
-        condominio_id: Number(sesionLocal.condominio_id),
-        condominio:
-          String(
-            sesionLocal.condominio_nombre ||
-              sesionLocal.condominio ||
-              ""
-          ).trim() || null,
-        condominio_nombre:
-          String(
-            sesionLocal.condominio_nombre ||
-              sesionLocal.condominio ||
-              "Condominio"
-          ),
-        condominio_logo_url: sesionLocal.condominio_logo_url,
-        unidad_id: Number(sesionLocal.unidad_id),
-        no_apartamento: String(sesionLocal.no_apartamento || ""),
-        nombre_propietario: String(
-          sesionLocal.nombre_propietario || ""
-        ),
-      };
-
-      setPerfil(sesion);
-
-      const respuesta = await consultarRpc(sesion, null, null);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          sesionInvalida(respuesta.mensaje);
-          return;
-        }
-
-        throw new Error(
-          respuesta.mensaje ||
-            "No se pudo cargar el informe financiero."
-        );
-      }
-
-      const condominioInfo =
-        respuesta.condominio || {
-          id: sesion.condominio_id,
-          nombre:
-            sesion.condominio_nombre ||
-            sesion.condominio ||
-            "Condominio",
-          logo_url: sesion.condominio_logo_url || null,
-        };
-
-      const cuentasActivas = Array.isArray(respuesta.cuentas)
-        ? respuesta.cuentas
-        : [];
-
-      const cierresPublicados = Array.isArray(respuesta.cierres)
-        ? respuesta.cierres
-        : [];
-
+      const condominioInfo = await cargarCondominio(contexto.condominio_id);
       setCondominio(condominioInfo);
+
+      const cuentasActivas = await cargarCuentasBancariasActivas(contexto.condominio_id);
       setCuentasDisponibles(cuentasActivas);
-      setPeriodos(cierresPublicados);
-
-      const primeraCuenta =
-        cuentasActivas.find((item) =>
-          cierresPublicados.some(
-            (c) =>
-              Number(c.cuenta_bancaria_id || 0) === Number(item.id)
-          )
-        ) ||
-        cuentasActivas[0] ||
-        null;
-
-      setCuenta(primeraCuenta);
-
-      if (!primeraCuenta) {
-        setError(
-          "No hay cuentas bancarias activas disponibles para este condominio."
-        );
-        setCierre(null);
-        setMovimientos([]);
-        setGastosRelacionados(new Map());
-        return;
+      setCuenta(cuentasActivas[0] || null);
+      if (!cuentasActivas.length) {
+        setError("No hay cuentas bancarias activas accesibles para este condominio.");
       }
 
-      const periodosCuenta = cierresPublicados
-        .filter(
-          (c) =>
-            Number(c.cuenta_bancaria_id || 0) ===
-            Number(primeraCuenta.id)
-        )
-        .map((c) => c.periodo)
-        .filter(Boolean)
-        .sort((a, b) => b.localeCompare(a));
-
-      if (periodoUrl && periodosCuenta.includes(periodoUrl)) {
-        setPeriodoSeleccionado(periodoUrl);
-      } else if (periodosCuenta.length > 0) {
-        setPeriodoSeleccionado(periodosCuenta[0]);
-      } else {
-        setError(
-          "No hay períodos cerrados disponibles para propietarios en esta cuenta."
-        );
-        setCierre(null);
-        setMovimientos([]);
-        setGastosRelacionados(new Map());
-      }
+      await cargarPeriodos(contexto.condominio_id);
     } catch (err: any) {
-      if (err?.message === "SESION_LOCAL_NO_DISPONIBLE") {
-        sesionInvalida();
-        return;
-      }
-
-      setError(
-        err?.message || "Error cargando el informe financiero."
-      );
+      setError(err?.message || "Error cargando el reporte resumido.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function consultarPeriodo(
-    periodo: string,
-    condominioId: number,
-    cuentaBancariaId: number
-  ) {
+  async function obtenerContextoUsuario(): Promise<PerfilUsuario> {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError) throw userError;
+    if (!user) throw new Error("No hay usuario logueado.");
+
+    let perfilEncontrado: any = null;
+
+    async function intentarPerfil(campo: string, valor: string) {
+      try {
+        const { data, error } = await supabase.from("profiles").select("*").eq(campo, valor).maybeSingle();
+        if (!error && data) return data;
+      } catch {
+        return null;
+      }
+      return null;
+    }
+
+    perfilEncontrado = await intentarPerfil("id", user.id);
+    if (!perfilEncontrado) perfilEncontrado = await intentarPerfil("user_id", user.id);
+    if (!perfilEncontrado && user.email) perfilEncontrado = await intentarPerfil("email", user.email);
+
+    let condominioId =
+      perfilEncontrado?.condominio_id ??
+      perfilEncontrado?.id_condominio ??
+      perfilEncontrado?.condominioId ??
+      null;
+
+    let nombreCondominio =
+      perfilEncontrado?.condominio ??
+      perfilEncontrado?.nombre_condominio ??
+      perfilEncontrado?.condominio_nombre ??
+      null;
+
+    if (!condominioId && typeof window !== "undefined") {
+      const posiblesKeys = [
+        "condominio_id",
+        "condominioId",
+        "selectedCondominioId",
+        "vam_condominio_id",
+        "condominio_actual",
+        "vam_condominio_actual",
+        "condominioSeleccionado",
+        "selectedCondominio",
+        "condominio",
+      ];
+
+      for (const key of posiblesKeys) {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+
+        try {
+          const parsed = JSON.parse(raw);
+          const posibleId = parsed?.id ?? parsed?.condominio_id ?? parsed?.id_condominio ?? parsed?.condominioId ?? raw;
+          const numeroId = Number(posibleId);
+
+          if (Number.isFinite(numeroId) && numeroId > 0) {
+            condominioId = numeroId;
+            nombreCondominio = parsed?.nombre ?? parsed?.condominio ?? parsed?.nombre_condominio ?? parsed?.condominio_nombre ?? nombreCondominio;
+            break;
+          }
+        } catch {
+          const numeroId = Number(raw);
+          if (Number.isFinite(numeroId) && numeroId > 0) {
+            condominioId = numeroId;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!condominioId) {
+      return { condominio_id: null, condominio: null };
+    }
+
+    return {
+      condominio_id: Number(condominioId),
+      condominio: nombreCondominio || null,
+      nombre: perfilEncontrado?.full_name || perfilEncontrado?.nombre || null,
+      rol: perfilEncontrado?.role || perfilEncontrado?.rol || null,
+    };
+  }
+
+  async function cargarCondominio(condominioId: number): Promise<CondominioInfo | null> {
+    try {
+      const { data, error } = await supabase
+        .from("condominios")
+        .select("id, nombre, logo_url")
+        .eq("id", condominioId)
+        .maybeSingle();
+
+      if (error) {
+        console.warn("No se pudo cargar condominio:", error.message);
+        return null;
+      }
+
+      return (data as CondominioInfo) || null;
+    } catch (err) {
+      console.warn("Error cargando condominio:", err);
+      return null;
+    }
+  }
+
+  async function cargarCuentasBancariasActivas(condominioId: number): Promise<CuentaBancaria[]> {
+    const { data, error } = await supabase
+      .from("cuentas_bancarias")
+      .select("id, condominio_id, nombre_banco, numero_cuenta, tipo_cuenta, moneda, activa")
+      .eq("condominio_id", condominioId)
+      .eq("activa", true)
+      .order("id", { ascending: true });
+    if (error) throw new Error("No se pudieron consultar las cuentas bancarias: " + error.message);
+    return (data || []) as CuentaBancaria[];
+  }
+
+  async function cargarPeriodos(condominioId: number) {
+    const { data, error } = await supabase.from("banco_cierres_mensuales")
+      .select("*").eq("condominio_id", condominioId)
+      .order("periodo", { ascending: false });
+    if (error) throw new Error("No se pudieron consultar los períodos bancarios: " + error.message);
+    setPeriodos((data || []) as CierreBancario[]);
+  }
+
+  async function consultarPeriodo(periodo: string, condominioId: number, cuentaBancariaId: number) {
     const solicitud = ++consultaActual.current;
     setConsultando(true);
     setError(null);
+    // Nunca mostrar/importar en la vista previa datos de otra cuenta o período.
     setCierre(null);
     setMovimientos([]);
     setGastosRelacionados(new Map());
 
     try {
-      if (!perfil) {
-        throw new Error(
-          "No se pudo identificar la sesión del propietario."
-        );
-      }
-
-      const respuesta = await consultarRpc(
-        perfil,
-        periodo,
-        cuentaBancariaId
-      );
-
+      const [cierreData, movimientosData] = await Promise.all([
+        buscarCierre(periodo, condominioId, cuentaBancariaId),
+        cargarMovimientos(periodo, condominioId, cuentaBancariaId),
+      ]);
+      const gastosData = await cargarGastosRelacionados(movimientosData);
       if (consultaActual.current !== solicitud) return;
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          sesionInvalida(respuesta.mensaje);
-          return;
-        }
-
-        throw new Error(
-          respuesta.mensaje ||
-            "No se pudo consultar el período."
-        );
-      }
-
-      const cierreData = respuesta.cierre || null;
-      const movimientosData = Array.isArray(respuesta.movimientos)
-        ? respuesta.movimientos
-        : [];
-      const gastosData = Array.isArray(respuesta.gastos)
-        ? respuesta.gastos
-        : [];
-
-      const mapaGastos = new Map<number, GastoRelacionado>();
-      gastosData.forEach((row) => {
-        if (Number.isFinite(Number(row.id))) {
-          mapaGastos.set(Number(row.id), row);
-        }
-      });
-
       setCierre(cierreData);
-      setMovimientos(
-        movimientosData
-          .filter(
-            (row) =>
-              esMovimientoActivo(row) &&
-              perteneceAlPeriodo(row, periodo)
-          )
-          .sort(
-            (a, b) =>
-              fechaEfectiva(a).localeCompare(fechaEfectiva(b)) ||
-              Number(a.id) - Number(b.id)
-          )
-      );
-      setGastosRelacionados(mapaGastos);
+      setMovimientos(movimientosData);
+      setGastosRelacionados(gastosData);
     } catch (err: any) {
       if (consultaActual.current === solicitud) {
-        setError(
-          err?.message || "Error consultando el período."
-        );
+        setError(err?.message || "Error consultando el período.");
       }
     } finally {
-      if (consultaActual.current === solicitud) {
-        setConsultando(false);
+      if (consultaActual.current === solicitud) setConsultando(false);
+    }
+  }
+
+  async function buscarCierre(
+    periodo: string,
+    condominioId: number,
+    cuentaBancariaId: number
+  ): Promise<CierreBancario | null> {
+    const { data, error } = await supabase
+      .from("banco_cierres_mensuales")
+      .select("*")
+      .eq("condominio_id", condominioId)
+      .eq("cuenta_bancaria_id", cuentaBancariaId)
+      .eq("periodo", periodo)
+      .maybeSingle();
+    if (error) throw new Error("Error consultando el cierre de la cuenta seleccionada: " + error.message);
+    // Prohibido tomar el cierre de otra cuenta o generar un cierre ficticio.
+    return data ? (data as CierreBancario) : null;
+  }
+
+  async function cargarMovimientos(
+    periodo: string,
+    condominioId: number,
+    cuentaBancariaId: number
+  ): Promise<MovimientoBanco[]> {
+    const { desde, hasta } = rangoPeriodo(periodo);
+    const resultados: MovimientoBanco[] = [];
+    const vistos = new Set<number>();
+    const tamano = 1000;
+
+    async function agregar(crearConsulta: () => any, etiqueta: string) {
+      for (let pagina = 0; ; pagina++) {
+        const { data, error } = await crearConsulta()
+          .order("id", { ascending: true })
+          .range(pagina * tamano, (pagina + 1) * tamano - 1);
+        if (error) throw new Error(`Error consultando ${etiqueta}: ${error.message}`);
+        const filas = (data || []) as MovimientoBanco[];
+        filas.forEach((row) => {
+          if (!vistos.has(row.id)) {
+            vistos.add(row.id);
+            resultados.push(row);
+          }
+        });
+        if (filas.length < tamano) break;
       }
     }
+
+    const base = () => supabase.from("banco_movimientos").select("*")
+      .eq("condominio_id", condominioId).eq("cuenta_bancaria_id", cuentaBancariaId);
+    // Cohortes excluyentes: fecha del banco, fecha interna si no hay fecha banco,
+    // período textual SOLO si no existe ninguna de las dos fechas.
+    await agregar(() => base().gte("fecha_banco", desde).lt("fecha_banco", hasta), "fecha bancaria");
+    await agregar(() => base().is("fecha_banco", null)
+      .gte("fecha_movimiento", desde).lt("fecha_movimiento", hasta), "fecha de movimiento");
+    await agregar(() => base().is("fecha_banco", null).is("fecha_movimiento", null)
+      .eq("periodo", periodo), "movimientos sin fecha");
+
+    return resultados
+      .filter((row) => esMovimientoActivo(row) && perteneceAlPeriodo(row, periodo))
+      .sort((a, b) => fechaEfectiva(a).localeCompare(fechaEfectiva(b)) || a.id - b.id);
+  }
+
+  async function cargarGastosRelacionados(movimientosData: MovimientoBanco[]): Promise<Map<number, GastoRelacionado>> {
+    // Los egresos CHEQUE/PAGO_PROVEEDOR de este flujo sí están relacionados
+    // con gastos; validar número de cheque y total antes de usar sus metadatos.
+    // Otros orígenes pueden referirse a pagos/solicitudes de tablas distintas.
+    const ids = Array.from(new Set(movimientosData
+      .filter((m) => tipoMovimiento(m) === "EGRESO" && esOrigenDeGasto(m))
+      .map((m) => Number(m.referencia_id || 0))
+      .filter((id) => Number.isFinite(id) && id > 0)));
+    if (!ids.length) return new Map();
+
+    const gastos = new Map<number, GastoRelacionado>();
+    for (let inicio = 0; inicio < ids.length; inicio += 200) {
+      const { data, error } = await supabase.from("gastos")
+        .select("id, proveedor, concepto, descripcion, detalle_gasto, categoria, total, monto, itbis, no_factura, ncf, metodo_pago, numero_cheque, fecha_pago, cheque_url")
+        .in("id", ids.slice(inicio, inicio + 200));
+      if (error) throw new Error("No se pudieron consultar los gastos relacionados: " + error.message);
+      (data || []).forEach((row: any) => gastos.set(Number(row.id), row as GastoRelacionado));
+    }
+    return gastos;
   }
 
   function imprimirReporte() {
@@ -914,18 +830,18 @@ export default function ResumenFinancieroPropietariosPage() {
   }
 
   return (
-    <div id="vam-informe-propietarios-v200" className="min-h-screen min-w-0 max-w-full overflow-x-hidden bg-slate-100 px-2 py-3 sm:px-3 sm:py-5 print:min-h-0 print:bg-white print:p-0">
+    <div id="vam-informe-propietarios-v110" className="min-h-screen min-w-0 max-w-full overflow-x-hidden bg-slate-100 px-2 py-3 sm:px-3 sm:py-5 print:min-h-0 print:bg-white print:p-0">
       <style jsx global>{`
         @page { size: letter portrait; margin: 0.43in; }
         /* El informe puede estar dentro de un panel móvil estrecho aunque la ventana
            sea grande. Ajustar las tarjetas al ancho REAL del informe, no al viewport. */
-        #vam-informe-propietarios-v200 .print-paper {
+        #vam-informe-propietarios-v110 .print-paper {
           container: estado-propietarios / inline-size;
         }
-        #vam-informe-propietarios-v200 .report-financial-cards {
+        #vam-informe-propietarios-v110 .report-financial-cards {
           grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
         }
-        #vam-informe-propietarios-v200 .financial-amount {
+        #vam-informe-propietarios-v110 .financial-amount {
           font-size: 14px;
           font-size: clamp(13px, 3.5cqw, 17px);
           letter-spacing: -0.35px;
@@ -933,49 +849,49 @@ export default function ResumenFinancieroPropietariosPage() {
           font-variant-numeric: tabular-nums;
         }
         @container estado-propietarios (min-width: 720px) {
-          #vam-informe-propietarios-v200 .report-financial-cards {
+          #vam-informe-propietarios-v110 .report-financial-cards {
             grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
           }
         }
         @container estado-propietarios (max-width: 300px) {
-          #vam-informe-propietarios-v200 .report-financial-cards {
+          #vam-informe-propietarios-v110 .report-financial-cards {
             grid-template-columns: minmax(0, 1fr) !important;
           }
         }
         @media screen and (max-width: 767px) {
-          #vam-informe-propietarios-v200 { max-width: 100vw; overflow-x: clip; }
-          #vam-informe-propietarios-v200 .print-paper { overflow-wrap: anywhere; }
-          #vam-informe-propietarios-v200 .mini-card { padding: 9px 7px; }
-          #vam-informe-propietarios-v200 .mini-card p:last-child { letter-spacing: -0.3px; }
-          #vam-informe-propietarios-v200 .report-head { flex-wrap: wrap; }
-          #vam-informe-propietarios-v200 .report-head img { max-width: 76px; }
+          #vam-informe-propietarios-v110 { max-width: 100vw; overflow-x: clip; }
+          #vam-informe-propietarios-v110 .print-paper { overflow-wrap: anywhere; }
+          #vam-informe-propietarios-v110 .mini-card { padding: 9px 7px; }
+          #vam-informe-propietarios-v110 .mini-card p:last-child { letter-spacing: -0.3px; }
+          #vam-informe-propietarios-v110 .report-head { flex-wrap: wrap; }
+          #vam-informe-propietarios-v110 .report-head img { max-width: 76px; }
         }
 
         @media print {
           html, body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           body * { visibility: hidden !important; }
-          #vam-informe-propietarios-v200, #vam-informe-propietarios-v200 * { visibility: visible !important; }
-          #vam-informe-propietarios-v200 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
-          #vam-informe-propietarios-v200 .no-print { display: none !important; visibility: hidden !important; }
-          #vam-informe-propietarios-v200 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-          #vam-informe-propietarios-v200 .report-head { padding-bottom: 12px !important; }
-          #vam-informe-propietarios-v200 .mini-card { padding: 10px 8px !important; }
-          #vam-informe-propietarios-v200 .mini-card p:last-child { font-size: 12px !important; }
-          #vam-informe-propietarios-v200 .report-financial-cards { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
-          #vam-informe-propietarios-v200 .financial-amount { font-size: 12px !important; letter-spacing: -0.3px; }
-          #vam-informe-propietarios-v200 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
-          #vam-informe-propietarios-v200 .report-table th, #vam-informe-propietarios-v200 .report-table td { padding: 5px 5px !important; }
-          #vam-informe-propietarios-v200 .report-table thead { display: table-header-group !important; }
-          #vam-informe-propietarios-v200 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-          #vam-informe-propietarios-v200 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
-          #vam-informe-propietarios-v200 .report-block { break-inside: avoid; page-break-inside: avoid; }
+          #vam-informe-propietarios-v110, #vam-informe-propietarios-v110 * { visibility: visible !important; }
+          #vam-informe-propietarios-v110 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+          #vam-informe-propietarios-v110 .no-print { display: none !important; visibility: hidden !important; }
+          #vam-informe-propietarios-v110 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+          #vam-informe-propietarios-v110 .report-head { padding-bottom: 12px !important; }
+          #vam-informe-propietarios-v110 .mini-card { padding: 10px 8px !important; }
+          #vam-informe-propietarios-v110 .mini-card p:last-child { font-size: 12px !important; }
+          #vam-informe-propietarios-v110 .report-financial-cards { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+          #vam-informe-propietarios-v110 .financial-amount { font-size: 12px !important; letter-spacing: -0.3px; }
+          #vam-informe-propietarios-v110 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
+          #vam-informe-propietarios-v110 .report-table th, #vam-informe-propietarios-v110 .report-table td { padding: 5px 5px !important; }
+          #vam-informe-propietarios-v110 .report-table thead { display: table-header-group !important; }
+          #vam-informe-propietarios-v110 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+          #vam-informe-propietarios-v110 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
+          #vam-informe-propietarios-v110 .report-block { break-inside: avoid; page-break-inside: avoid; }
         }
       `}</style>
 
       <div className="no-print mx-auto mb-4 flex w-full min-w-0 max-w-4xl flex-col items-stretch gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:p-4">
         <div>
           <p className="text-lg font-bold text-slate-900">Informe financiero · Propietarios</p>
-          <p className="text-xs text-slate-500">V2.0 · Acceso seguro para propietarios · impresión y PDF</p>
+          <p className="text-xs text-slate-500">V1.10 · Versión ejecutiva lista para impresión y PDF</p>
         </div>
         <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-end">
           <label className="text-xs font-semibold text-slate-600">Cuenta
@@ -1127,7 +1043,7 @@ export default function ResumenFinancieroPropietariosPage() {
               <p>Datos de ingresos, egresos y saldos registrados al {fechaCorte}.</p>
               <p className="mt-1">Emitido el {fechaEmision} · Elaborado por VAM Administradora de Condominios</p>
             </div>
-            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Informe financiero mensual · V2.0</p>
+            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Informe financiero · V1.10</p>
           </footer>
         </main>
       )}

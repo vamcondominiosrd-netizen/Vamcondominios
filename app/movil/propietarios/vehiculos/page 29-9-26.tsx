@@ -43,43 +43,6 @@ type Vehiculo = {
   created_at?: string | null;
 };
 
-
-type RespuestaVehiculos = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  vehiculos?: Vehiculo[];
-};
-
-type RespuestaVehiculoAccion = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  vehiculo?: Vehiculo | null;
-};
-
-const RPC_LISTAR_VEHICULOS = "vam_propietario_listar_vehiculos";
-const RPC_CREAR_VEHICULO = "vam_propietario_crear_vehiculo";
-const RPC_ELIMINAR_VEHICULO = "vam_propietario_eliminar_vehiculo";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta<T>(data: unknown): T {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as T;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as T;
-  }
-
-  return {} as T;
-}
-
 const TIPOS_VEHICULO = ["Carro", "Jeepeta", "Motor", "Camioneta", "Otro"];
 
 const MARCAS_VEHICULOS = [
@@ -153,50 +116,15 @@ export default function VehiculosPropietariosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-    localStorage.removeItem("condominio_id");
-    localStorage.removeItem("condominio_nombre");
-    localStorage.removeItem("condominio_logo_url");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) {
-      setMensaje(mensaje);
-      setExito(false);
-    }
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
   async function inicializar() {
     setLoadingLista(true);
     setMensaje("");
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
-        enviarALogin();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
@@ -207,17 +135,15 @@ export default function VehiculosPropietariosPage() {
         !sesion?.condominio_id ||
         !sesion?.unidad_id
       ) {
-        enviarALogin();
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       setPropietario(sesion);
-      await cargarVehiculos(sesion, token);
-    } catch (error) {
-      console.error("Error inicializando vehículos:", error);
+      await cargarVehiculos(sesion);
+    } catch {
       setMensaje("No se pudo cargar la información del propietario.");
       setExito(false);
-      setVehiculos([]);
     } finally {
       setLoadingLista(false);
     }
@@ -225,7 +151,6 @@ export default function VehiculosPropietariosPage() {
 
   async function cargarVehiculos(
     prop: PropietarioActual,
-    tokenRecibido?: string,
     modoActualizacion = false,
     conservarMensaje = false
   ) {
@@ -236,69 +161,34 @@ export default function VehiculosPropietariosPage() {
       setExito(false);
     }
 
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
+    const { data, error } = await supabase
+      .from("vehiculos_propietarios")
+      .select(`
+        id,
+        marca,
+        modelo,
+        color,
+        placa,
+        anio,
+        tipo_vehiculo,
+        observaciones,
+        estado,
+        created_at
+      `)
+      .eq("condominio_id", prop.condominio_id)
+      .eq("propietario_id", prop.propietario_id)
+      .eq("unidad_id", prop.unidad_id)
+      .order("created_at", { ascending: false });
 
-      if (!token) {
-        enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-        return;
-      }
-
-      const { data, error } = await supabase.rpc(
-        RPC_LISTAR_VEHICULOS,
-        {
-          p_token: token,
-          p_condominio_id: Number(prop.condominio_id),
-          p_unidad_id: Number(prop.unidad_id),
-        }
-      );
-
-      if (error) {
-        console.error("Error cargando vehículos:", error);
-        setMensaje("No se pudieron cargar los vehículos en este momento.");
-        setExito(false);
-        setVehiculos([]);
-        return;
-      }
-
-      const respuesta =
-        normalizarRespuesta<RespuestaVehiculos>(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setMensaje(
-          respuesta.mensaje ||
-            "No se pudieron cargar los vehículos."
-        );
-        setExito(false);
-        setVehiculos([]);
-        return;
-      }
-
-      setVehiculos(
-        Array.isArray(respuesta.vehiculos)
-          ? respuesta.vehiculos
-          : []
-      );
-    } catch (error) {
-      console.error("Error inesperado cargando vehículos:", error);
-      setMensaje("No se pudieron cargar los vehículos en este momento.");
+    if (error) {
+      setMensaje(`No se pudieron cargar los vehículos: ${error.message}`);
       setExito(false);
       setVehiculos([]);
-    } finally {
-      if (modoActualizacion) setActualizando(false);
+    } else {
+      setVehiculos((data || []) as Vehiculo[]);
     }
+
+    if (modoActualizacion) setActualizando(false);
   }
 
   function limpiarFormulario() {
@@ -318,15 +208,8 @@ export default function VehiculosPropietariosPage() {
     setMensaje("");
     setExito(false);
 
-    const placaFinal = placa.trim().toUpperCase();
-
-    if (!placaFinal) {
+    if (!placa.trim()) {
       setMensaje("Debe indicar la placa del vehículo.");
-      return;
-    }
-
-    if (placaFinal.length > 20) {
-      setMensaje("La placa indicada es demasiado larga.");
       return;
     }
 
@@ -340,122 +223,50 @@ export default function VehiculosPropietariosPage() {
       return;
     }
 
-    const marcaFinal =
-      marca === "Otra marca"
-        ? marcaOtro.trim()
-        : marca;
-
-    if (marcaFinal.length > 80) {
-      setMensaje("La marca indicada es demasiado larga.");
-      return;
-    }
-
-    if (modelo.trim().length > 80) {
-      setMensaje("El modelo indicado es demasiado largo.");
-      return;
-    }
-
-    if (color.trim().length > 50) {
-      setMensaje("El color indicado es demasiado largo.");
-      return;
-    }
-
-    if (observaciones.trim().length > 1000) {
-      setMensaje("Las observaciones son demasiado largas.");
-      return;
-    }
-
-    let anioNumero: number | null = null;
-
     if (anio) {
-      anioNumero = Number(anio);
+      const anioNumero = Number(anio);
       const anioActual = new Date().getFullYear();
 
-      if (
-        !Number.isInteger(anioNumero) ||
-        anioNumero < 1950 ||
-        anioNumero > anioActual + 1
-      ) {
+      if (anioNumero < 1950 || anioNumero > anioActual + 1) {
         setMensaje("Debe indicar un año de vehículo válido.");
         return;
       }
     }
 
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-      return;
-    }
+    const marcaFinal = marca === "Otra marca" ? marcaOtro.trim() : marca;
 
     setLoading(true);
 
-    try {
-      const { data, error } = await supabase.rpc(
-        RPC_CREAR_VEHICULO,
-        {
-          p_token: token,
-          p_condominio_id: Number(propietario.condominio_id),
-          p_unidad_id: Number(propietario.unidad_id),
-          p_tipo_vehiculo: tipoVehiculo,
-          p_marca: marcaFinal,
-          p_modelo: modelo.trim() || null,
-          p_color: color.trim() || null,
-          p_placa: placaFinal,
-          p_anio: anioNumero,
-          p_observaciones: observaciones.trim() || null,
-        }
-      );
+    const { error } = await supabase.from("vehiculos_propietarios").insert({
+      condominio_id: propietario.condominio_id,
+      condominio: propietario.condominio_nombre,
+      propietario_id: propietario.propietario_id,
+      unidad_id: propietario.unidad_id,
+      no_apartamento: propietario.no_apartamento,
+      nombre_propietario: propietario.nombre_propietario,
+      marca: marcaFinal || null,
+      modelo: modelo.trim() || null,
+      color: color.trim() || null,
+      placa: placa.trim().toUpperCase(),
+      anio: anio ? Number(anio) : null,
+      tipo_vehiculo: tipoVehiculo,
+      observaciones: observaciones.trim() || null,
+      estado: "Activo",
+    });
 
-      if (error) {
-        console.error("Error registrando vehículo:", error);
-        setMensaje("No se pudo registrar el vehículo en este momento.");
-        setExito(false);
-        return;
-      }
-
-      const respuesta =
-        normalizarRespuesta<RespuestaVehiculoAccion>(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setMensaje(
-          respuesta.mensaje ||
-            "No se pudo registrar el vehículo."
-        );
-        setExito(false);
-        return;
-      }
-
-      limpiarFormulario();
-      setExito(true);
-      setMensaje(
-        respuesta.mensaje ||
-          "Vehículo registrado correctamente."
-      );
-
-      await cargarVehiculos(
-        propietario,
-        token,
-        false,
-        true
-      );
-    } catch (error) {
-      console.error("Error inesperado registrando vehículo:", error);
-      setMensaje("No se pudo registrar el vehículo.");
+    if (error) {
+      setMensaje(`Error registrando vehículo: ${error.message}`);
       setExito(false);
-    } finally {
       setLoading(false);
+      return;
     }
+
+    limpiarFormulario();
+    setExito(true);
+    setMensaje("Vehículo registrado correctamente.");
+
+    await cargarVehiculos(propietario, false, true);
+    setLoading(false);
   }
 
   async function eliminarVehiculo(id: number) {
@@ -467,73 +278,28 @@ export default function VehiculosPropietariosPage() {
 
     if (!confirmar) return;
 
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-      return;
-    }
-
     setEliminandoId(id);
     setMensaje("");
     setExito(false);
 
-    try {
-      const { data, error } = await supabase.rpc(
-        RPC_ELIMINAR_VEHICULO,
-        {
-          p_token: token,
-          p_condominio_id: Number(propietario.condominio_id),
-          p_unidad_id: Number(propietario.unidad_id),
-          p_vehiculo_id: Number(id),
-        }
-      );
+    const { error } = await supabase
+      .from("vehiculos_propietarios")
+      .delete()
+      .eq("id", id)
+      .eq("condominio_id", propietario.condominio_id)
+      .eq("propietario_id", propietario.propietario_id)
+      .eq("unidad_id", propietario.unidad_id);
 
-      if (error) {
-        console.error("Error eliminando vehículo:", error);
-        setMensaje("No se pudo eliminar el vehículo en este momento.");
-        return;
-      }
-
-      const respuesta =
-        normalizarRespuesta<RespuestaVehiculoAccion>(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setMensaje(
-          respuesta.mensaje ||
-            "No se pudo eliminar el vehículo."
-        );
-        return;
-      }
-
-      setExito(true);
-      setMensaje(
-        respuesta.mensaje ||
-          "Vehículo eliminado correctamente."
-      );
-
-      await cargarVehiculos(
-        propietario,
-        token,
-        false,
-        true
-      );
-    } catch (error) {
-      console.error("Error inesperado eliminando vehículo:", error);
-      setMensaje("No se pudo eliminar el vehículo.");
-    } finally {
+    if (error) {
+      setMensaje(`Error eliminando vehículo: ${error.message}`);
       setEliminandoId(null);
+      return;
     }
+
+    setExito(true);
+    setMensaje("Vehículo eliminado correctamente.");
+    await cargarVehiculos(propietario, false, true);
+    setEliminandoId(null);
   }
 
   const vehiculosActivos = useMemo(
@@ -585,7 +351,7 @@ export default function VehiculosPropietariosPage() {
 
             <button
               type="button"
-              onClick={() => cargarVehiculos(propietario, undefined, true)}
+              onClick={() => cargarVehiculos(propietario, true)}
               disabled={actualizando}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60"
               aria-label="Actualizar"
@@ -924,12 +690,6 @@ export default function VehiculosPropietariosPage() {
             </div>
           )}
         </section>
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Vehículos Propietario V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );

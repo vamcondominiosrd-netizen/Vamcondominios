@@ -41,34 +41,6 @@ type Anuncio = {
   created_at?: string | null;
 };
 
-type RespuestaAnuncios = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  anuncios?: Anuncio[];
-};
-
-const RPC_LISTAR_ANUNCIOS = "vam_propietario_listar_anuncios";
-const MODULO_VERSION = "2.1";
-
-function normalizarRespuesta(data: unknown): RespuestaAnuncios {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaAnuncios;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaAnuncios;
-  }
-
-  return {};
-}
-
-
 export default function AnunciosPropietariosPage() {
   const router = useRouter();
 
@@ -86,33 +58,15 @@ export default function AnunciosPropietariosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) setMensaje(mensaje);
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
   async function inicializar() {
     setLoading(true);
     setMensaje("");
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
-        enviarALogin();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
@@ -123,12 +77,12 @@ export default function AnunciosPropietariosPage() {
         !prop?.condominio_id ||
         !prop?.unidad_id
       ) {
-        enviarALogin();
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       setPropietario(prop);
-      await cargarAnuncios(prop, token);
+      await cargarAnuncios(prop);
     } catch {
       setMensaje("No se pudo cargar la información del propietario.");
     } finally {
@@ -138,75 +92,43 @@ export default function AnunciosPropietariosPage() {
 
   async function cargarAnuncios(
     prop: PropietarioActual,
-    tokenRecibido?: string,
     modoActualizacion = false
   ) {
     if (modoActualizacion) setActualizando(true);
     setMensaje("");
 
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
+    const hoy = new Date().toISOString().slice(0, 10);
 
-      if (!token) {
-        enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-        return;
-      }
+    const { data, error } = await supabase
+      .from("anuncios")
+      .select(`
+        id,
+        titulo,
+        contenido,
+        descripcion,
+        estado,
+        tipo_anuncio,
+        prioridad,
+        imagen_url,
+        documento_url,
+        fecha_publicacion,
+        fecha_vencimiento,
+        publicado_en,
+        created_at
+      `)
+      .eq("condominio_id", prop.condominio_id)
+      .in("estado", ["Publicado", "Activo", "PUBLICADO", "ACTIVO"])
+      .or(`fecha_vencimiento.is.null,fecha_vencimiento.gte.${hoy}`)
+      .order("created_at", { ascending: false });
 
-      const { data, error } = await supabase.rpc(RPC_LISTAR_ANUNCIOS, {
-        p_token: token,
-        p_condominio_id: Number(prop.condominio_id),
-        p_unidad_id: Number(prop.unidad_id),
-      });
+    if (modoActualizacion) setActualizando(false);
 
-      if (error) {
-        console.error("Error cargando anuncios:", error);
-        setMensaje("No se pudieron cargar los anuncios en este momento.");
-        setAnuncios([]);
-        return;
-      }
-
-      const respuesta = normalizarRespuesta(data);
-
-      if (respuesta.ok !== true) {
-        const codigo = String(respuesta.codigo || "");
-
-        if (
-          [
-            "SESION_INVALIDA",
-            "SESION_VENCIDA",
-            "CUENTA_INACTIVA",
-            "CAMBIO_CLAVE_PENDIENTE",
-            "SIN_ACCESO",
-          ].includes(codigo)
-        ) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setMensaje(
-          respuesta.mensaje || "No se pudieron cargar los anuncios."
-        );
-        setAnuncios([]);
-        return;
-      }
-
-      setAnuncios(
-        Array.isArray(respuesta.anuncios) ? respuesta.anuncios : []
-      );
-    } catch (error) {
-      console.error("Error inesperado cargando anuncios:", error);
-      setMensaje("No se pudieron cargar los anuncios en este momento.");
-      setAnuncios([]);
-    } finally {
-      if (modoActualizacion) setActualizando(false);
+    if (error) {
+      setMensaje("Error cargando anuncios: " + error.message);
+      return;
     }
+
+    setAnuncios(data || []);
   }
 
   const anunciosFiltrados = useMemo(() => {
@@ -282,7 +204,7 @@ export default function AnunciosPropietariosPage() {
 
             <button
               type="button"
-              onClick={() => cargarAnuncios(propietario, undefined, true)}
+              onClick={() => cargarAnuncios(propietario, true)}
               disabled={actualizando}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60"
               aria-label="Actualizar"
@@ -475,12 +397,6 @@ export default function AnunciosPropietariosPage() {
             })
           )}
         </section>
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            Anuncios Propietario · V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );

@@ -38,45 +38,10 @@ type Documento = {
   titulo: string;
   descripcion?: string | null;
   categoria: string;
-  tiene_archivo?: boolean;
+  archivo_url?: string | null;
   fecha_publicacion?: string | null;
   requiere_firma?: boolean | null;
 };
-
-type RespuestaDocumentos = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  documentos?: Documento[];
-};
-
-type RespuestaDocumentoUrl = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  archivo_url?: string | null;
-};
-
-const RPC_LISTAR_DOCUMENTOS = "vam_propietario_listar_documentos";
-const RPC_DOCUMENTO_URL = "vam_propietario_documento_url";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta<T>(data: unknown): T {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as T;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as T;
-  }
-
-  return {} as T;
-}
 
 function formatearFecha(fecha?: string | null) {
   if (!fecha) return "Sin fecha";
@@ -126,44 +91,15 @@ export default function DocumentosPropietariosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) setMensaje(mensaje);
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
   async function inicializar() {
     setLoading(true);
     setMensaje("");
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
-        enviarALogin();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
@@ -174,16 +110,14 @@ export default function DocumentosPropietariosPage() {
         !sesion?.condominio_id ||
         !sesion?.unidad_id
       ) {
-        enviarALogin();
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       setPropietario(sesion);
-      await cargarDocumentos(sesion, token);
-    } catch (error) {
-      console.error("Error inicializando documentos:", error);
+      await cargarDocumentos(sesion);
+    } catch {
       setMensaje("No se pudo cargar la información del propietario.");
-      setDocumentos([]);
     } finally {
       setLoading(false);
     }
@@ -191,151 +125,35 @@ export default function DocumentosPropietariosPage() {
 
   async function cargarDocumentos(
     prop: PropietarioActual,
-    tokenRecibido?: string,
     modoActualizacion = false
   ) {
     if (modoActualizacion) setActualizando(true);
     setMensaje("");
 
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
+    const { data, error } = await supabase
+      .from("documentos_condominio")
+      .select(`
+        id,
+        titulo,
+        descripcion,
+        categoria,
+        archivo_url,
+        fecha_publicacion,
+        requiere_firma
+      `)
+      .eq("condominio_id", prop.condominio_id)
+      .eq("estado", "Publicado")
+      .eq("visible_propietarios", true)
+      .order("fecha_publicacion", { ascending: false });
 
-      if (!token) {
-        enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-        return;
-      }
-
-      const { data, error } = await supabase.rpc(
-        RPC_LISTAR_DOCUMENTOS,
-        {
-          p_token: token,
-          p_condominio_id: Number(prop.condominio_id),
-          p_unidad_id: Number(prop.unidad_id),
-        }
-      );
-
-      if (error) {
-        console.error("Error cargando documentos:", error);
-        setMensaje("No se pudieron cargar los documentos en este momento.");
-        setDocumentos([]);
-        return;
-      }
-
-      const respuesta =
-        normalizarRespuesta<RespuestaDocumentos>(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setMensaje(
-          respuesta.mensaje ||
-            "No se pudieron cargar los documentos."
-        );
-        setDocumentos([]);
-        return;
-      }
-
-      setDocumentos(
-        Array.isArray(respuesta.documentos)
-          ? respuesta.documentos
-          : []
-      );
-    } catch (error) {
-      console.error("Error inesperado cargando documentos:", error);
-      setMensaje("No se pudieron cargar los documentos en este momento.");
+    if (error) {
+      setMensaje(`No se pudieron cargar los documentos: ${error.message}`);
       setDocumentos([]);
-    } finally {
-      if (modoActualizacion) setActualizando(false);
-    }
-  }
-
-  async function abrirDocumento(
-    documento: Documento,
-    modo: "ver" | "descargar"
-  ) {
-    if (!propietario) return;
-
-    setMensaje("");
-
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-      return;
+    } else {
+      setDocumentos((data || []) as Documento[]);
     }
 
-    try {
-      const { data, error } = await supabase.rpc(
-        RPC_DOCUMENTO_URL,
-        {
-          p_token: token,
-          p_condominio_id: Number(propietario.condominio_id),
-          p_unidad_id: Number(propietario.unidad_id),
-          p_documento_id: Number(documento.id),
-        }
-      );
-
-      if (error) {
-        console.error("Error obteniendo documento:", error);
-        setMensaje("No se pudo abrir el documento en este momento.");
-        return;
-      }
-
-      const respuesta =
-        normalizarRespuesta<RespuestaDocumentoUrl>(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setMensaje(
-          respuesta.mensaje ||
-            "Este documento no está disponible."
-        );
-        return;
-      }
-
-      const url = String(respuesta.archivo_url || "").trim();
-
-      if (!url) {
-        setMensaje("Este documento no tiene un archivo disponible.");
-        return;
-      }
-
-      if (modo === "ver") {
-        window.open(url, "_blank", "noopener,noreferrer");
-        return;
-      }
-
-      const enlace = document.createElement("a");
-      enlace.href = url;
-      enlace.target = "_blank";
-      enlace.rel = "noopener noreferrer";
-      enlace.download = "";
-      document.body.appendChild(enlace);
-      enlace.click();
-      enlace.remove();
-    } catch (error) {
-      console.error("Error inesperado abriendo documento:", error);
-      setMensaje("No se pudo abrir el documento en este momento.");
-    }
+    if (modoActualizacion) setActualizando(false);
   }
 
   const categorias = useMemo(
@@ -419,7 +237,7 @@ export default function DocumentosPropietariosPage() {
 
             <button
               type="button"
-              onClick={() => cargarDocumentos(propietario, undefined, true)}
+              onClick={() => cargarDocumentos(propietario, true)}
               disabled={actualizando}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60"
               aria-label="Actualizar"
@@ -584,25 +402,28 @@ export default function DocumentosPropietariosPage() {
                     </div>
                   )}
 
-                  {documento.tiene_archivo ? (
+                  {documento.archivo_url ? (
                     <div className="mt-4 grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => abrirDocumento(documento, "ver")}
+                      <a
+                        href={documento.archivo_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-800 text-xs font-extrabold text-white"
                       >
                         <Eye size={15} />
                         Ver
-                      </button>
+                      </a>
 
-                      <button
-                        type="button"
-                        onClick={() => abrirDocumento(documento, "descargar")}
+                      <a
+                        href={documento.archivo_url}
+                        download
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-extrabold text-slate-700"
                       >
                         <Download size={15} />
                         Descargar
-                      </button>
+                      </a>
                     </div>
                   ) : (
                     <div className="mt-4 rounded-xl bg-slate-100 px-3 py-3 text-center text-xs text-slate-500">
@@ -614,12 +435,6 @@ export default function DocumentosPropietariosPage() {
             })
           )}
         </section>
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Documentos Propietario V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );

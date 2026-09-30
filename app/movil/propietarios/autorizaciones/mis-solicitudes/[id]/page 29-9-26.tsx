@@ -77,34 +77,6 @@ type Autorizacion = {
   updated_at: string | null;
 };
 
-
-type RespuestaDetalleAutorizacion = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  solicitud?: Autorizacion | null;
-};
-
-const RPC_DETALLE_AUTORIZACION = "vam_propietario_detalle_autorizacion";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta(data: unknown): RespuestaDetalleAutorizacion {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaDetalleAutorizacion;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaDetalleAutorizacion;
-  }
-
-  return {};
-}
-
 function normalizarEstado(valor: string | null | undefined) {
   return String(valor || "PENDIENTE")
     .trim()
@@ -210,45 +182,14 @@ export default function DetalleAutorizacionPropietarioPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [solicitudId]);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-  }
-
-  function sesionInvalida(mensaje?: string) {
-    setError(
-      mensaje || "La sesión ha vencido. Inicie sesión nuevamente."
-    );
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, 700);
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
   async function cargarDetalle() {
     setCargando(true);
     setError("");
-    setSolicitud(null);
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
+      if (!raw) {
         router.replace("/movil/propietarios/login");
         return;
       }
@@ -265,58 +206,31 @@ export default function DetalleAutorizacionPropietarioPage() {
       }
 
       if (!Number.isFinite(solicitudId) || solicitudId <= 0) {
-        setPropietario(sesion);
         setError("La solicitud indicada no es válida.");
         return;
       }
 
       setPropietario(sesion);
 
-      const { data, error: consultaError } = await supabase.rpc(
-        RPC_DETALLE_AUTORIZACION,
-        {
-          p_token: token,
-          p_condominio_id: Number(sesion.condominio_id),
-          p_unidad_id: Number(sesion.unidad_id),
-          p_autorizacion_id: Number(solicitudId),
-        }
-      );
+      const { data, error: consultaError } = await supabase
+        .from("autorizaciones")
+        .select("*")
+        .eq("id", solicitudId)
+        .eq("condominio_id", sesion.condominio_id)
+        .eq("propietario_id", sesion.propietario_id)
+        .eq("unidad_id", sesion.unidad_id)
+        .maybeSingle();
 
-      if (consultaError) {
-        console.error(
-          "Error cargando detalle de autorización:",
-          consultaError
-        );
-        setError(
-          "No se pudo cargar el detalle de la solicitud en este momento."
-        );
+      if (consultaError) throw consultaError;
+
+      if (!data) {
+        setError("No se encontró la solicitud o no pertenece a esta unidad.");
         return;
       }
 
-      const respuesta = normalizarRespuesta(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          sesionInvalida(respuesta.mensaje);
-          return;
-        }
-
-        setError(
-          respuesta.mensaje ||
-            "No se encontró la solicitud o no está disponible."
-        );
-        return;
-      }
-
-      if (!respuesta.solicitud) {
-        setError("No se encontró la solicitud o no está disponible.");
-        return;
-      }
-
-      setSolicitud(respuesta.solicitud);
-    } catch (err) {
-      console.error("Error inesperado cargando autorización:", err);
-      setError("No se pudo cargar el detalle de la solicitud.");
+      setSolicitud(data as Autorizacion);
+    } catch (err: any) {
+      setError(err?.message || "No se pudo cargar el detalle de la solicitud.");
     } finally {
       setCargando(false);
     }
@@ -612,12 +526,6 @@ export default function DetalleAutorizacionPropietarioPage() {
             )}
           </Seccion>
         )}
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            Detalle autorización · V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );

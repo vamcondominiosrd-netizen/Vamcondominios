@@ -41,34 +41,6 @@ type ContactoDirectorio = {
   tipo_contacto?: string | null;
 };
 
-
-type RespuestaDirectorio = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  contactos?: ContactoDirectorio[];
-};
-
-const RPC_LISTAR_DIRECTORIO = "vam_propietario_listar_directorio";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta(data: unknown): RespuestaDirectorio {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaDirectorio;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaDirectorio;
-  }
-
-  return {};
-}
-
 function limpiarTelefono(telefono?: string | null) {
   return String(telefono || "").replace(/\D/g, "");
 }
@@ -117,44 +89,15 @@ export default function DirectorioMovilPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) setMensaje(mensaje);
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
   async function inicializar() {
     setLoading(true);
     setMensaje("");
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
-        enviarALogin();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
@@ -165,16 +108,14 @@ export default function DirectorioMovilPage() {
         !sesion?.condominio_id ||
         !sesion?.unidad_id
       ) {
-        enviarALogin();
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       setPropietario(sesion);
-      await cargarContactos(sesion, token);
-    } catch (error) {
-      console.error("Error inicializando directorio:", error);
+      await cargarContactos(sesion);
+    } catch {
       setMensaje("No se pudo cargar la información del propietario.");
-      setContactos([]);
     } finally {
       setLoading(false);
     }
@@ -182,71 +123,35 @@ export default function DirectorioMovilPage() {
 
   async function cargarContactos(
     prop: PropietarioActual,
-    tokenRecibido?: string,
     modoActualizacion = false
   ) {
     if (modoActualizacion) setActualizando(true);
     setMensaje("");
 
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
+    const { data, error } = await supabase
+      .from("directorio_condominio")
+      .select(`
+        id,
+        nombre,
+        cargo,
+        empresa,
+        telefono,
+        correo,
+        tipo_contacto
+      `)
+      .eq("condominio_id", prop.condominio_id)
+      .eq("activo", true)
+      .order("tipo_contacto", { ascending: true })
+      .order("nombre", { ascending: true });
 
-      if (!token) {
-        enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-        return;
-      }
-
-      const { data, error } = await supabase.rpc(
-        RPC_LISTAR_DIRECTORIO,
-        {
-          p_token: token,
-          p_condominio_id: Number(prop.condominio_id),
-          p_unidad_id: Number(prop.unidad_id),
-        }
-      );
-
-      if (error) {
-        console.error("Error cargando directorio:", error);
-        setMensaje("No se pudo cargar el directorio en este momento.");
-        setContactos([]);
-        return;
-      }
-
-      const respuesta = normalizarRespuesta(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setMensaje(
-          respuesta.mensaje ||
-            "No se pudo cargar el directorio."
-        );
-        setContactos([]);
-        return;
-      }
-
-      setContactos(
-        Array.isArray(respuesta.contactos)
-          ? respuesta.contactos
-          : []
-      );
-    } catch (error) {
-      console.error("Error inesperado cargando directorio:", error);
-      setMensaje("No se pudo cargar el directorio en este momento.");
+    if (error) {
+      setMensaje(`No se pudo cargar el directorio: ${error.message}`);
       setContactos([]);
-    } finally {
-      if (modoActualizacion) setActualizando(false);
+    } else {
+      setContactos((data || []) as ContactoDirectorio[]);
     }
+
+    if (modoActualizacion) setActualizando(false);
   }
 
   const tipos = useMemo(
@@ -326,7 +231,7 @@ export default function DirectorioMovilPage() {
 
             <button
               type="button"
-              onClick={() => cargarContactos(propietario, undefined, true)}
+              onClick={() => cargarContactos(propietario, true)}
               disabled={actualizando}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60"
               aria-label="Actualizar"
@@ -535,12 +440,6 @@ export default function DirectorioMovilPage() {
             })
           )}
         </section>
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Directorio Propietario V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );

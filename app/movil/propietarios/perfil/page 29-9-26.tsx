@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/app/lib/supabaseClient";
 import {
   ArrowLeft,
   Building2,
@@ -29,34 +28,6 @@ type PropietarioActual = {
   correo?: string;
 };
 
-
-type RespuestaPerfil = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  propietario?: PropietarioActual | null;
-};
-
-const RPC_PERFIL_PROPIETARIO = "vam_propietario_perfil";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta(data: unknown): RespuestaPerfil {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as RespuestaPerfil;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as RespuestaPerfil;
-  }
-
-  return {};
-}
-
 export default function PerfilPropietarioPage() {
   const router = useRouter();
 
@@ -65,135 +36,39 @@ export default function PerfilPropietarioPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    void inicializar();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
-
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-    localStorage.removeItem("condominio_id");
-    localStorage.removeItem("condominio_nombre");
-    localStorage.removeItem("condominio_logo_url");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function enviarALogin(mensaje?: string) {
-    limpiarSesionPropietario();
-
-    if (mensaje) {
-      console.warn("Perfil propietario:", mensaje);
-    }
-
-    router.replace("/movil/propietarios/login");
-  }
-
-  async function inicializar() {
-    setLoading(true);
-
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
 
-      if (!raw || !token) {
-        enviarALogin();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
-      const contexto = JSON.parse(raw) as PropietarioActual;
+      const sesion = JSON.parse(raw) as PropietarioActual;
 
       if (
-        !contexto?.propietario_id ||
-        !contexto?.condominio_id ||
-        !contexto?.unidad_id
+        !sesion?.propietario_id ||
+        !sesion?.condominio_id ||
+        !sesion?.unidad_id
       ) {
-        enviarALogin();
+        router.replace("/movil/propietarios/login");
         return;
       }
 
-      const { data, error } = await supabase.rpc(
-        RPC_PERFIL_PROPIETARIO,
-        {
-          p_token: token,
-          p_condominio_id: Number(contexto.condominio_id),
-          p_unidad_id: Number(contexto.unidad_id),
-        }
-      );
-
-      if (error) {
-        console.error("Error cargando perfil:", error);
-        enviarALogin("No se pudo validar la sesión del propietario.");
-        return;
-      }
-
-      const respuesta = normalizarRespuesta(data);
-
-      if (respuesta.ok !== true || !respuesta.propietario) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        console.error(
-          "Perfil propietario rechazado:",
-          respuesta.mensaje || "Respuesta inválida del servidor."
-        );
-        enviarALogin();
-        return;
-      }
-
-      const perfilValidado = respuesta.propietario;
-
-      setPropietario(perfilValidado);
-
-      // Mantener el contexto local sincronizado con los datos validados
-      // por el servidor. El token sigue siendo la autoridad.
-      localStorage.setItem(
-        "propietario_actual",
-        JSON.stringify(perfilValidado)
-      );
-      localStorage.setItem(
-        "condominio_id",
-        String(perfilValidado.condominio_id)
-      );
-      localStorage.setItem(
-        "condominio_nombre",
-        perfilValidado.condominio_nombre || ""
-      );
-
-      if (perfilValidado.condominio_logo_url) {
-        localStorage.setItem(
-          "condominio_logo_url",
-          perfilValidado.condominio_logo_url
-        );
-      } else {
-        localStorage.removeItem("condominio_logo_url");
-      }
-    } catch (error) {
-      console.error("Error inicializando perfil propietario:", error);
-      enviarALogin();
+      setPropietario(sesion);
+    } catch {
+      router.replace("/movil/propietarios/login");
     } finally {
       setLoading(false);
     }
-  }
+  }, [router]);
 
   function cerrarSesion() {
-    limpiarSesionPropietario();
+    localStorage.removeItem("propietario_actual");
+    localStorage.removeItem("condominio_id");
+    localStorage.removeItem("condominio_nombre");
+    localStorage.removeItem("condominio_logo_url");
+
     router.replace("/movil/propietarios/login");
   }
 
@@ -367,12 +242,6 @@ export default function PerfilPropietarioPage() {
           <LogOut size={18} />
           Cerrar sesión
         </button>
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Perfil Propietario V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );

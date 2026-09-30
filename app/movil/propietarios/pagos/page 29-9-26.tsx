@@ -22,11 +22,23 @@ type BancoNombre = {
   nombre_banco: string;
 };
 
+function formatoMoneda(valor: number) {
+  return new Intl.NumberFormat("es-DO", {
+    style: "currency",
+    currency: "DOP",
+  }).format(valor || 0);
+}
+
 export default function PagosPropietariosPage() {
   const router = useRouter();
 
-  const [propietario, setPropietario] = useState<PropietarioActual | null>(null);
+  const [propietario, setPropietario] = useState<PropietarioActual | null>(
+    null
+  );
   const [bancos, setBancos] = useState<BancoNombre[]>([]);
+
+  const [balancePendiente, setBalancePendiente] = useState(0);
+  const [cargandoBalance, setCargandoBalance] = useState(true);
 
   const [concepto, setConcepto] = useState("Pago de mantenimiento");
   const [monto, setMonto] = useState("");
@@ -49,9 +61,13 @@ export default function PagosPropietariosPage() {
       return;
     }
 
-    setPropietario(JSON.parse(raw));
+    const prop = JSON.parse(raw);
+
+    setPropietario(prop);
     setFechaPago(new Date().toISOString().slice(0, 10));
+
     cargarBancos();
+    cargarBalance(prop);
   }, [router]);
 
   async function cargarBancos() {
@@ -68,6 +84,35 @@ export default function PagosPropietariosPage() {
     }
 
     setBancos(data || []);
+  }
+
+  async function cargarBalance(prop: PropietarioActual) {
+    setCargandoBalance(true);
+
+    const { data, error } = await supabase
+      .from("cargos_periodicos")
+      .select("balance")
+      .eq("condominio_id", prop.condominio_id)
+      .eq("unidad_id", prop.unidad_id);
+
+    if (error) {
+      setMensaje("Error cargando balance: " + error.message);
+      setCargandoBalance(false);
+      return;
+    }
+
+    const balance = (data || []).reduce(
+      (sum, item: any) => sum + Number(item.balance || 0),
+      0
+    );
+
+    setBalancePendiente(balance);
+
+    if (balance > 0) {
+      setMonto(balance.toFixed(2));
+    }
+
+    setCargandoBalance(false);
   }
 
   async function subirComprobante() {
@@ -173,7 +218,7 @@ export default function PagosPropietariosPage() {
       setMensaje("Pago enviado correctamente. Quedará pendiente de validación.");
 
       setConcepto("Pago de mantenimiento");
-      setMonto("");
+      setMonto(balancePendiente > 0 ? balancePendiente.toFixed(2) : "");
       setFechaPago(new Date().toISOString().slice(0, 10));
       setMetodoPago("Transferencia");
       setBanco("");
@@ -204,8 +249,43 @@ export default function PagosPropietariosPage() {
 
         <p className="text-sm text-slate-300">Registrar pago</p>
         <h1 className="text-xl font-bold">{propietario.no_apartamento}</h1>
-        <p className="text-xs text-slate-300">{propietario.condominio_nombre}</p>
+        <p className="text-xs text-slate-300">
+          {propietario.condominio_nombre}
+        </p>
       </header>
+
+      <section className="bg-white rounded-3xl border shadow-sm p-5">
+        <p className="text-sm font-bold text-slate-500">Balance pendiente</p>
+
+        {cargandoBalance ? (
+          <p className="text-slate-500 mt-2">Cargando balance...</p>
+        ) : (
+          <>
+            <h2
+              className={`text-3xl font-extrabold mt-1 ${
+                balancePendiente > 0 ? "text-red-600" : "text-green-600"
+              }`}
+            >
+              {formatoMoneda(balancePendiente)}
+            </h2>
+
+            <p className="text-xs text-slate-500 mt-1">
+              El monto a pagar se cargó automáticamente, pero puede modificarlo
+              si realizará un pago parcial.
+            </p>
+
+            {balancePendiente > 0 && (
+              <button
+                type="button"
+                onClick={() => setMonto(balancePendiente.toFixed(2))}
+                className="mt-4 w-full bg-slate-100 text-slate-800 rounded-2xl py-3 font-bold"
+              >
+                Pagar balance completo
+              </button>
+            )}
+          </>
+        )}
+      </section>
 
       {mensaje && (
         <div
@@ -225,6 +305,7 @@ export default function PagosPropietariosPage() {
           <label className="block text-sm font-bold text-slate-700 mb-1">
             Concepto
           </label>
+
           <select
             value={concepto}
             onChange={(e) => setConcepto(e.target.value)}
@@ -240,8 +321,9 @@ export default function PagosPropietariosPage() {
 
         <div>
           <label className="block text-sm font-bold text-slate-700 mb-1">
-            Monto pagado
+            Monto a pagar
           </label>
+
           <input
             type="number"
             value={monto}
@@ -249,12 +331,19 @@ export default function PagosPropietariosPage() {
             placeholder="Ejemplo: 4500"
             className="w-full border rounded-2xl px-4 py-3"
           />
+
+          {monto && (
+            <p className="text-xs text-slate-500 mt-1">
+              {formatoMoneda(Number(monto))}
+            </p>
+          )}
         </div>
 
         <div>
           <label className="block text-sm font-bold text-slate-700 mb-1">
             Fecha del pago
           </label>
+
           <input
             type="date"
             value={fechaPago}
@@ -267,10 +356,12 @@ export default function PagosPropietariosPage() {
           <label className="block text-sm font-bold text-slate-700 mb-1">
             Método de pago
           </label>
+
           <select
             value={metodoPago}
             onChange={(e) => {
               setMetodoPago(e.target.value);
+
               if (e.target.value === "Efectivo") {
                 setBanco("");
                 setBancoOtro("");
@@ -293,11 +384,15 @@ export default function PagosPropietariosPage() {
               <label className="block text-sm font-bold text-slate-700 mb-1">
                 Banco
               </label>
+
               <select
                 value={banco}
                 onChange={(e) => {
                   setBanco(e.target.value);
-                  if (e.target.value !== "Otro banco") setBancoOtro("");
+
+                  if (e.target.value !== "Otro banco") {
+                    setBancoOtro("");
+                  }
                 }}
                 className="w-full border rounded-2xl px-4 py-3 bg-white"
               >
@@ -318,6 +413,7 @@ export default function PagosPropietariosPage() {
                 <label className="block text-sm font-bold text-slate-700 mb-1">
                   Especifique banco
                 </label>
+
                 <input
                   type="text"
                   value={bancoOtro}
@@ -332,6 +428,7 @@ export default function PagosPropietariosPage() {
               <label className="block text-sm font-bold text-slate-700 mb-1">
                 Referencia / No. transacción
               </label>
+
               <input
                 type="text"
                 value={referencia}
@@ -350,9 +447,11 @@ export default function PagosPropietariosPage() {
 
           <label className="border-2 border-dashed rounded-3xl p-5 flex flex-col items-center justify-center text-center cursor-pointer bg-slate-50">
             <Upload className="text-blue-700 mb-2" size={28} />
+
             <span className="text-sm font-bold text-slate-700">
               Subir comprobante
             </span>
+
             <span className="text-xs text-slate-500 mt-1">
               Imagen o PDF del pago
             </span>

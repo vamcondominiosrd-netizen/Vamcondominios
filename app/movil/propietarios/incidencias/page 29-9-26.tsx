@@ -42,45 +42,9 @@ type Incidencia = {
   descripcion?: string | null;
   prioridad?: string | null;
   estado?: string | null;
-  tiene_foto?: boolean;
+  foto_url?: string | null;
   created_at?: string | null;
 };
-
-type RespuestaIncidencias = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  incidencias?: Incidencia[];
-};
-
-type RespuestaCrearIncidencia = {
-  ok?: boolean;
-  codigo?: string;
-  mensaje?: string;
-  incidencia?: Incidencia | null;
-};
-
-const RPC_LISTAR_INCIDENCIAS = "vam_propietario_listar_incidencias";
-const RPC_CREAR_INCIDENCIA = "vam_propietario_crear_incidencia";
-const API_EVIDENCIA = "/api/propietarios/incidencias/evidencia";
-const MODULO_VERSION = "2.0";
-
-function normalizarRespuesta<T>(data: unknown): T {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as T;
-  }
-
-  if (
-    Array.isArray(data) &&
-    data.length > 0 &&
-    data[0] &&
-    typeof data[0] === "object"
-  ) {
-    return data[0] as T;
-  }
-
-  return {} as T;
-}
 
 const CATEGORIAS = [
   "Agua",
@@ -148,68 +112,28 @@ export default function IncidenciasPropietariosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function limpiarSesionPropietario() {
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-  }
-
-  function codigoSesionInvalida(codigo?: string) {
-    return [
-      "SESION_INVALIDA",
-      "SESION_VENCIDA",
-      "CUENTA_INACTIVA",
-      "CAMBIO_CLAVE_PENDIENTE",
-      "SIN_ACCESO",
-    ].includes(String(codigo || ""));
-  }
-
-  function enviarALogin(mensaje?: string) {
-    if (mensaje) {
-      setMensaje(mensaje);
-      setExito(false);
-    }
-
-    limpiarSesionPropietario();
-
-    window.setTimeout(() => {
-      router.replace("/movil/propietarios/login");
-    }, mensaje ? 700 : 0);
-  }
-
   async function inicializar() {
     setLoadingLista(true);
     setMensaje("");
 
     try {
       const raw = localStorage.getItem("propietario_actual");
-      const token = String(
-        localStorage.getItem("propietario_token") || ""
-      ).trim();
-
-      if (!raw || !token) {
-        enviarALogin();
+      if (!raw) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       const sesion = JSON.parse(raw) as PropietarioActual;
-
-      if (
-        !sesion?.propietario_id ||
-        !sesion?.condominio_id ||
-        !sesion?.unidad_id
-      ) {
-        enviarALogin();
+      if (!sesion?.propietario_id || !sesion?.condominio_id || !sesion?.unidad_id) {
+        router.replace("/movil/propietarios/login");
         return;
       }
 
       setPropietario(sesion);
-      await cargarIncidencias(sesion, token);
-    } catch (error) {
-      console.error("Error inicializando incidencias:", error);
+      await cargarIncidencias(sesion);
+    } catch {
       setMensaje("No se pudo cargar la información del propietario.");
       setExito(false);
-      setIncidencias([]);
     } finally {
       setLoadingLista(false);
     }
@@ -217,80 +141,47 @@ export default function IncidenciasPropietariosPage() {
 
   async function cargarIncidencias(
     prop: PropietarioActual,
-    tokenRecibido?: string,
     modoActualizacion = false,
     conservarMensaje = false
   ) {
     if (modoActualizacion) setActualizando(true);
-
     if (!conservarMensaje) {
       setMensaje("");
       setExito(false);
     }
 
-    try {
-      const token = String(
-        tokenRecibido ||
-          localStorage.getItem("propietario_token") ||
-          ""
-      ).trim();
+    const { data, error } = await supabase
+      .from("incidencias")
+      .select("id, titulo, categoria, descripcion, prioridad, estado, foto_url, created_at")
+      .eq("condominio_id", prop.condominio_id)
+      .eq("unidad_id", prop.unidad_id)
+      .order("created_at", { ascending: false });
 
-      if (!token) {
-        enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-        return;
-      }
-
-      const { data, error } = await supabase.rpc(
-        RPC_LISTAR_INCIDENCIAS,
-        {
-          p_token: token,
-          p_condominio_id: Number(prop.condominio_id),
-          p_unidad_id: Number(prop.unidad_id),
-        }
-      );
-
-      if (error) {
-        console.error("Error cargando incidencias:", error);
-        setMensaje("No se pudieron cargar las incidencias en este momento.");
-        setExito(false);
-        setIncidencias([]);
-        return;
-      }
-
-      const respuesta =
-        normalizarRespuesta<RespuestaIncidencias>(data);
-
-      if (respuesta.ok !== true) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        setMensaje(
-          respuesta.mensaje ||
-            "No se pudieron cargar las incidencias."
-        );
-        setExito(false);
-        setIncidencias([]);
-        return;
-      }
-
-      setIncidencias(
-        Array.isArray(respuesta.incidencias)
-          ? respuesta.incidencias
-          : []
-      );
-    } catch (error) {
-      console.error("Error inesperado cargando incidencias:", error);
-      setMensaje("No se pudieron cargar las incidencias en este momento.");
+    if (error) {
+      setMensaje(`No se pudieron cargar las incidencias: ${error.message}`);
       setExito(false);
       setIncidencias([]);
-    } finally {
-      if (modoActualizacion) setActualizando(false);
+    } else {
+      setIncidencias((data || []) as Incidencia[]);
     }
+
+    if (modoActualizacion) setActualizando(false);
+  }
+
+  async function subirFoto(prop: PropietarioActual) {
+    if (!foto) return "";
+
+    const extension = foto.name.split(".").pop()?.toLowerCase() || "jpg";
+    const nombreArchivo = `incidencias/${prop.condominio_id}/${prop.unidad_id}-${Date.now()}.${extension}`;
+
+    const { error } = await supabase.storage
+      .from("incidencias")
+      .upload(nombreArchivo, foto, { cacheControl: "3600", upsert: false });
+
+    if (error) throw new Error(`Error subiendo foto: ${error.message}`);
+
+    const { data } = supabase.storage.from("incidencias").getPublicUrl(nombreArchivo);
+    return data.publicUrl;
   }
 
   function limpiarFormulario() {
@@ -299,98 +190,7 @@ export default function IncidenciasPropietariosPage() {
     setCategoria("");
     setPrioridad("Media");
     setFoto(null);
-
-    if (inputFotoRef.current) {
-      inputFotoRef.current.value = "";
-    }
-  }
-
-  async function subirEvidencia(
-    incidenciaId: number,
-    archivo: File,
-    prop: PropietarioActual,
-    token: string
-  ) {
-    const formData = new FormData();
-    formData.append("incidencia_id", String(incidenciaId));
-    formData.append("condominio_id", String(prop.condominio_id));
-    formData.append("unidad_id", String(prop.unidad_id));
-    formData.append("file", archivo);
-
-    const response = await fetch(API_EVIDENCIA, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: formData,
-      cache: "no-store",
-    });
-
-    const resultado = await response.json().catch(() => ({}));
-
-    if (!response.ok || resultado?.ok !== true) {
-      throw new Error(
-        resultado?.mensaje ||
-          "No se pudo adjuntar la evidencia."
-      );
-    }
-  }
-
-  async function abrirEvidencia(item: Incidencia) {
-    if (!propietario || !item?.id) return;
-
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
-      return;
-    }
-
-    const ventana = window.open("", "_blank");
-
-    try {
-      const params = new URLSearchParams({
-        incidencia_id: String(item.id),
-        condominio_id: String(propietario.condominio_id),
-        unidad_id: String(propietario.unidad_id),
-      });
-
-      const response = await fetch(`${API_EVIDENCIA}?${params.toString()}`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        cache: "no-store",
-      });
-
-      const resultado = await response.json().catch(() => ({}));
-
-      if (!response.ok || resultado?.ok !== true || !resultado?.url) {
-        if (ventana) ventana.close();
-
-        setExito(false);
-        setMensaje(
-          resultado?.mensaje ||
-            "No se pudo abrir la evidencia."
-        );
-        return;
-      }
-
-      if (ventana) {
-        ventana.opener = null;
-        ventana.location.href = resultado.url;
-      } else {
-        window.location.href = resultado.url;
-      }
-    } catch (error) {
-      if (ventana) ventana.close();
-
-      console.error("Error abriendo evidencia:", error);
-      setExito(false);
-      setMensaje("No se pudo abrir la evidencia en este momento.");
-    }
+    if (inputFotoRef.current) inputFotoRef.current.value = "";
   }
 
   async function enviarIncidencia() {
@@ -403,115 +203,48 @@ export default function IncidenciasPropietariosPage() {
       setMensaje("Debe indicar el título de la incidencia.");
       return;
     }
-
     if (!categoria) {
       setMensaje("Debe seleccionar la categoría.");
       return;
     }
-
     if (!descripcion.trim()) {
       setMensaje("Debe describir la situación.");
-      return;
-    }
-
-    if (foto) {
-      const tiposPermitidos = [
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-      ];
-
-      if (!tiposPermitidos.includes(foto.type)) {
-        setMensaje("La evidencia debe ser JPG, PNG o WEBP.");
-        return;
-      }
-
-      if (foto.size > 8 * 1024 * 1024) {
-        setMensaje("La evidencia no puede superar 8 MB.");
-        return;
-      }
-    }
-
-    const token = String(
-      localStorage.getItem("propietario_token") || ""
-    ).trim();
-
-    if (!token) {
-      enviarALogin("La sesión ha vencido. Inicie sesión nuevamente.");
       return;
     }
 
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.rpc(
-        RPC_CREAR_INCIDENCIA,
+      const fotoUrl = await subirFoto(propietario);
+
+      const { error } = await supabase.from("incidencias").insert([
         {
-          p_token: token,
-          p_condominio_id: Number(propietario.condominio_id),
-          p_unidad_id: Number(propietario.unidad_id),
-          p_titulo: titulo.trim(),
-          p_descripcion: descripcion.trim(),
-          p_categoria: categoria,
-          p_prioridad: prioridad,
-        }
-      );
+          condominio: propietario.condominio_nombre,
+          condominio_id: propietario.condominio_id,
+          unidad_id: propietario.unidad_id,
+          no_apartamento: propietario.no_apartamento,
+          propietario_id: propietario.propietario_id,
+          nombre_propietario: propietario.nombre_propietario,
+          telefono: propietario.telefono || "",
+          titulo: titulo.trim(),
+          descripcion: descripcion.trim(),
+          categoria,
+          prioridad,
+          foto_url: fotoUrl,
+          estado: "Pendiente",
+          origen: "VAM Móvil",
+        },
+      ]);
 
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      const respuesta =
-        normalizarRespuesta<RespuestaCrearIncidencia>(data);
-
-      if (respuesta.ok !== true || !respuesta.incidencia?.id) {
-        if (codigoSesionInvalida(respuesta.codigo)) {
-          enviarALogin(
-            respuesta.mensaje ||
-              "La sesión ha vencido. Inicie sesión nuevamente."
-          );
-          return;
-        }
-
-        throw new Error(
-          respuesta.mensaje ||
-            "No se pudo registrar la incidencia."
-        );
-      }
-
-      let mensajeFinal = "Incidencia enviada correctamente.";
-
-      if (foto) {
-        try {
-          await subirEvidencia(
-            Number(respuesta.incidencia.id),
-            foto,
-            propietario,
-            token
-          );
-        } catch (error: any) {
-          mensajeFinal =
-            "La incidencia fue registrada, pero no se pudo adjuntar la evidencia. " +
-            (error?.message || "");
-        }
-      }
+      if (error) throw error;
 
       limpiarFormulario();
       setExito(true);
-      setMensaje(mensajeFinal);
-
-      await cargarIncidencias(
-        propietario,
-        token,
-        false,
-        true
-      );
+      setMensaje("Incidencia enviada correctamente.");
+      await cargarIncidencias(propietario, false, true);
     } catch (error: any) {
-      console.error("Error registrando incidencia:", error);
       setExito(false);
-      setMensaje(
-        error?.message || "Error registrando incidencia."
-      );
+      setMensaje(error?.message || "Error registrando incidencia.");
     } finally {
       setLoading(false);
     }
@@ -557,7 +290,7 @@ export default function IncidenciasPropietariosPage() {
               <h1 className="truncate text-base font-black">Incidencias</h1>
             </div>
 
-            <button type="button" onClick={() => cargarIncidencias(propietario, undefined, true)} disabled={actualizando} className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60" aria-label="Actualizar">
+            <button type="button" onClick={() => cargarIncidencias(propietario, true)} disabled={actualizando} className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-60" aria-label="Actualizar">
               <RefreshCw size={18} className={actualizando ? "animate-spin" : ""} />
             </button>
           </div>
@@ -700,28 +433,16 @@ export default function IncidenciasPropietariosPage() {
                     <span className="flex items-center gap-1 text-slate-400"><CalendarDays size={12} />{formatearFecha(item.created_at)}</span>
                   </div>
 
-                  {item.tiene_foto && (
-                    <button
-                      type="button"
-                      onClick={() => abrirEvidencia(item)}
-                      className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 text-xs font-extrabold text-blue-800"
-                    >
-                      <ImageIcon size={15} />
-                      Ver evidencia
-                      <ExternalLink size={13} />
-                    </button>
+                  {item.foto_url && (
+                    <a href={item.foto_url} target="_blank" rel="noopener noreferrer" className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 text-xs font-extrabold text-blue-800">
+                      <ImageIcon size={15} />Ver evidencia<ExternalLink size={13} />
+                    </a>
                   )}
                 </article>
               ))}
             </div>
           )}
         </section>
-
-        <footer className="pb-1 pt-1 text-center">
-          <p className="text-[10px] text-slate-400">
-            VAM Administración de Condominios · Incidencias Propietario V{MODULO_VERSION}
-          </p>
-        </footer>
       </div>
     </main>
   );
