@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import InstalarVAMUniversal from "@/components/vam/InstalarVAMUniversal";
+import InstalarVAMButton from "@/components/vam/InstalarVAMButton";
 import {
   ArrowLeft,
   Bell,
@@ -25,21 +25,17 @@ import {
 } from "lucide-react";
 import { supabase } from "@/app/lib/supabaseClient";
 
-type DatosActivacionPropietario = {
-  ok?: boolean;
-  success?: boolean;
-  mensaje?: string;
-  message?: string;
-  propietario_id: number;
-  condominio_id: number;
-  condominio_nombre: string;
-  condominio_logo_url?: string | null;
-  unidad_id: number;
-  no_apartamento: string;
-  nombre_propietario: string | null;
-  cedula: string | null;
-  telefono?: string | null;
-  correo?: string | null;
+// VAM Móvil Login v2.1 - Directiva homologada por cédula; roles y accesos separados.
+
+type Condominio = {
+  id: number;
+  nombre: string;
+  logo_url?: string | null;
+};
+
+type Unidad = {
+  id: number;
+  codigo: string;
 };
 
 type ModoPortal = "propietario" | "directiva";
@@ -271,12 +267,11 @@ export default function LoginMovilVAMPage() {
   const [vistaDirectiva, setVistaDirectiva] =
     useState<VistaDirectiva>("entrar");
 
+  const [condominios, setCondominios] = useState<Condominio[]>([]);
+  const [unidades, setUnidades] = useState<Unidad[]>([]);
+
   const [condominioId, setCondominioId] = useState("");
   const [unidadId, setUnidadId] = useState("");
-  const [datosActivacionValidada, setDatosActivacionValidada] =
-    useState<DatosActivacionPropietario | null>(null);
-  const [condominioActivoNombre, setCondominioActivoNombre] = useState("");
-  const [condominioActivoLogo, setCondominioActivoLogo] = useState("");
 
   const [cedula, setCedula] = useState("");
   const [clavePropietario, setClavePropietario] = useState("");
@@ -285,7 +280,6 @@ export default function LoginMovilVAMPage() {
   const [mostrarClavePropietario, setMostrarClavePropietario] = useState(false);
   const [mostrarConfirmacion, setMostrarConfirmacion] = useState(false);
 
-  const [correoDirectiva, setCorreoDirectiva] = useState("");
   const [cedulaDirectiva, setCedulaDirectiva] = useState("");
   const [codigoActivacionDirectiva, setCodigoActivacionDirectiva] = useState("");
   const [claveDirectiva, setClaveDirectiva] = useState("");
@@ -300,6 +294,8 @@ export default function LoginMovilVAMPage() {
   const [mensaje, setMensaje] = useState("");
   const [tipoMensaje, setTipoMensaje] = useState<TipoMensaje>("info");
   const [loading, setLoading] = useState(false);
+  const [cargandoCondominios, setCargandoCondominios] = useState(true);
+  const [cargandoUnidades, setCargandoUnidades] = useState(false);
 
   const [propietarioAutenticadoId, setPropietarioAutenticadoId] = useState<
     number | null
@@ -325,17 +321,24 @@ export default function LoginMovilVAMPage() {
   const [mostrarConfirmarNuevaClavePersonal, setMostrarConfirmarNuevaClavePersonal] =
     useState(false);
 
+  useEffect(() => {
+    void cargarCondominios();
+  }, []);
+
+  const condominioSeleccionado = useMemo(
+    () =>
+      condominios.find(
+        (condominio) => String(condominio.id) === condominioId
+      ) || null,
+    [condominios, condominioId]
+  );
+
   const anuncioActual = anunciosInicio[indiceAnuncio] || null;
 
   const configuracionActual = useMemo(
     () => (anuncioActual ? obtenerConfiguracion(anuncioActual) : null),
     [anuncioActual]
   );
-
-  const logoCabecera =
-    datosActivacionValidada?.condominio_logo_url || condominioActivoLogo || "";
-  const nombreCondominioCabecera =
-    datosActivacionValidada?.condominio_nombre || condominioActivoNombre || "VAM";
 
   function mostrarError(texto: string) {
     setTipoMensaje("error");
@@ -352,6 +355,56 @@ export default function LoginMovilVAMPage() {
     setTipoMensaje("info");
   }
 
+  async function cargarCondominios() {
+    setCargandoCondominios(true);
+    limpiarMensaje();
+
+    const { data, error } = await supabase.rpc("listar_condominios_portal");
+
+    setCargandoCondominios(false);
+
+    if (error) {
+      mostrarError("No fue posible cargar los condominios: " + error.message);
+      return;
+    }
+
+    setCondominios((data || []) as Condominio[]);
+  }
+
+  async function cargarUnidades(id: string) {
+    if (!id) {
+      setUnidades([]);
+      return;
+    }
+
+    setCargandoUnidades(true);
+
+    const { data, error } = await supabase.rpc(
+      "listar_unidades_activacion",
+      { p_condominio_id: Number(id) }
+    );
+
+    setCargandoUnidades(false);
+
+    if (error) {
+      mostrarError("No fue posible cargar las unidades: " + error.message);
+      return;
+    }
+
+    setUnidades((data || []) as Unidad[]);
+  }
+
+  async function seleccionarCondominio(id: string) {
+    setCondominioId(id);
+    setUnidadId("");
+    setUnidades([]);
+    limpiarMensaje();
+
+    if (modoPortal === "propietario" && vistaPropietario === "activar" && id) {
+      await cargarUnidades(id);
+    }
+  }
+
   async function cambiarPortal(nuevoModo: ModoPortal) {
     if (loading) return;
 
@@ -364,12 +417,11 @@ export default function LoginMovilVAMPage() {
     setVistaDirectiva("entrar");
     setCondominioId("");
     setUnidadId("");
-    setDatosActivacionValidada(null);
+    setUnidades([]);
     setCedula("");
     setClavePropietario("");
     setConfirmarClave("");
     setCodigoActivacion("");
-    setCorreoDirectiva("");
     setClaveDirectiva("");
     setCondominiosDirectiva([]);
     setMostrarSelectorDirectiva(false);
@@ -380,15 +432,16 @@ export default function LoginMovilVAMPage() {
     if (loading) return;
 
     setVistaPropietario(nuevaVista);
-    setCondominioId("");
     setUnidadId("");
-    setDatosActivacionValidada(null);
+    setUnidades([]);
     setClavePropietario("");
     setConfirmarClave("");
     setCodigoActivacion("");
-    setMostrarClavePropietario(false);
-    setMostrarConfirmacion(false);
     limpiarMensaje();
+
+    if (nuevaVista === "activar" && condominioId) {
+      await cargarUnidades(condominioId);
+    }
   }
 
   function limpiarSesionesLocales() {
@@ -412,18 +465,18 @@ export default function LoginMovilVAMPage() {
     token: string,
     expiraEn?: string
   ) {
+    const condominio = condominios.find(
+      (item) => item.id === Number(propietario.condominio_id)
+    );
+
     const sesionPropietario = {
       tipo_usuario: "PROPIETARIO",
       propietario_id: Number(propietario.propietario_id),
       condominio_id: Number(propietario.condominio_id),
       condominio_nombre:
-        propietario.condominio_nombre ||
-        datosActivacionValidada?.condominio_nombre ||
-        "Condominio",
+        propietario.condominio_nombre || condominio?.nombre || "Condominio",
       condominio_logo_url:
-        propietario.condominio_logo_url ||
-        datosActivacionValidada?.condominio_logo_url ||
-        "",
+        propietario.condominio_logo_url || condominio?.logo_url || "",
       unidad_id: Number(propietario.unidad_id),
       no_apartamento: propietario.no_apartamento,
       nombre_propietario: propietario.nombre_propietario,
@@ -458,8 +511,6 @@ export default function LoginMovilVAMPage() {
     );
 
     setCondominioId(String(sesionPropietario.condominio_id));
-    setCondominioActivoNombre(sesionPropietario.condominio_nombre);
-    setCondominioActivoLogo(sesionPropietario.condominio_logo_url);
     setPropietarioAutenticadoId(sesionPropietario.propietario_id);
 
     return sesionPropietario;
@@ -602,87 +653,20 @@ export default function LoginMovilVAMPage() {
     }
   }
 
-  async function validarDatosActivacionPropietario(
-    event?: FormEvent<HTMLFormElement>
-  ) {
+  async function activarCuenta(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
 
-    const cedulaLimpia = limpiarCedula(cedula);
-    const codigo = codigoActivacion.trim().toUpperCase();
-
-    if (cedulaLimpia.length !== 11) {
-      mostrarError("La cédula debe contener 11 dígitos.");
+    if (!condominioId || !unidadId) {
+      mostrarError("Debe seleccionar el condominio y el apartamento.");
       return;
     }
 
-    if (!codigo) {
+    if (!codigoActivacion.trim()) {
       mostrarError("Debe indicar el código de activación entregado por VAM.");
       return;
     }
 
-    setLoading(true);
-    limpiarMensaje();
-
-    try {
-      const { data, error } = await supabase.rpc(
-        "validar_activacion_propietario",
-        {
-          p_cedula: cedulaLimpia,
-          p_codigo_activacion: codigo,
-        }
-      );
-
-      if (error) {
-        mostrarError(error.message);
-        return;
-      }
-
-      const respuesta = extraerRespuesta<DatosActivacionPropietario>(data);
-      const fueCorrecto = respuesta.ok ?? respuesta.success ?? false;
-
-      if (
-        !fueCorrecto ||
-        !respuesta.condominio_id ||
-        !respuesta.unidad_id ||
-        !respuesta.no_apartamento
-      ) {
-        mostrarError(
-          respuesta.mensaje ||
-            respuesta.message ||
-            "No fue posible validar la cédula y el código de activación."
-        );
-        return;
-      }
-
-      setDatosActivacionValidada(respuesta);
-      setCondominioId(String(respuesta.condominio_id));
-      setUnidadId(String(respuesta.unidad_id));
-      setClavePropietario("");
-      setConfirmarClave("");
-      mostrarExito("Datos validados correctamente. Cree su contraseña para activar la cuenta.");
-    } catch (error: unknown) {
-      mostrarError(
-        error instanceof Error
-          ? error.message
-          : "No fue posible validar los datos de activación."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function activarCuenta(event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-
-    if (!datosActivacionValidada || !condominioId || !unidadId) {
-      mostrarError("Primero debe validar su cédula y código de activación.");
-      return;
-    }
-
-    if (clavePropietario.length < 8) {
-      mostrarError("La contraseña debe tener al menos 8 caracteres.");
-      return;
-    }
+    if (!validarCedulaYClave()) return;
 
     if (clavePropietario !== confirmarClave) {
       mostrarError("Las contraseñas no coinciden.");
@@ -876,7 +860,7 @@ export default function LoginMovilVAMPage() {
       usuario_id: usuario.id,
       usuario_nombre: nombreUsuario,
       nombre: nombreUsuario,
-      correo: usuario.email || correoDirectiva.trim().toLowerCase(),
+      correo: usuario.email || "",
       rol,
       empresa_id: condominio.empresa_id || null,
       condominio_id: Number(condominio.condominio_id),
@@ -925,16 +909,10 @@ export default function LoginMovilVAMPage() {
     event?.preventDefault();
 
     const cedulaLimpia = limpiarCedula(cedulaDirectiva);
-    const correo = correoDirectiva.trim().toLowerCase();
     const codigo = codigoActivacionDirectiva.trim().toUpperCase();
 
     if (cedulaLimpia.length !== 11) {
       mostrarError("La cédula debe contener 11 dígitos.");
-      return;
-    }
-
-    if (!correo) {
-      mostrarError("Debe indicar el correo registrado en la Directiva.");
       return;
     }
 
@@ -957,111 +935,43 @@ export default function LoginMovilVAMPage() {
     limpiarMensaje();
 
     try {
-      const { data: validacionData, error: validacionError } = await supabase.rpc(
-        "validar_activacion_directiva",
-        {
-          p_cedula: cedulaLimpia,
-          p_correo: correo,
-          p_codigo_activacion: codigo,
-        }
-      );
-
-      if (validacionError) {
-        mostrarError(validacionError.message);
-        return;
-      }
-
-      const validacion = extraerRespuesta<{
-        ok?: boolean;
-        mensaje?: string;
-        message?: string;
-        nombre?: string;
-      }>(validacionData);
-
-      if (!validacion.ok) {
-        mostrarError(
-          validacion.mensaje ||
-            validacion.message ||
-            "No fue posible validar los datos de activación."
-        );
-        return;
-      }
-
-      const { data: registroData, error: registroError } = await supabase.auth.signUp({
-        email: correo,
-        password: claveDirectiva,
-        options: {
-          data: {
-            full_name: validacion.nombre || "Miembro de la directiva",
-          },
+      const response = await fetch("/api/directiva/activar-cedula", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          cedula: cedulaLimpia,
+          codigo,
+          password: claveDirectiva,
+        }),
       });
 
-      if (registroError) {
-        const texto = registroError.message.toLowerCase();
-        if (texto.includes("already") || texto.includes("registered")) {
-          mostrarError(
-            "Este correo ya tiene una cuenta. Use la opción Entrar como directiva."
-          );
-        } else {
-          mostrarError(registroError.message);
-        }
-        return;
-      }
+      const result = await response.json();
 
-      let usuario = registroData.user;
-      let sesion = registroData.session;
-
-      if (!sesion || !usuario) {
-        const { data: ingresoData, error: ingresoError } =
-          await supabase.auth.signInWithPassword({
-            email: correo,
-            password: claveDirectiva,
-          });
-
-        if (ingresoError || !ingresoData.user) {
-          mostrarExito(
-            "La cuenta fue creada. Si Supabase requiere confirmar el correo, confirme el mensaje recibido y luego entre como Directiva."
-          );
-          setVistaDirectiva("entrar");
-          setCedulaDirectiva("");
-          setCodigoActivacionDirectiva("");
-          setConfirmarClaveDirectiva("");
-          return;
-        }
-
-        usuario = ingresoData.user;
-        sesion = ingresoData.session;
-      }
-
-      const { data: finalizarData, error: finalizarError } = await supabase.rpc(
-        "finalizar_activacion_directiva",
-        {
-          p_cedula: cedulaLimpia,
-          p_correo: correo,
-          p_codigo_activacion: codigo,
-        }
-      );
-
-      if (finalizarError) {
-        await supabase.auth.signOut();
-        mostrarError(finalizarError.message);
-        return;
-      }
-
-      const finalizacion = extraerRespuesta<{
-        ok?: boolean;
-        mensaje?: string;
-        message?: string;
-      }>(finalizarData);
-
-      if (!finalizacion.ok) {
-        await supabase.auth.signOut();
+      if (!response.ok || !result?.ok) {
         mostrarError(
-          finalizacion.mensaje ||
-            finalizacion.message ||
-            "No fue posible completar la activación de la cuenta."
+          result?.error ||
+            result?.mensaje ||
+            "No fue posible activar la cuenta de Directiva."
         );
+        return;
+      }
+
+      if (!result.access_token || !result.refresh_token) {
+        mostrarError(
+          "La cuenta fue activada, pero no fue posible iniciar la sesión automáticamente."
+        );
+        return;
+      }
+
+      const { error: sesionError } = await supabase.auth.setSession({
+        access_token: result.access_token,
+        refresh_token: result.refresh_token,
+      });
+
+      if (sesionError) {
+        mostrarError("No fue posible iniciar la sesión de Directiva.");
         return;
       }
 
@@ -1115,8 +1025,10 @@ export default function LoginMovilVAMPage() {
   async function entrarDirectiva(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
 
-    if (!correoDirectiva.trim() || !claveDirectiva) {
-      mostrarError("Debe indicar correo y contraseña.");
+    const cedulaLimpia = limpiarCedula(cedulaDirectiva);
+
+    if (cedulaLimpia.length !== 11 || !claveDirectiva) {
+      mostrarError("Debe indicar cédula y contraseña.");
       return;
     }
 
@@ -1124,14 +1036,36 @@ export default function LoginMovilVAMPage() {
     limpiarMensaje();
 
     try {
-      const { data: authData, error: authError } =
-        await supabase.auth.signInWithPassword({
-          email: correoDirectiva.trim().toLowerCase(),
+      const response = await fetch("/api/directiva/login-cedula", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          cedula: cedulaLimpia,
           password: claveDirectiva,
-        });
+        }),
+      });
 
-      if (authError || !authData.user) {
-        mostrarError("Correo o contraseña incorrectos.");
+      const result = await response.json();
+
+      if (!response.ok || !result?.ok) {
+        mostrarError("Cédula o contraseña incorrecta.");
+        return;
+      }
+
+      if (!result.access_token || !result.refresh_token) {
+        mostrarError("No fue posible iniciar la sesión de Directiva.");
+        return;
+      }
+
+      const { error: sesionError } = await supabase.auth.setSession({
+        access_token: result.access_token,
+        refresh_token: result.refresh_token,
+      });
+
+      if (sesionError) {
+        mostrarError("No fue posible iniciar la sesión de Directiva.");
         return;
       }
 
@@ -1375,10 +1309,10 @@ export default function LoginMovilVAMPage() {
           <section className="w-full overflow-hidden rounded-[1.8rem] bg-white shadow-2xl shadow-black/30">
             <header className="bg-gradient-to-r from-blue-800 via-blue-900 to-slate-950 px-5 py-5 text-white">
               <div className="flex items-center gap-3">
-                {logoCabecera ? (
+                {condominioSeleccionado?.logo_url ? (
                   <img
-                    src={logoCabecera}
-                    alt={nombreCondominioCabecera}
+                    src={condominioSeleccionado.logo_url}
+                    alt={condominioSeleccionado.nombre}
                     className="h-13 w-13 rounded-2xl bg-white object-contain p-1.5"
                   />
                 ) : (
@@ -1431,7 +1365,36 @@ export default function LoginMovilVAMPage() {
                 </button>
               </div>
 
-
+              {modoPortal === "propietario" &&
+                vistaPropietario === "activar" && (
+                <div className="mt-4">
+                  <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-600">
+                    Condominio
+                  </label>
+                  <div className="relative">
+                    <Building2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <select
+                      value={condominioId}
+                      onChange={(event) =>
+                        void seleccionarCondominio(event.target.value)
+                      }
+                      disabled={cargandoCondominios || loading}
+                      className="h-12 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-10 pr-9 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                    >
+                      <option value="">
+                        {cargandoCondominios
+                          ? "Cargando condominios..."
+                          : "Seleccione el condominio"}
+                      </option>
+                      {condominios.map((condominio) => (
+                        <option key={condominio.id} value={condominio.id}>
+                          {condominio.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
 
               {modoPortal === "propietario" ? (
                 <div className="mt-4">
@@ -1526,7 +1489,7 @@ export default function LoginMovilVAMPage() {
                         )}
                         {loading ? "Validando acceso..." : "Entrar a mi cuenta"}
                       </button>
-                      <InstalarVAMUniversal />
+                      <InstalarVAMButton />
 
                       <button
                         type="button"
@@ -1541,203 +1504,160 @@ export default function LoginMovilVAMPage() {
                       </button>
                     </form>
                   ) : (
-                    <form
-                      onSubmit={
-                        datosActivacionValidada
-                          ? activarCuenta
-                          : validarDatosActivacionPropietario
-                      }
-                      className="space-y-3"
-                    >
+                    <form onSubmit={activarCuenta} className="space-y-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <h1 className="text-xl font-black tracking-tight text-slate-900">
                             Activar mi cuenta
                           </h1>
                           <p className="mt-1 text-xs leading-5 text-slate-500">
-                            {datosActivacionValidada
-                              ? "Confirme sus datos y cree la contraseña que utilizará para entrar."
-                              : "Ingrese su cédula y el código de activación entregado por VAM."}
+                            Registre su cédula y cree la contraseña que utilizará
+                            para entrar.
                           </p>
                         </div>
                         <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-700">
-                          {datosActivacionValidada ? (
-                            <CheckCircle2 className="h-5 w-5" />
-                          ) : (
-                            <Sparkles className="h-5 w-5" />
-                          )}
+                          <Sparkles className="h-5 w-5" />
                         </div>
                       </div>
 
-                      {!datosActivacionValidada ? (
-                        <>
-                          <div>
-                            <label className="mb-1 block text-xs font-bold text-slate-700">
-                              Cédula del propietario
-                            </label>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              autoComplete="username"
-                              value={cedula}
-                              onChange={(event) => {
-                                setCedula(formatearCedula(event.target.value));
-                                setDatosActivacionValidada(null);
-                              }}
-                              placeholder="000-0000000-0"
-                              disabled={loading}
-                              className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
-                            />
-                          </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">
+                          Apartamento / Unidad
+                        </label>
+                        <select
+                          value={unidadId}
+                          onChange={(event) => setUnidadId(event.target.value)}
+                          disabled={
+                            !condominioId || cargandoUnidades || loading
+                          }
+                          className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                        >
+                          <option value="">
+                            {cargandoUnidades
+                              ? "Cargando unidades..."
+                              : !condominioId
+                                ? "Seleccione primero el condominio"
+                                : "Seleccione su unidad"}
+                          </option>
+                          {unidades.map((unidad) => (
+                            <option key={unidad.id} value={unidad.id}>
+                              {unidad.codigo}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                          <div>
-                            <label className="mb-1 block text-xs font-bold text-slate-700">
-                              Código de activación
-                            </label>
-                            <input
-                              type="text"
-                              autoCapitalize="characters"
-                              autoComplete="one-time-code"
-                              value={codigoActivacion}
-                              onChange={(event) => {
-                                setCodigoActivacion(
-                                  event.target.value
-                                    .replace(/\s/g, "")
-                                    .toUpperCase()
-                                    .slice(0, 12)
-                                );
-                                setDatosActivacionValidada(null);
-                              }}
-                              placeholder="Código entregado por VAM"
-                              disabled={loading}
-                              className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-center text-sm font-black uppercase tracking-[0.18em] text-slate-800 outline-none transition placeholder:normal-case placeholder:tracking-normal placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
-                            />
-                          </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">
+                          Código de activación
+                        </label>
+                        <input
+                          type="text"
+                          autoCapitalize="characters"
+                          autoComplete="one-time-code"
+                          value={codigoActivacion}
+                          onChange={(event) =>
+                            setCodigoActivacion(
+                              event.target.value
+                                .replace(/\s/g, "")
+                                .toUpperCase()
+                                .slice(0, 12)
+                            )
+                          }
+                          placeholder="Código entregado por VAM"
+                          disabled={loading}
+                          className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-center text-sm font-black uppercase tracking-[0.18em] text-slate-800 outline-none transition placeholder:normal-case placeholder:tracking-normal placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                        />
+                      </div>
 
-                          <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 text-[11px] leading-5 text-blue-800">
-                            Por seguridad, VAM no muestra públicamente la lista de condominios ni apartamentos. El sistema identificará automáticamente su propiedad.
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="overflow-hidden rounded-2xl border border-emerald-200 bg-emerald-50">
-                            <div className="flex items-center gap-2 border-b border-emerald-200 px-4 py-3 text-emerald-900">
-                              <CheckCircle2 className="h-5 w-5 shrink-0" />
-                              <span className="text-sm font-black">Datos validados</span>
-                            </div>
-                            <div className="space-y-2.5 bg-white/70 px-4 py-3 text-xs">
-                              <div className="flex items-start justify-between gap-3">
-                                <span className="text-slate-500">Condominio</span>
-                                <span className="text-right font-black text-slate-900">
-                                  {datosActivacionValidada.condominio_nombre}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="text-slate-500">Apartamento</span>
-                                <span className="font-black text-slate-900">
-                                  {datosActivacionValidada.no_apartamento}
-                                </span>
-                              </div>
-                              <div className="flex items-start justify-between gap-3">
-                                <span className="text-slate-500">Propietario</span>
-                                <span className="text-right font-black text-slate-900">
-                                  {datosActivacionValidada.nombre_propietario || "Propietario"}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="text-slate-500">Cédula</span>
-                                <span className="font-bold text-slate-700">{cedula}</span>
-                              </div>
-                            </div>
-                          </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">
+                          Cédula del propietario
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="username"
+                          value={cedula}
+                          onChange={(event) =>
+                            setCedula(formatearCedula(event.target.value))
+                          }
+                          placeholder="000-0000000-0"
+                          disabled={loading}
+                          className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                        />
+                      </div>
 
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">
+                          Crear contraseña
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={mostrarClavePropietario ? "text" : "password"}
+                            autoComplete="new-password"
+                            value={clavePropietario}
+                            onChange={(event) =>
+                              setClavePropietario(event.target.value)
+                            }
+                            placeholder="Mínimo 6 caracteres"
+                            disabled={loading}
+                            className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                          />
                           <button
                             type="button"
-                            onClick={() => {
-                              setDatosActivacionValidada(null);
-                              setCondominioId("");
-                              setUnidadId("");
-                              setClavePropietario("");
-                              setConfirmarClave("");
-                              limpiarMensaje();
-                            }}
-                            disabled={loading}
-                            className="w-full text-center text-[11px] font-black text-blue-700 underline underline-offset-2 disabled:opacity-60"
+                            onClick={() =>
+                              setMostrarClavePropietario((actual) => !actual)
+                            }
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            aria-label="Mostrar u ocultar contraseña"
                           >
-                            Corregir cédula o código de activación
+                            {mostrarClavePropietario ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
                           </button>
+                        </div>
+                      </div>
 
-                          <div>
-                            <label className="mb-1 block text-xs font-bold text-slate-700">
-                              Crear contraseña
-                            </label>
-                            <div className="relative">
-                              <input
-                                type={mostrarClavePropietario ? "text" : "password"}
-                                autoComplete="new-password"
-                                value={clavePropietario}
-                                onChange={(event) =>
-                                  setClavePropietario(event.target.value)
-                                }
-                                placeholder="Mínimo 8 caracteres"
-                                disabled={loading}
-                                className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
-                              />
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setMostrarClavePropietario((actual) => !actual)
-                                }
-                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                                aria-label="Mostrar u ocultar contraseña"
-                              >
-                                {mostrarClavePropietario ? (
-                                  <EyeOff className="h-4 w-4" />
-                                ) : (
-                                  <Eye className="h-4 w-4" />
-                                )}
-                              </button>
-                            </div>
-                          </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-bold text-slate-700">
+                          Confirmar contraseña
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={mostrarConfirmacion ? "text" : "password"}
+                            autoComplete="new-password"
+                            value={confirmarClave}
+                            onChange={(event) =>
+                              setConfirmarClave(event.target.value)
+                            }
+                            placeholder="Repita su contraseña"
+                            disabled={loading}
+                            className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setMostrarConfirmacion((actual) => !actual)
+                            }
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            aria-label="Mostrar u ocultar confirmación"
+                          >
+                            {mostrarConfirmacion ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
 
-                          <div>
-                            <label className="mb-1 block text-xs font-bold text-slate-700">
-                              Confirmar contraseña
-                            </label>
-                            <div className="relative">
-                              <input
-                                type={mostrarConfirmacion ? "text" : "password"}
-                                autoComplete="new-password"
-                                value={confirmarClave}
-                                onChange={(event) =>
-                                  setConfirmarClave(event.target.value)
-                                }
-                                placeholder="Repita su contraseña"
-                                disabled={loading}
-                                className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
-                              />
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setMostrarConfirmacion((actual) => !actual)
-                                }
-                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                                aria-label="Mostrar u ocultar confirmación"
-                              >
-                                {mostrarConfirmacion ? (
-                                  <EyeOff className="h-4 w-4" />
-                                ) : (
-                                  <Eye className="h-4 w-4" />
-                                )}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 text-[11px] leading-5 text-blue-800">
-                            La contraseña debe tener al menos 8 caracteres. La cédula será su usuario de acceso a VAM.
-                          </div>
-                        </>
-                      )}
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 text-[11px] leading-5 text-blue-800">
+                        Al completar la activación, la cédula quedará guardada en
+                        el perfil del propietario y será su usuario de acceso.
+                      </div>
 
                       {mensaje && (
                         <div
@@ -1751,26 +1671,14 @@ export default function LoginMovilVAMPage() {
                       <button
                         type="submit"
                         disabled={loading}
-                        className={`flex h-12 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-black text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                          datosActivacionValidada
-                            ? "bg-emerald-700 hover:bg-emerald-800"
-                            : "bg-blue-800 hover:bg-blue-900"
-                        }`}
+                        className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-black text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {loading ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : datosActivacionValidada ? (
-                          <CheckCircle2 className="h-4 w-4" />
                         ) : (
-                          <ShieldCheck className="h-4 w-4" />
+                          <CheckCircle2 className="h-4 w-4" />
                         )}
-                        {loading
-                          ? datosActivacionValidada
-                            ? "Activando cuenta..."
-                            : "Validando datos..."
-                          : datosActivacionValidada
-                            ? "Activar mi cuenta"
-                            : "Validar mis datos"}
+                        {loading ? "Activando cuenta..." : "Activar mi cuenta"}
                       </button>
 
                       <button
@@ -1795,7 +1703,7 @@ export default function LoginMovilVAMPage() {
                             Acceso de directiva
                           </h1>
                           <p className="mt-1 text-xs leading-5 text-slate-500">
-                            Ingrese con su correo y contraseña. El sistema identificará
+                            Ingrese con su cédula y contraseña. El sistema identificará
                             automáticamente los condominios que tiene autorizados.
                           </p>
                         </div>
@@ -1806,14 +1714,17 @@ export default function LoginMovilVAMPage() {
 
                       <div>
                         <label className="mb-1 block text-xs font-bold text-slate-700">
-                          Correo electrónico
+                          Cédula
                         </label>
                         <input
-                          type="email"
-                          autoComplete="email"
-                          value={correoDirectiva}
-                          onChange={(event) => setCorreoDirectiva(event.target.value)}
-                          placeholder="usuario@correo.com"
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="username"
+                          value={cedulaDirectiva}
+                          onChange={(event) =>
+                            setCedulaDirectiva(formatearCedula(event.target.value))
+                          }
+                          placeholder="000-0000000-0"
                           disabled={loading}
                           className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-100"
                         />
@@ -1912,19 +1823,6 @@ export default function LoginMovilVAMPage() {
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-xs font-bold text-slate-700">Correo electrónico</label>
-                        <input
-                          type="email"
-                          autoComplete="email"
-                          value={correoDirectiva}
-                          onChange={(event) => setCorreoDirectiva(event.target.value)}
-                          placeholder="correo registrado en la Directiva"
-                          disabled={loading}
-                          className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
-                        />
-                      </div>
-
-                      <div>
                         <label className="mb-1 block text-xs font-bold text-slate-700">Código de activación</label>
                         <input
                           type="text"
@@ -1989,7 +1887,7 @@ export default function LoginMovilVAMPage() {
                       </div>
 
                       <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 text-[11px] leading-5 text-blue-800">
-                        La cédula, el correo y el código deben coincidir con un miembro activo registrado en la Directiva.
+                        La cédula y el código deben coincidir con un miembro activo registrado en la Directiva.
                       </div>
 
                       {mensaje && (
@@ -2024,7 +1922,7 @@ export default function LoginMovilVAMPage() {
 
               <div className="mt-4 border-t border-slate-100 pt-3 text-center">
                 <p className="text-[10px] font-semibold text-slate-400">
-                  VAM Administración de Condominios · Login móvil v2.4
+                  VAM Administración de Condominios
                 </p>
               </div>
             </div>
@@ -2430,7 +2328,7 @@ export default function LoginMovilVAMPage() {
                 <span>
                   Aviso {indiceAnuncio + 1} de {anunciosInicio.length}
                 </span>
-                <span>{condominioActivoNombre || datosActivacionValidada?.condominio_nombre || "Condominio"}</span>
+                <span>{condominioSeleccionado?.nombre || "Condominio"}</span>
               </div>
 
               <button

@@ -1,25 +1,5 @@
 "use client";
 
-/*
- * VAM Administración de Condominios
- * Módulo: Editar Solicitud de Pago / Documentos del Gasto
- * Versión: v1.1.1
- * Fecha de versión: 30/09/2026
- *
- * CAMBIOS v1.1.1
- * - Corrige las carpetas del bucket gastos-documentos para cumplir la política RLS existente.
- * - Factura usa /factura/, Cheque usa /cheque/ y Recibo usa /recibo-suplidor/.
- * - No requiere cambios en las políticas de Storage.
- *
- * CAMBIOS v1.1.0
- * - Se agrega expediente documental del gasto relacionado.
- * - Permite cargar o reemplazar Factura, Cheque y Recibo del suplidor.
- * - Los documentos se almacenan en gastos_documentos / bucket gastos-documentos.
- * - El documento anterior del mismo tipo se conserva para auditoría con estado ANULADO.
- * - La corrección documental no modifica montos, estado financiero ni movimientos bancarios.
- * - Se mantiene el soporte/factura de la solicitud mientras todavía no exista gasto generado.
- */
-
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -58,79 +38,7 @@ type SolicitudPago = {
   created_at: string | null;
 };
 
-type TipoDocumentoGasto = "FACTURA" | "CHEQUE" | "RECIBO_SUPLIDOR";
-
-type GastoRelacionado = {
-  id: number;
-  client_id: number | null;
-  condominio_id: number;
-  proveedor_id: number | null;
-  proveedor: string | null;
-  monto: number | null;
-  total: number | null;
-  fecha_pago: string | null;
-  no_factura: string | null;
-  numero_cheque: string | null;
-  factura_url: string | null;
-  cheque_url: string | null;
-};
-
-type DocumentoGasto = {
-  id: number;
-  gasto_id: number;
-  client_id: number | null;
-  condominio_id: number;
-  tipo_documento: string;
-  numero_documento: string | null;
-  fecha_documento: string | null;
-  monto: number | null;
-  nombre_archivo: string | null;
-  archivo_url: string;
-  mime_type: string | null;
-  tamano_bytes: number | null;
-  observaciones: string | null;
-  visible_propietarios: boolean | null;
-  es_principal: boolean | null;
-  estado: string;
-  created_at: string;
-};
-
 const BUCKET_SOPORTES = "soportes-solicitudes-pago";
-const BUCKET_DOCUMENTOS_GASTOS = "gastos-documentos";
-
-const MODULO_NOMBRE = "Editar Solicitud / Documentos del Gasto";
-const MODULO_VERSION = "v1.1.1";
-const MODULO_FECHA_VERSION = "30/09/2026";
-
-const EXTENSIONES_PERMITIDAS = ["pdf", "jpg", "jpeg", "png", "webp"];
-const TIPOS_MIME_PERMITIDOS = [
-  "application/pdf",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-];
-const TAMANO_MAXIMO = 10 * 1024 * 1024;
-
-const CONFIG_DOCUMENTOS: Record<
-  TipoDocumentoGasto,
-  { label: string; carpeta: string; descripcion: string }
-> = {
-  FACTURA: {
-    label: "Factura",
-    carpeta: "factura",
-    descripcion: "Factura o soporte fiscal correcto del gasto.",
-  },
-  CHEQUE: {
-    label: "Cheque",
-    carpeta: "cheque",
-    descripcion: "Imagen o PDF del cheque firmado / comprobante de cheque.",
-  },
-  RECIBO_SUPLIDOR: {
-    label: "Recibo",
-    carpeta: "recibo-suplidor",
-    descripcion: "Recibo del suplidor o constancia definitiva de pago.",
-  },
-};
 
 export default function EditarSolicitudPagoPage() {
   const params = useParams<{ id: string }>();
@@ -150,13 +58,6 @@ export default function EditarSolicitudPagoPage() {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
 
   const [solicitud, setSolicitud] = useState<SolicitudPago | null>(null);
-
-  const [gastoRelacionado, setGastoRelacionado] =
-    useState<GastoRelacionado | null>(null);
-  const [documentosGasto, setDocumentosGasto] = useState<DocumentoGasto[]>([]);
-  const [cargandoDocumentos, setCargandoDocumentos] = useState(false);
-  const [subiendoDocumento, setSubiendoDocumento] =
-    useState<TipoDocumentoGasto | null>(null);
 
   const [fechaSolicitud, setFechaSolicitud] = useState("");
   const [proveedorId, setProveedorId] = useState("");
@@ -277,63 +178,6 @@ export default function EditarSolicitudPagoPage() {
     return String(fecha).split("T")[0];
   }
 
-  function hoyISO() {
-    return new Date().toISOString().split("T")[0];
-  }
-
-  function limpiarNombreArchivo(nombre: string) {
-    return nombre
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-zA-Z0-9._-]/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .toLowerCase();
-  }
-
-  function idUnico() {
-    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-      return crypto.randomUUID();
-    }
-
-    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  }
-
-  function validarArchivoDocumento(archivo: File) {
-    const extension = archivo.name.split(".").pop()?.toLowerCase() || "";
-
-    if (!EXTENSIONES_PERMITIDAS.includes(extension)) {
-      throw new Error(
-        "Formato no permitido. Use PDF, JPG, JPEG, PNG o WEBP.",
-      );
-    }
-
-    if (
-      archivo.type &&
-      !TIPOS_MIME_PERMITIDOS.includes(archivo.type)
-    ) {
-      throw new Error(
-        "El tipo de archivo no está permitido. Use PDF o una imagen válida.",
-      );
-    }
-
-    if (archivo.size <= 0) {
-      throw new Error("El archivo seleccionado está vacío.");
-    }
-
-    if (archivo.size > TAMANO_MAXIMO) {
-      throw new Error("El archivo no puede superar 10 MB.");
-    }
-  }
-
-  function documentoActual(tipo: TipoDocumentoGasto) {
-    return documentosGasto.find(
-      (documento) =>
-        documento.tipo_documento === tipo &&
-        String(documento.estado || "").toUpperCase() === "ACTIVO",
-    );
-  }
-
   async function cargarData(idCondominio: string) {
     setLoading(true);
     setMensaje("");
@@ -391,268 +235,6 @@ export default function EditarSolicitudPagoPage() {
     setCuentaBanco(solicitudData.cuenta_banco || "");
     setPrioridad(solicitudData.prioridad || "Normal");
     setSoporteUrl(solicitudData.soporte_url || "");
-
-    if (solicitudData.gasto_generado_id) {
-      await cargarGastoRelacionado(
-        solicitudData.gasto_generado_id,
-        idCondominio,
-      );
-    } else {
-      setGastoRelacionado(null);
-      setDocumentosGasto([]);
-    }
-  }
-
-  async function cargarGastoRelacionado(
-    gastoId: number,
-    idCondominio: string,
-  ) {
-    const { data, error } = await supabase
-      .from("gastos")
-      .select(
-        "id, client_id, condominio_id, proveedor_id, proveedor, monto, total, fecha_pago, no_factura, numero_cheque, factura_url, cheque_url",
-      )
-      .eq("id", gastoId)
-      .eq("condominio_id", Number(idCondominio))
-      .maybeSingle();
-
-    if (error || !data) {
-      console.error(
-        "No se pudo cargar el gasto relacionado:",
-        error?.message || "Gasto no encontrado.",
-      );
-      setGastoRelacionado(null);
-      setDocumentosGasto([]);
-      return;
-    }
-
-    const gasto = data as GastoRelacionado;
-    setGastoRelacionado(gasto);
-    await cargarDocumentosGasto(gasto.id, Number(idCondominio));
-  }
-
-  async function cargarDocumentosGasto(
-    gastoId: number,
-    idCondominio = Number(condominioId || 0),
-  ) {
-    if (!gastoId || !idCondominio) {
-      setDocumentosGasto([]);
-      return;
-    }
-
-    setCargandoDocumentos(true);
-
-    const { data, error } = await supabase
-      .from("gastos_documentos")
-      .select(
-        "id, gasto_id, client_id, condominio_id, tipo_documento, numero_documento, fecha_documento, monto, nombre_archivo, archivo_url, mime_type, tamano_bytes, observaciones, visible_propietarios, es_principal, estado, created_at",
-      )
-      .eq("condominio_id", idCondominio)
-      .eq("gasto_id", gastoId)
-      .eq("estado", "ACTIVO")
-      .in("tipo_documento", ["FACTURA", "CHEQUE", "RECIBO_SUPLIDOR"])
-      .order("es_principal", { ascending: false })
-      .order("created_at", { ascending: false });
-
-    setCargandoDocumentos(false);
-
-    if (error) {
-      console.error("Error cargando documentos del gasto:", error.message);
-      setDocumentosGasto([]);
-      return;
-    }
-
-    setDocumentosGasto((data || []) as DocumentoGasto[]);
-  }
-
-  async function abrirDocumentoGasto(documento: DocumentoGasto) {
-    if (!documento.archivo_url) {
-      alert("Este documento no tiene una ruta de archivo válida.");
-      return;
-    }
-
-    if (/^https?:\/\//i.test(documento.archivo_url)) {
-      window.open(documento.archivo_url, "_blank", "noopener,noreferrer");
-      return;
-    }
-
-    const { data, error } = await supabase.storage
-      .from(BUCKET_DOCUMENTOS_GASTOS)
-      .createSignedUrl(documento.archivo_url, 180);
-
-    if (error || !data?.signedUrl) {
-      alert(
-        "No fue posible abrir el documento: " +
-          (error?.message || "No se pudo generar el enlace temporal."),
-      );
-      return;
-    }
-
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-  }
-
-  async function subirDocumentoGasto(
-    tipo: TipoDocumentoGasto,
-    archivo: File,
-  ) {
-    if (!archivo) return;
-
-    if (!solicitud || !gastoRelacionado || !condominioId) {
-      alert(
-        "La solicitud todavía no tiene un gasto relacionado disponible para corregir sus documentos.",
-      );
-      return;
-    }
-
-    try {
-      validarArchivoDocumento(archivo);
-
-      const config = CONFIG_DOCUMENTOS[tipo];
-      const nombreSeguro =
-        limpiarNombreArchivo(archivo.name) || `${tipo.toLowerCase()}.pdf`;
-
-      const rutaArchivo =
-        `condominio-${condominioId}/gasto-${gastoRelacionado.id}/` +
-        `${config.carpeta}/${idUnico()}-${nombreSeguro}`;
-
-      const numeroDocumento =
-        tipo === "FACTURA"
-          ? noFactura.trim() || gastoRelacionado.no_factura || null
-          : tipo === "CHEQUE"
-            ? gastoRelacionado.numero_cheque || null
-            : null;
-
-      const fechaDocumento =
-        tipo === "FACTURA"
-          ? fechaSolicitud || hoyISO()
-          : gastoRelacionado.fecha_pago || hoyISO();
-
-      const proveedorNombre =
-        proveedores.find((item) => String(item.id) === proveedorId)
-          ?.nombre_proveedor ||
-        gastoRelacionado.proveedor ||
-        null;
-
-      setSubiendoDocumento(tipo);
-
-      /*
-       * Se crea primero el registro documental. Si falla la carga física,
-       * el registro nuevo se marca ANULADO y el documento anterior permanece.
-       */
-      const { data: documentoCreado, error: documentoError } = await supabase
-        .from("gastos_documentos")
-        .insert({
-          client_id: gastoRelacionado.client_id || null,
-          condominio_id: Number(condominioId),
-          gasto_id: gastoRelacionado.id,
-          proveedor_id: gastoRelacionado.proveedor_id || null,
-          proveedor_nombre: proveedorNombre,
-          tipo_documento: tipo,
-          numero_documento: numeroDocumento,
-          fecha_documento: fechaDocumento,
-          monto: Number(gastoRelacionado.total || gastoRelacionado.monto || 0),
-          nombre_archivo: archivo.name,
-          archivo_url: rutaArchivo,
-          mime_type: archivo.type || null,
-          tamano_bytes: archivo.size,
-          observaciones:
-            `Corrección documental desde solicitud #${solicitud.id}. ` +
-            `${config.label} cargado/reemplazado desde el módulo de edición.`,
-          visible_propietarios: true,
-          es_principal: true,
-          estado: "ACTIVO",
-        })
-        .select("id")
-        .single();
-
-      if (documentoError || !documentoCreado) {
-        throw new Error(
-          "No fue posible registrar el documento: " +
-            (documentoError?.message || "Registro no creado."),
-        );
-      }
-
-      const { error: uploadError } = await supabase.storage
-        .from(BUCKET_DOCUMENTOS_GASTOS)
-        .upload(rutaArchivo, archivo, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType: archivo.type || undefined,
-        });
-
-      if (uploadError) {
-        await supabase
-          .from("gastos_documentos")
-          .update({
-            estado: "ANULADO",
-            es_principal: false,
-            observaciones:
-              `Carga fallida: ${uploadError.message}. ` +
-              `Solicitud #${solicitud.id}.`,
-          })
-          .eq("id", documentoCreado.id);
-
-        throw new Error("Error subiendo el archivo: " + uploadError.message);
-      }
-
-      /*
-       * Una vez confirmado el nuevo archivo, el anterior del mismo tipo
-       * deja de estar activo. No se elimina: queda preservado para auditoría.
-       */
-      const { error: reemplazoError } = await supabase
-        .from("gastos_documentos")
-        .update({
-          estado: "ANULADO",
-          es_principal: false,
-        })
-        .eq("condominio_id", Number(condominioId))
-        .eq("gasto_id", gastoRelacionado.id)
-        .eq("tipo_documento", tipo)
-        .eq("estado", "ACTIVO")
-        .neq("id", documentoCreado.id);
-
-      if (reemplazoError) {
-        console.warn(
-          "El nuevo documento fue guardado, pero no se pudo cerrar el documento anterior:",
-          reemplazoError.message,
-        );
-      }
-
-      if (tipo === "RECIBO_SUPLIDOR") {
-        const { error: gastoError } = await supabase
-          .from("gastos")
-          .update({
-            requiere_recibo_suplidor: true,
-            motivo_recibo_no_requerido: null,
-          })
-          .eq("id", gastoRelacionado.id)
-          .eq("condominio_id", Number(condominioId));
-
-        if (gastoError) {
-          console.warn(
-            "El recibo fue cargado, pero no se pudo actualizar el indicador documental:",
-            gastoError.message,
-          );
-        }
-      }
-
-      await cargarDocumentosGasto(
-        gastoRelacionado.id,
-        Number(condominioId),
-      );
-
-      alert(
-        `${config.label} guardado correctamente para el gasto #${gastoRelacionado.id}.`,
-      );
-    } catch (error: unknown) {
-      alert(
-        error instanceof Error
-          ? error.message
-          : "No fue posible guardar el documento.",
-      );
-    } finally {
-      setSubiendoDocumento(null);
-    }
   }
 
   async function cargarProveedores(idCondominio: string) {
@@ -911,9 +493,8 @@ export default function EditarSolicitudPagoPage() {
       {!editable && (
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-2xl p-4 text-sm font-semibold">
           Esta solicitud ya fue aprobada, procesada o convertida en gasto.
-          Los datos financieros permanecen bloqueados. Los documentos del gasto
-          (factura, cheque y recibo) sí pueden corregirse sin alterar el gasto,
-          el pago ni los movimientos bancarios.
+          Los datos financieros permanecen bloqueados; solamente puede
+          reemplazarse el documento soporte.
         </div>
       )}
 
@@ -1108,214 +689,60 @@ export default function EditarSolicitudPagoPage() {
             />
           </div>
 
-          {!solicitud.gasto_generado_id && (
-            <div className="md:col-span-4">
-              <label className="block text-sm font-semibold mb-1">
-                Soporte / factura de la solicitud
-              </label>
+          <div className="md:col-span-4">
+            <label className="block text-sm font-semibold mb-1">
+              Soporte / factura
+            </label>
 
-              <div className="border rounded-2xl p-4 bg-slate-50">
-                <input
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png,.webp"
-                  disabled={subiendoSoporte}
-                  onChange={(e) => {
-                    const archivo = e.target.files?.[0];
-                    if (archivo) subirSoporteFactura(archivo);
-                    e.currentTarget.value = "";
-                  }}
-                  className="block w-full text-sm text-slate-700
-                    file:mr-4 file:py-2 file:px-4
-                    file:rounded-xl file:border-0
-                    file:text-sm file:font-bold
-                    file:bg-blue-700 file:text-white
-                    hover:file:bg-blue-800
-                    disabled:opacity-50"
-                />
+            <div className="border rounded-2xl p-4 bg-slate-50">
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                disabled={subiendoSoporte}
+                onChange={(e) => {
+                  const archivo = e.target.files?.[0];
+                  if (archivo) subirSoporteFactura(archivo);
+                  e.currentTarget.value = "";
+                }}
+                className="block w-full text-sm text-slate-700
+                  file:mr-4 file:py-2 file:px-4
+                  file:rounded-xl file:border-0
+                  file:text-sm file:font-bold
+                  file:bg-blue-700 file:text-white
+                  hover:file:bg-blue-800
+                  disabled:opacity-50"
+              />
 
-                <p className="text-xs text-slate-500 mt-2">
-                  Mientras no exista gasto generado, aquí puede corregirse la
-                  factura o soporte de la solicitud.
-                </p>
-
-                {subiendoSoporte && (
-                  <p className="text-sm text-blue-700 font-bold mt-2">
-                    Subiendo soporte...
-                  </p>
-                )}
-
-                {soporteUrl && (
-                  <div className="mt-3 flex flex-col md:flex-row gap-2 md:items-center">
-                    <a
-                      href={soporteUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-center"
-                    >
-                      Ver soporte actual
-                    </a>
-
-                    <span className="text-xs font-semibold text-slate-600">
-                      Para reemplazarlo, seleccione un archivo nuevo.
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {solicitud.gasto_generado_id && (
-        <div className="bg-white rounded-3xl border shadow-sm p-6">
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-5">
-            <div>
-              <h2 className="text-xl font-black text-slate-900">
-                Expediente documental del gasto
-              </h2>
-              <p className="text-sm text-slate-500 mt-1">
-                Gasto #{solicitud.gasto_generado_id}. Puede corregir la factura,
-                el cheque y el recibo sin modificar los valores financieros.
+              <p className="text-xs text-slate-500 mt-2">
+                Formatos permitidos: PDF, JPG, JPEG, PNG o WEBP.
               </p>
-            </div>
 
-            {cargandoDocumentos && (
-              <span className="text-xs font-bold text-blue-700 bg-blue-50 rounded-full px-3 py-1">
-                Cargando documentos...
-              </span>
-            )}
-          </div>
+              {subiendoSoporte && (
+                <p className="text-sm text-blue-700 font-bold mt-2">
+                  Subiendo soporte...
+                </p>
+              )}
 
-          {!gastoRelacionado ? (
-            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 font-semibold">
-              La solicitud indica un gasto relacionado, pero el gasto no pudo
-              cargarse. Verifique el gasto #{solicitud.gasto_generado_id} antes
-              de reemplazar documentos.
-            </div>
-          ) : (
-            <>
               {soporteUrl && (
-                <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
-                  <span className="font-bold text-slate-800">
-                    Factura/soporte original de la solicitud:
-                  </span>{" "}
+                <div className="mt-3 flex flex-col md:flex-row gap-2 md:items-center">
                   <a
                     href={soporteUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-bold text-blue-700 underline"
+                    className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-center"
                   >
-                    Ver documento original
+                    Ver soporte actual
                   </a>
+
+                  <span className="text-xs font-semibold text-slate-600">
+                    Para reemplazarlo, seleccione un archivo nuevo.
+                  </span>
                 </div>
               )}
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {(
-                  [
-                    "FACTURA",
-                    "CHEQUE",
-                    "RECIBO_SUPLIDOR",
-                  ] as TipoDocumentoGasto[]
-                ).map((tipo) => {
-                  const config = CONFIG_DOCUMENTOS[tipo];
-                  const actual = documentoActual(tipo);
-                  const subiendo = subiendoDocumento === tipo;
-
-                  return (
-                    <div
-                      key={tipo}
-                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="font-black text-slate-900">
-                            {config.label}
-                          </h3>
-                          <p className="text-xs text-slate-500 mt-1">
-                            {config.descripcion}
-                          </p>
-                        </div>
-
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-[11px] font-black ${
-                            actual
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-amber-100 text-amber-800"
-                          }`}
-                        >
-                          {actual ? "Cargado" : "Pendiente"}
-                        </span>
-                      </div>
-
-                      {actual && (
-                        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
-                          <p className="text-xs font-semibold text-slate-600 truncate">
-                            {actual.nombre_archivo || `${config.label} actual`}
-                          </p>
-
-                          <button
-                            type="button"
-                            onClick={() => abrirDocumentoGasto(actual)}
-                            className="mt-2 w-full rounded-xl bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 text-sm font-black"
-                          >
-                            Ver {config.label.toLowerCase()} actual
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="mt-4">
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png,.webp"
-                          disabled={!!subiendoDocumento}
-                          onChange={(e) => {
-                            const archivo = e.target.files?.[0];
-                            if (archivo) subirDocumentoGasto(tipo, archivo);
-                            e.currentTarget.value = "";
-                          }}
-                          className="block w-full text-xs text-slate-700
-                            file:mr-3 file:py-2 file:px-3
-                            file:rounded-xl file:border-0
-                            file:text-xs file:font-black
-                            file:bg-blue-700 file:text-white
-                            hover:file:bg-blue-800
-                            disabled:opacity-50"
-                        />
-
-                        <p className="text-[11px] text-slate-500 mt-2">
-                          PDF, JPG, JPEG, PNG o WEBP · máximo 10 MB.
-                        </p>
-
-                        {subiendo && (
-                          <p className="text-xs text-blue-700 font-black mt-2">
-                            Guardando {config.label.toLowerCase()}...
-                          </p>
-                        )}
-
-                        {actual && (
-                          <p className="text-[11px] text-slate-500 mt-2">
-                            Al cargar uno nuevo, el documento anterior se
-                            conserva en auditoría y deja de ser el documento
-                            activo.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-                <strong>Corrección documental segura:</strong> esta sección
-                solamente administra archivos del expediente del gasto. No
-                cambia monto, ITBIS, total, estado de pago, cheque contabilizado
-                ni movimientos bancarios.
-              </div>
-            </>
-          )}
+            </div>
+          </div>
         </div>
-      )}
+      </div>
 
       <div className="bg-white rounded-3xl border shadow-sm p-6 flex flex-col md:flex-row justify-end gap-3">
         <Link
@@ -1328,17 +755,11 @@ export default function EditarSolicitudPagoPage() {
         <button
           type="button"
           onClick={guardarCambios}
-          disabled={!editable || guardando || subiendoSoporte || !!subiendoDocumento}
+          disabled={!editable || guardando || subiendoSoporte}
           className="bg-blue-700 hover:bg-blue-800 text-white px-5 py-3 rounded-xl font-black disabled:opacity-50"
         >
           {guardando ? "Guardando..." : "Guardar cambios"}
         </button>
-      </div>
-
-      <div className="flex justify-end">
-        <span className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-[10px] font-semibold text-slate-400 shadow-sm">
-          {MODULO_NOMBRE} · {MODULO_VERSION} · {MODULO_FECHA_VERSION}
-        </span>
       </div>
     </main>
   );

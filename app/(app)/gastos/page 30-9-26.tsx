@@ -1,18 +1,5 @@
 "use client";
 
-/*
- * VAM Administración de Condominios
- * Módulo: Gastos / Expediente documental
- * Versión: v1.0.1
- * Fecha de versión: 30/09/2026
- *
- * CAMBIOS v1.0.1
- * - Factura y cheque consultan primero gastos_documentos.
- * - Se mantiene compatibilidad con factura_url y cheque_url históricos.
- * - Las rutas privadas del bucket gastos-documentos se abren con URL firmada.
- * - Recibo continúa utilizando gastos_documentos.
- */
-
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -84,8 +71,6 @@ type Gasto = {
   cantidad_documentos?: number;
   cantidad_constancias_pago?: number;
   estado_documentacion?: EstadoDocumentacion;
-  factura_documento?: DocumentoGasto | null;
-  cheque_documento?: DocumentoGasto | null;
   recibo_documento?: DocumentoGasto | null;
   catalogo_proveedores?: { nombre_proveedor: string | null } | null;
   catalogo_categoria_gastos?: { nombre_categoria: string | null } | null;
@@ -345,7 +330,7 @@ export default function GastosPage() {
       query = query.eq("condominio", nombreCondominio);
     }
 
-    const [gastosResponse, controlResponse, documentosResponse] = await Promise.all([
+    const [gastosResponse, controlResponse, recibosResponse] = await Promise.all([
       query,
       supabase
         .from("vw_gastos_control_documental")
@@ -361,8 +346,6 @@ export default function GastosPage() {
         .eq("condominio_id", Number(id))
         .eq("estado", "ACTIVO")
         .in("tipo_documento", [
-          "FACTURA",
-          "CHEQUE",
           "RECIBO_SUPLIDOR",
           "RECIBO",
           "RECIBO_PAGO",
@@ -393,41 +376,17 @@ export default function GastosPage() {
       controlPorGasto.set(Number(control.gasto_id), control);
     }
 
-    if (documentosResponse.error) {
+    if (recibosResponse.error) {
       console.warn(
-        "No se pudieron cargar los documentos del gasto para el resumen:",
-        documentosResponse.error.message,
+        "No se pudieron cargar los recibos para el resumen:",
+        recibosResponse.error.message,
       );
     }
 
-    const facturaPorGasto = new Map<number, DocumentoGasto>();
-    const chequePorGasto = new Map<number, DocumentoGasto>();
     const reciboPorGasto = new Map<number, DocumentoGasto>();
-
-    const tiposRecibo = new Set([
-      "RECIBO_SUPLIDOR",
-      "RECIBO",
-      "RECIBO_PAGO",
-      "CONSTANCIA_PAGO",
-      "FACTURA_PAGADA",
-      "CERTIFICACION_PAGO",
-    ]);
-
-    for (const documento of (documentosResponse.data || []) as DocumentoGasto[]) {
+    for (const documento of (recibosResponse.data || []) as DocumentoGasto[]) {
       const gastoId = Number(documento.gasto_id);
-      const tipo = String(documento.tipo_documento || "").toUpperCase();
-
-      if (tipo === "FACTURA" && !facturaPorGasto.has(gastoId)) {
-        facturaPorGasto.set(gastoId, documento);
-        continue;
-      }
-
-      if (tipo === "CHEQUE" && !chequePorGasto.has(gastoId)) {
-        chequePorGasto.set(gastoId, documento);
-        continue;
-      }
-
-      if (tiposRecibo.has(tipo) && !reciboPorGasto.has(gastoId)) {
+      if (!reciboPorGasto.has(gastoId)) {
         reciboPorGasto.set(gastoId, documento);
       }
     }
@@ -453,8 +412,6 @@ export default function GastosPage() {
           estado_documentacion:
             control?.estado_documentacion ||
             (gasto.pagado ? "NO_REQUERIDO" : "NO_APLICA"),
-          factura_documento: facturaPorGasto.get(gasto.id) || null,
-          cheque_documento: chequePorGasto.get(gasto.id) || null,
           recibo_documento: reciboPorGasto.get(gasto.id) || null,
         };
       },
@@ -525,44 +482,6 @@ export default function GastosPage() {
     if (error || !data?.signedUrl) {
       alert(
         "No fue posible abrir el documento privado: " +
-          (error?.message || "URL firmada no generada."),
-      );
-      return;
-    }
-
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-  }
-
-  async function abrirSoporteGasto(
-    documento: DocumentoGasto | null | undefined,
-    urlHistorica: string | null | undefined,
-    etiqueta: string,
-  ) {
-    if (documento) {
-      await abrirDocumento(documento);
-      return;
-    }
-
-    const url = String(urlHistorica || "").trim();
-
-    if (!url) {
-      alert(`Este gasto no tiene ${etiqueta.toLowerCase()} disponible.`);
-      return;
-    }
-
-    if (/^https?:\/\//i.test(url)) {
-      window.open(url, "_blank", "noopener,noreferrer");
-      return;
-    }
-
-    const rutaPrivada = url.replace(/^\/+/, "");
-    const { data, error } = await supabase.storage
-      .from("gastos-documentos")
-      .createSignedUrl(rutaPrivada, 120);
-
-    if (error || !data?.signedUrl) {
-      alert(
-        `No fue posible abrir ${etiqueta.toLowerCase()}: ` +
           (error?.message || "URL firmada no generada."),
       );
       return;
@@ -948,11 +867,8 @@ export default function GastosPage() {
 
       <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
         Los gastos se generan y pagan desde <strong>Solicitudes de Pago</strong>.
-        En este módulo se consulta el gasto y se completa su expediente con factura,
-        cheque, recibo o constancia emitida por el suplidor.
-        <span className="ml-2 text-[10px] font-bold text-blue-500">
-          Gastos / Expediente documental v1.0.1 · 30/09/2026
-        </span>
+        En este módulo se consulta el gasto y se completa su expediente con el
+        recibo o constancia emitida por el suplidor.
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -1137,54 +1053,34 @@ export default function GastosPage() {
 
                   <td className="px-3 py-3">
                     <div className="grid grid-cols-3 gap-1.5">
-                      {g.factura_documento || g.factura_url ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            abrirSoporteGasto(
-                              g.factura_documento,
-                              g.factura_url,
-                              "Factura",
-                            )
-                          }
+                      {g.factura_url ? (
+                        <a
+                          href={g.factura_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-900 px-2 text-[11px] font-bold text-white hover:bg-slate-800"
-                          title={
-                            g.factura_documento
-                              ? "Abrir factura del expediente documental"
-                              : "Abrir factura histórica"
-                          }
+                          title="Abrir factura"
                         >
                           <FileText className="h-3.5 w-3.5" />
                           Factura
-                        </button>
+                        </a>
                       ) : (
                         <span className="inline-flex min-h-10 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 text-[10px] font-semibold text-slate-400">
                           Sin factura
                         </span>
                       )}
 
-                      {g.cheque_documento || g.cheque_url ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            abrirSoporteGasto(
-                              g.cheque_documento,
-                              g.cheque_url,
-                              "Cheque",
-                            )
-                          }
+                      {g.cheque_url ? (
+                        <a
+                          href={g.cheque_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-700 px-2 text-[11px] font-bold text-white hover:bg-emerald-800"
-                          title={
-                            g.numero_cheque
-                              ? `Cheque No. ${g.numero_cheque}`
-                              : g.cheque_documento
-                                ? "Abrir cheque del expediente documental"
-                                : "Abrir cheque histórico"
-                          }
+                          title={g.numero_cheque ? `Cheque No. ${g.numero_cheque}` : "Abrir cheque"}
                         >
                           <FileCheck2 className="h-3.5 w-3.5" />
                           Cheque
-                        </button>
+                        </a>
                       ) : (
                         <span className="inline-flex min-h-10 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 text-[10px] font-semibold text-slate-400">
                           Sin cheque
