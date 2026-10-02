@@ -82,19 +82,6 @@ type RespuestaDirectiva = {
   condominio_id?: number;
 };
 
-type RespuestaLoginDirectivaCedula = {
-  ok?: boolean;
-  mensaje?: string;
-  error?: string;
-  access_token?: string;
-  refresh_token?: string;
-  expires_at?: number | null;
-  expires_in?: number | null;
-  user_id?: string;
-  nombre?: string;
-  tipo_usuario?: string;
-};
-
 type CondominioDirectiva = {
   condominio_id: number;
   condominio_nombre: string;
@@ -1128,10 +1115,8 @@ export default function LoginMovilVAMPage() {
   async function entrarDirectiva(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
 
-    const cedulaLimpia = limpiarCedula(cedulaDirectiva);
-
-    if (cedulaLimpia.length !== 11 || !claveDirectiva) {
-      mostrarError("Debe indicar su cédula y contraseña.");
+    if (!correoDirectiva.trim() || !claveDirectiva) {
+      mostrarError("Debe indicar correo y contraseña.");
       return;
     }
 
@@ -1139,64 +1124,15 @@ export default function LoginMovilVAMPage() {
     limpiarMensaje();
 
     try {
-      // IMPORTANTE: eliminar cualquier sesión Supabase anterior antes de
-      // instalar la identidad real de la Directiva autenticada por cédula.
-      // Esto evita que auth.uid() conserve el UUID de otro usuario.
-      await supabase.auth.signOut();
-      limpiarSesionesLocales();
-
-      const response = await fetch("/api/directiva/login-cedula", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          cedula: cedulaLimpia,
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email: correoDirectiva.trim().toLowerCase(),
           password: claveDirectiva,
-        }),
-      });
-
-      const resultado =
-        (await response.json()) as RespuestaLoginDirectivaCedula;
-
-      if (!response.ok || !resultado?.ok) {
-        throw new Error(
-          resultado?.error ||
-            resultado?.mensaje ||
-            "Cédula o contraseña incorrecta."
-        );
-      }
-
-      if (!resultado.access_token || !resultado.refresh_token) {
-        throw new Error(
-          "El servidor no devolvió una sesión válida de Directiva."
-        );
-      }
-
-      // El backend ya validó cédula + contraseña. Aquí instalamos esos tokens
-      // en el cliente Supabase para que auth.uid() corresponda realmente a
-      // directiva_condominio.auth_user_id en todos los RPC posteriores.
-      const { data: sessionData, error: sessionError } =
-        await supabase.auth.setSession({
-          access_token: resultado.access_token,
-          refresh_token: resultado.refresh_token,
         });
 
-      if (sessionError || !sessionData.session || !sessionData.user) {
-        throw new Error(
-          sessionError?.message ||
-            "No fue posible establecer la sesión de Directiva."
-        );
-      }
-
-      if (
-        resultado.user_id &&
-        sessionData.user.id !== String(resultado.user_id)
-      ) {
-        await supabase.auth.signOut();
-        throw new Error(
-          "La identidad autenticada no coincide con la cuenta de Directiva."
-        );
+      if (authError || !authData.user) {
+        mostrarError("Correo o contraseña incorrectos.");
+        return;
       }
 
       const { data, error } = await supabase.rpc(
@@ -1205,7 +1141,8 @@ export default function LoginMovilVAMPage() {
 
       if (error) {
         await supabase.auth.signOut();
-        throw new Error(error.message);
+        mostrarError(error.message);
+        return;
       }
 
       const autorizados = ((data || []) as CondominioDirectiva[]).filter(
@@ -1214,12 +1151,11 @@ export default function LoginMovilVAMPage() {
 
       if (!autorizados.length) {
         await supabase.auth.signOut();
-        throw new Error(
+        mostrarError(
           "Este usuario no tiene condominios activos autorizados para el portal de directiva."
         );
+        return;
       }
-
-      setCedulaDirectiva("");
 
       if (autorizados.length === 1) {
         await completarIngresoDirectiva(autorizados[0]);
@@ -1859,7 +1795,7 @@ export default function LoginMovilVAMPage() {
                             Acceso de directiva
                           </h1>
                           <p className="mt-1 text-xs leading-5 text-slate-500">
-                            Ingrese con su cédula y contraseña. El sistema identificará
+                            Ingrese con su correo y contraseña. El sistema identificará
                             automáticamente los condominios que tiene autorizados.
                           </p>
                         </div>
@@ -1870,19 +1806,14 @@ export default function LoginMovilVAMPage() {
 
                       <div>
                         <label className="mb-1 block text-xs font-bold text-slate-700">
-                          Cédula
+                          Correo electrónico
                         </label>
                         <input
-                          type="text"
-                          inputMode="numeric"
-                          autoComplete="username"
-                          value={cedulaDirectiva}
-                          onChange={(event) =>
-                            setCedulaDirectiva(
-                              formatearCedula(event.target.value)
-                            )
-                          }
-                          placeholder="000-0000000-0"
+                          type="email"
+                          autoComplete="email"
+                          value={correoDirectiva}
+                          onChange={(event) => setCorreoDirectiva(event.target.value)}
+                          placeholder="usuario@correo.com"
                           disabled={loading}
                           className="h-12 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-100"
                         />
@@ -1918,9 +1849,8 @@ export default function LoginMovilVAMPage() {
                       </div>
 
                       <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11px] leading-5 text-slate-600">
-                        El sistema validará la cédula, instalará la sesión segura de
-                        Directiva y mostrará únicamente los condominios donde tenga
-                        autorización activa.
+                        El sistema validará el usuario y mostrará únicamente los
+                        condominios donde tenga autorización activa.
                       </div>
 
                       {mensaje && (

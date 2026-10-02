@@ -82,10 +82,10 @@ type RespuestaDirectiva = {
   condominio_id?: number;
 };
 
-type RespuestaLoginDirectivaCedula = {
+type RespuestaLoginDirectivaApi = {
   ok?: boolean;
-  mensaje?: string;
   error?: string;
+  mensaje?: string;
   access_token?: string;
   refresh_token?: string;
   expires_at?: number | null;
@@ -382,8 +382,11 @@ export default function LoginMovilVAMPage() {
     setClavePropietario("");
     setConfirmarClave("");
     setCodigoActivacion("");
+    setCedulaDirectiva("");
     setCorreoDirectiva("");
+    setCodigoActivacionDirectiva("");
     setClaveDirectiva("");
+    setConfirmarClaveDirectiva("");
     setCondominiosDirectiva([]);
     setMostrarSelectorDirectiva(false);
     limpiarMensaje();
@@ -1131,7 +1134,7 @@ export default function LoginMovilVAMPage() {
     const cedulaLimpia = limpiarCedula(cedulaDirectiva);
 
     if (cedulaLimpia.length !== 11 || !claveDirectiva) {
-      mostrarError("Debe indicar su cédula y contraseña.");
+      mostrarError("Debe indicar cédula y contraseña.");
       return;
     }
 
@@ -1139,12 +1142,6 @@ export default function LoginMovilVAMPage() {
     limpiarMensaje();
 
     try {
-      // IMPORTANTE: eliminar cualquier sesión Supabase anterior antes de
-      // instalar la identidad real de la Directiva autenticada por cédula.
-      // Esto evita que auth.uid() conserve el UUID de otro usuario.
-      await supabase.auth.signOut();
-      limpiarSesionesLocales();
-
       const response = await fetch("/api/directiva/login-cedula", {
         method: "POST",
         headers: {
@@ -1156,47 +1153,47 @@ export default function LoginMovilVAMPage() {
         }),
       });
 
-      const resultado =
-        (await response.json()) as RespuestaLoginDirectivaCedula;
+      const resultado = (await response.json()) as RespuestaLoginDirectivaApi;
 
-      if (!response.ok || !resultado?.ok) {
-        throw new Error(
-          resultado?.error ||
-            resultado?.mensaje ||
+      if (!response.ok || !resultado.ok) {
+        mostrarError(
+          resultado.error ||
+            resultado.mensaje ||
             "Cédula o contraseña incorrecta."
         );
+        return;
       }
 
       if (!resultado.access_token || !resultado.refresh_token) {
-        throw new Error(
-          "El servidor no devolvió una sesión válida de Directiva."
+        mostrarError(
+          "La autenticación fue validada, pero no se recibió una sesión válida."
         );
+        return;
       }
 
-      // El backend ya validó cédula + contraseña. Aquí instalamos esos tokens
-      // en el cliente Supabase para que auth.uid() corresponda realmente a
-      // directiva_condominio.auth_user_id en todos los RPC posteriores.
-      const { data: sessionData, error: sessionError } =
+      const { data: sesionData, error: sesionError } =
         await supabase.auth.setSession({
           access_token: resultado.access_token,
           refresh_token: resultado.refresh_token,
         });
 
-      if (sessionError || !sessionData.session || !sessionData.user) {
-        throw new Error(
-          sessionError?.message ||
-            "No fue posible establecer la sesión de Directiva."
+      if (sesionError || !sesionData.user || !sesionData.session) {
+        await supabase.auth.signOut();
+        mostrarError(
+          "No fue posible establecer la sesión de Directiva. Intente nuevamente."
         );
+        return;
       }
 
       if (
         resultado.user_id &&
-        sessionData.user.id !== String(resultado.user_id)
+        String(sesionData.user.id) !== String(resultado.user_id)
       ) {
         await supabase.auth.signOut();
-        throw new Error(
-          "La identidad autenticada no coincide con la cuenta de Directiva."
+        mostrarError(
+          "La sesión recibida no corresponde a la cuenta de Directiva validada."
         );
+        return;
       }
 
       const { data, error } = await supabase.rpc(
@@ -1205,7 +1202,8 @@ export default function LoginMovilVAMPage() {
 
       if (error) {
         await supabase.auth.signOut();
-        throw new Error(error.message);
+        mostrarError(error.message);
+        return;
       }
 
       const autorizados = ((data || []) as CondominioDirectiva[]).filter(
@@ -1214,9 +1212,10 @@ export default function LoginMovilVAMPage() {
 
       if (!autorizados.length) {
         await supabase.auth.signOut();
-        throw new Error(
+        mostrarError(
           "Este usuario no tiene condominios activos autorizados para el portal de directiva."
         );
+        return;
       }
 
       setCedulaDirectiva("");
@@ -1878,9 +1877,7 @@ export default function LoginMovilVAMPage() {
                           autoComplete="username"
                           value={cedulaDirectiva}
                           onChange={(event) =>
-                            setCedulaDirectiva(
-                              formatearCedula(event.target.value)
-                            )
+                            setCedulaDirectiva(formatearCedula(event.target.value))
                           }
                           placeholder="000-0000000-0"
                           disabled={loading}
@@ -1918,9 +1915,8 @@ export default function LoginMovilVAMPage() {
                       </div>
 
                       <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11px] leading-5 text-slate-600">
-                        El sistema validará la cédula, instalará la sesión segura de
-                        Directiva y mostrará únicamente los condominios donde tenga
-                        autorización activa.
+                        El sistema validará el usuario y mostrará únicamente los
+                        condominios donde tenga autorización activa.
                       </div>
 
                       {mensaje && (
@@ -2094,7 +2090,7 @@ export default function LoginMovilVAMPage() {
 
               <div className="mt-4 border-t border-slate-100 pt-3 text-center">
                 <p className="text-[10px] font-semibold text-slate-400">
-                  VAM Administración de Condominios · Login móvil v2.4
+                  VAM Administración de Condominios · Login móvil v2.5
                 </p>
               </div>
             </div>

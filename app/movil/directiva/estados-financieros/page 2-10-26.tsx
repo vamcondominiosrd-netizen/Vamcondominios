@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/app/lib/supabaseClient";
 
 type PerfilUsuario = {
@@ -499,7 +497,6 @@ function conceptoParaPropietario(value: string): string {
 }
 
 export default function EstadoFinancieroDirectivaPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [consultando, setConsultando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -509,7 +506,7 @@ export default function EstadoFinancieroDirectivaPage() {
   const [cuenta, setCuenta] = useState<CuentaBancaria | null>(null);
   const [cuentasDisponibles, setCuentasDisponibles] = useState<CuentaBancaria[]>([]);
   const [periodos, setPeriodos] = useState<CierreBancario[]>([]);
-  const [periodoSeleccionado, setPeriodoSeleccionado] = useState<string>("");
+  const [periodoSeleccionado, setPeriodoSeleccionado] = useState<string>(periodoActual());
 
   const [cierre, setCierre] = useState<CierreBancario | null>(null);
   const [movimientos, setMovimientos] = useState<MovimientoBanco[]>([]);
@@ -520,26 +517,11 @@ export default function EstadoFinancieroDirectivaPage() {
   const [cargandoExpediente, setCargandoExpediente] = useState(false);
   const [errorExpediente, setErrorExpediente] = useState("");
   const consultaActual = useRef(0);
-  const periodoSolicitadoRef = useRef<string | null>(null);
 
-  // La Directiva solo puede consultar meses oficialmente CERRADOS.
-  // Los cierres históricos sin cuenta_bancaria_id se aceptan únicamente cuando
-  // el condominio tiene una sola cuenta activa, evitando mezclar cuentas.
   const periodosDisponibles = useMemo(() => {
-    if (!cuenta?.id) return [];
-
-    const candidatos = periodos.filter((p) => {
-      if (normalizarTexto(p.estado) !== "cerrado") return false;
-
-      const cuentaCierre = Number(p.cuenta_bancaria_id || 0);
-      if (cuentaCierre === Number(cuenta.id)) return true;
-
-      return !p.cuenta_bancaria_id && cuentasDisponibles.length === 1;
-    });
-
-    return Array.from(new Set(candidatos.map((p) => p.periodo).filter(Boolean)))
-      .sort((a, b) => b.localeCompare(a));
-  }, [periodos, cuenta?.id, cuentasDisponibles.length]);
+    const existentes = periodos.map((p) => p.periodo).filter(Boolean);
+    return Array.from(new Set([...existentes, ...generarPeriodosHistoricos(24)])).sort((a, b) => b.localeCompare(a));
+  }, [periodos]);
 
   const ingresos = useMemo(
     () => movimientos.filter((m) => tipoMovimiento(m) === "INGRESO"),
@@ -680,26 +662,6 @@ export default function EstadoFinancieroDirectivaPage() {
   }, []);
 
   useEffect(() => {
-    if (!cuenta?.id) return;
-
-    if (!periodosDisponibles.length) {
-      if (periodoSeleccionado) setPeriodoSeleccionado("");
-      return;
-    }
-
-    if (periodoSeleccionado && periodosDisponibles.includes(periodoSeleccionado)) {
-      return;
-    }
-
-    const solicitado = periodoSolicitadoRef.current;
-    const siguiente = solicitado && periodosDisponibles.includes(solicitado)
-      ? solicitado
-      : periodosDisponibles[0];
-
-    setPeriodoSeleccionado(siguiente);
-  }, [cuenta?.id, periodosDisponibles, periodoSeleccionado]);
-
-  useEffect(() => {
     if (perfil?.condominio_id && cuenta?.id && periodoSeleccionado) {
       consultarPeriodo(periodoSeleccionado, perfil.condominio_id, cuenta.id);
     }
@@ -715,7 +677,7 @@ export default function EstadoFinancieroDirectivaPage() {
         const params = new URLSearchParams(window.location.search);
         const periodoUrl = params.get("periodo");
         if (periodoUrl && /^\d{4}-\d{2}$/.test(periodoUrl)) {
-          periodoSolicitadoRef.current = periodoUrl;
+          setPeriodoSeleccionado(periodoUrl);
         }
       }
 
@@ -869,12 +831,7 @@ export default function EstadoFinancieroDirectivaPage() {
       .select("*").eq("condominio_id", condominioId)
       .order("periodo", { ascending: false });
     if (error) throw new Error("No se pudieron consultar los períodos bancarios: " + error.message);
-
-    const cierres = ((data || []) as CierreBancario[]).filter(
-      (item) => normalizarTexto(item.estado) === "cerrado"
-    );
-
-    setPeriodos(cierres);
+    setPeriodos((data || []) as CierreBancario[]);
   }
 
   async function consultarPeriodo(periodo: string, condominioId: number, cuentaBancariaId: number) {
@@ -922,30 +879,12 @@ export default function EstadoFinancieroDirectivaPage() {
       .from("banco_cierres_mensuales")
       .select("*")
       .eq("condominio_id", condominioId)
+      .eq("cuenta_bancaria_id", cuentaBancariaId)
       .eq("periodo", periodo)
-      .order("id", { ascending: false });
-
+      .maybeSingle();
     if (error) throw new Error("Error consultando el cierre de la cuenta seleccionada: " + error.message);
-
-    const cerrados = ((data || []) as CierreBancario[]).filter(
-      (item) => normalizarTexto(item.estado) === "cerrado"
-    );
-
-    // Primero se exige el cierre de la cuenta bancaria elegida.
-    const exacto = cerrados.find(
-      (item) => Number(item.cuenta_bancaria_id || 0) === Number(cuentaBancariaId)
-    );
-    if (exacto) return exacto;
-
-    // Compatibilidad con cierres históricos de VAM creados antes de asociar
-    // cuenta_bancaria_id. Solo es seguro usarlos si existe una sola cuenta activa.
-    if (cuentasDisponibles.length === 1) {
-      const historico = cerrados.find((item) => !item.cuenta_bancaria_id);
-      if (historico) return historico;
-    }
-
-    // Nunca tomar un cierre de otra cuenta ni generar un cierre ficticio.
-    return null;
+    // Prohibido tomar el cierre de otra cuenta o generar un cierre ficticio.
+    return data ? (data as CierreBancario) : null;
   }
 
   async function cargarMovimientos(
@@ -1269,8 +1208,8 @@ export default function EstadoFinancieroDirectivaPage() {
   }
 
   function imprimirReporte() {
-    // Solo se imprime un período oficialmente CERRADO y completamente validado.
-    if (loading || consultando || error || !cuenta || !cierre || normalizarTexto(cierre.estado) !== "cerrado" || !cuotasDirectiva || hayDiferencias ||
+    // No emitir un informe final si falta el cierre o hay discrepancias financieras.
+    if (loading || consultando || error || !cuenta || !cierre || !cuotasDirectiva || hayDiferencias ||
         consultaCompletada !== `${perfil?.condominio_id}:${cuenta.id}:${periodoSeleccionado}` ||
         balanceInicial === null || balanceFinal === null ||
         cuotasDirectiva.consultadoEn !== fechaLocalHoy()) return;
@@ -1278,7 +1217,7 @@ export default function EstadoFinancieroDirectivaPage() {
   }
 
   function recargar() {
-    if (perfil?.condominio_id && cuenta?.id && periodoSeleccionado) {
+    if (perfil?.condominio_id && cuenta?.id) {
       consultarPeriodo(periodoSeleccionado, perfil.condominio_id, cuenta.id);
     }
   }
@@ -1290,27 +1229,10 @@ export default function EstadoFinancieroDirectivaPage() {
     : "Cuenta no seleccionada";
   const fechaCorte = formatDate(rangoPeriodo(periodoSeleccionado).cierre);
   const fechaEmision = formatDate(new Date());
-  const cierreCerrado = Boolean(cierre && normalizarTexto(cierre.estado) === "cerrado");
-  const listoParaPublicar = Boolean(cierreCerrado && cuenta && cuotasDirectiva && !hayDiferencias &&
+  const listoParaPublicar = Boolean(cierre && cuenta && cuotasDirectiva && !hayDiferencias &&
     consultaCompletada === `${perfil?.condominio_id}:${cuenta?.id}:${periodoSeleccionado}` &&
     balanceInicial !== null && balanceFinal !== null &&
     cuotasDirectiva?.consultadoEn === fechaLocalHoy());
-
-  const motivosNoDisponible = (() => {
-    const motivos: string[] = [];
-    if (!periodoSeleccionado) motivos.push("No existen meses cerrados disponibles para la cuenta seleccionada.");
-    if (periodoSeleccionado && !cierre) motivos.push("No se encontró el cierre CERRADO de ese mes para la cuenta seleccionada.");
-    if (cierre && !cierreCerrado) motivos.push("El período todavía no está marcado como CERRADO.");
-    if (cierreCerrado && !cuotasDirectiva) motivos.push("No se pudo completar la validación de cuotas ordinarias.");
-    if (cierreCerrado && hayDiferencias) motivos.push("El detalle bancario actual presenta diferencias frente al cierre oficial y requiere revisión.");
-    if (balanceInicial === null || balanceFinal === null) motivos.push("El cierre no contiene saldo inicial y saldo final completos.");
-    if (cuenta && periodoSeleccionado && consultaCompletada &&
-        consultaCompletada !== `${perfil?.condominio_id}:${cuenta.id}:${periodoSeleccionado}`) {
-      motivos.push("La consulta mostrada no corresponde todavía a la cuenta y período seleccionados.");
-    }
-    return motivos;
-  })();
-
   const gastosPresentacion = [...detalleGastos].sort((a, b) => {
     const ordenFecha = (texto: string) => texto.split("/").reverse().join("-");
     return ordenFecha(a.fecha).localeCompare(ordenFecha(b.fecha)) ||
@@ -1322,54 +1244,43 @@ export default function EstadoFinancieroDirectivaPage() {
   }
 
   return (
-    <div id="vam-estado-financiero-directiva-v25" className="min-h-screen min-w-0 max-w-full overflow-x-hidden bg-slate-100 px-2 py-3 sm:px-3 sm:py-5 print:min-h-0 print:bg-white print:p-0">
+    <div id="vam-estado-financiero-directiva-v24" className="min-h-screen min-w-0 max-w-full overflow-x-hidden bg-slate-100 px-2 py-3 sm:px-3 sm:py-5 print:min-h-0 print:bg-white print:p-0">
       <style jsx global>{`
         @page { size: letter portrait; margin: 0.43in; }
         @media screen and (max-width: 767px) {
-          #vam-estado-financiero-directiva-v25 { max-width: 100vw; overflow-x: clip; }
-          #vam-estado-financiero-directiva-v25 .print-paper { overflow-wrap: anywhere; }
-          #vam-estado-financiero-directiva-v25 .mini-card { padding: 9px 7px; }
-          #vam-estado-financiero-directiva-v25 .mini-card p:last-child { letter-spacing: -0.35px; }
-          #vam-estado-financiero-directiva-v25 .report-head { flex-wrap: wrap; }
-          #vam-estado-financiero-directiva-v25 .report-head img { max-width: 76px; }
+          #vam-estado-financiero-directiva-v24 { max-width: 100vw; overflow-x: clip; }
+          #vam-estado-financiero-directiva-v24 .print-paper { overflow-wrap: anywhere; }
+          #vam-estado-financiero-directiva-v24 .mini-card { padding: 9px 7px; }
+          #vam-estado-financiero-directiva-v24 .mini-card p:last-child { letter-spacing: -0.35px; }
+          #vam-estado-financiero-directiva-v24 .report-head { flex-wrap: wrap; }
+          #vam-estado-financiero-directiva-v24 .report-head img { max-width: 76px; }
         }
 
         @media print {
           html, body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           body * { visibility: hidden !important; }
-          #vam-estado-financiero-directiva-v25, #vam-estado-financiero-directiva-v25 * { visibility: visible !important; }
-          #vam-estado-financiero-directiva-v25 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
-          #vam-estado-financiero-directiva-v25 .no-print { display: none !important; visibility: hidden !important; }
-          #vam-estado-financiero-directiva-v25 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-          #vam-estado-financiero-directiva-v25 .report-head { padding-bottom: 12px !important; }
-          #vam-estado-financiero-directiva-v25 .mini-card { padding: 10px 8px !important; }
-          #vam-estado-financiero-directiva-v25 .mini-card p:last-child { font-size: 12px !important; }
-          #vam-estado-financiero-directiva-v25 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
-          #vam-estado-financiero-directiva-v25 .report-table th, #vam-estado-financiero-directiva-v25 .report-table td { padding: 5px 5px !important; }
-          #vam-estado-financiero-directiva-v25 .report-table thead { display: table-header-group !important; }
-          #vam-estado-financiero-directiva-v25 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-          #vam-estado-financiero-directiva-v25 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
-          #vam-estado-financiero-directiva-v25 table { break-inside: auto !important; }
-          #vam-estado-financiero-directiva-v25 thead { display: table-header-group !important; }
-          #vam-estado-financiero-directiva-v25 .report-block { break-inside: avoid; page-break-inside: avoid; }
+          #vam-estado-financiero-directiva-v24, #vam-estado-financiero-directiva-v24 * { visibility: visible !important; }
+          #vam-estado-financiero-directiva-v24 { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+          #vam-estado-financiero-directiva-v24 .no-print { display: none !important; visibility: hidden !important; }
+          #vam-estado-financiero-directiva-v24 .print-paper { width: 100% !important; max-width: none !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+          #vam-estado-financiero-directiva-v24 .report-head { padding-bottom: 12px !important; }
+          #vam-estado-financiero-directiva-v24 .mini-card { padding: 10px 8px !important; }
+          #vam-estado-financiero-directiva-v24 .mini-card p:last-child { font-size: 12px !important; }
+          #vam-estado-financiero-directiva-v24 .report-table { font-size: 9.5px !important; line-height: 1.23 !important; }
+          #vam-estado-financiero-directiva-v24 .report-table th, #vam-estado-financiero-directiva-v24 .report-table td { padding: 5px 5px !important; }
+          #vam-estado-financiero-directiva-v24 .report-table thead { display: table-header-group !important; }
+          #vam-estado-financiero-directiva-v24 .report-table tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+          #vam-estado-financiero-directiva-v24 .report-footer { margin-top: 13px !important; padding-top: 9px !important; }
+          #vam-estado-financiero-directiva-v24 table { break-inside: auto !important; }
+          #vam-estado-financiero-directiva-v24 thead { display: table-header-group !important; }
+          #vam-estado-financiero-directiva-v24 .report-block { break-inside: avoid; page-break-inside: avoid; }
         }
       `}</style>
 
       <div className="no-print mx-auto mb-4 flex w-full min-w-0 max-w-4xl flex-col items-stretch gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:p-4">
-        <div className="flex min-w-0 items-start gap-3">
-          <button
-            type="button"
-            onClick={() => router.replace("/movil/directiva")}
-            className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
-            aria-label="Volver al menú principal de Directiva"
-            title="Volver al menú principal"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <div className="min-w-0">
-            <p className="text-lg font-bold text-slate-900">Estado financiero · Directiva</p>
-            <p className="text-xs text-slate-500">V2.5 · Solo períodos cerrados · Impresión y PDF</p>
-          </div>
+        <div>
+          <p className="text-lg font-bold text-slate-900">Estado financiero · Directiva</p>
+          <p className="text-xs text-slate-500">V2.4 · Informe exclusivo de directiva · Impresión y PDF</p>
         </div>
         <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-end">
           <label className="text-xs font-semibold text-slate-600">Cuenta
@@ -1381,15 +1292,13 @@ export default function EstadoFinancieroDirectivaPage() {
               ))}
             </select>
           </label>
-          <label className="text-xs font-semibold text-slate-600">Mes cerrado
+          <label className="text-xs font-semibold text-slate-600">Mes
             <select value={periodoSeleccionado} onChange={(e) => setPeriodoSeleccionado(e.target.value)}
-              disabled={!periodosDisponibles.length}
-              className="mt-1 block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-3 text-sm disabled:bg-slate-100 disabled:text-slate-400">
-              {!periodosDisponibles.length && <option value="">Sin cierres disponibles</option>}
+              className="mt-1 block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-3 text-sm">
               {periodosDisponibles.map((p) => <option key={p} value={p}>{nombrePeriodo(p)}</option>)}
             </select>
           </label>
-          <button type="button" onClick={recargar} disabled={consultando || !periodoSeleccionado}
+          <button type="button" onClick={recargar} disabled={consultando}
             className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50">
             {consultando ? "Actualizando…" : "Actualizar"}
           </button>
@@ -1405,12 +1314,7 @@ export default function EstadoFinancieroDirectivaPage() {
       {consultando && <div className="no-print mx-auto mb-3 max-w-4xl rounded-lg bg-blue-50 p-3 text-sm text-blue-800">Actualizando el período. Espere para imprimir.</div>}
       {!consultando && !error && !listoParaPublicar && (
         <div className="no-print mx-auto max-w-4xl rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
-          <p className="font-bold">El estado financiero todavía no está disponible para impresión.</p>
-          <p className="mt-1">
-            {motivosNoDisponible.length
-              ? motivosNoDisponible.join(" ")
-              : "Actualice el período para completar la validación."}
-          </p>
+          No se puede emitir el estado financiero de directiva: falta el cierre, no se pudieron validar las cuotas ordinarias hasta el período seleccionado o existen diferencias financieras. Revise los datos y actualice.
         </div>
       )}
 
@@ -1669,7 +1573,7 @@ export default function EstadoFinancieroDirectivaPage() {
               <p>Datos de ingresos, egresos y saldos registrados al {fechaCorte}.</p>
               <p className="mt-1">Emitido el {fechaEmision} · Elaborado por VAM Administradora de Condominios</p>
             </div>
-            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Estado financiero directiva · V2.5</p>
+            <p className="whitespace-nowrap text-right text-[9px] font-semibold text-slate-500">Estado financiero directiva · V2.4</p>
           </footer>
         </main>
       )}

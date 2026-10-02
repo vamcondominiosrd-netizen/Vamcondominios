@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Building2,
-  Clock3,
   Eye,
   EyeOff,
   KeyRound,
@@ -13,7 +12,6 @@ import {
   RefreshCcw,
   Search,
   ShieldCheck,
-  Smartphone,
   UnlockKeyhole,
   UserCheck,
   UserRound,
@@ -21,6 +19,11 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
+
+type CondominioOpcion = {
+  condominio_id: number;
+  condominio: string;
+};
 
 type PropiedadVinculada = {
   vinculo_id: number;
@@ -58,6 +61,8 @@ type PropietarioSinAcceso = {
   cedula: string;
   telefono: string | null;
   correo: string | null;
+  cuenta_id_existente: number | null;
+  cuenta_activa: boolean | null;
 };
 
 function formatearCedula(cedula: string) {
@@ -88,7 +93,7 @@ function estadoCuenta(cuenta: AccesoPropietario) {
 
   if (!cuenta.activo) {
     return {
-      texto: "Inactiva",
+      texto: "Cuenta VAM inactiva",
       clase: "bg-slate-100 text-slate-700 border-slate-200",
     };
   }
@@ -99,13 +104,13 @@ function estadoCuenta(cuenta: AccesoPropietario) {
     bloqueadoHasta > ahora
   ) {
     return {
-      texto: "Bloqueada",
+      texto: "Cuenta bloqueada",
       clase: "bg-red-50 text-red-700 border-red-200",
     };
   }
 
   return {
-    texto: "Activa",
+    texto: "Cuenta VAM activa",
     clase: "bg-emerald-50 text-emerald-700 border-emerald-200",
   };
 }
@@ -117,10 +122,15 @@ export default function AccesosPropietariosPage() {
   const [actualizando, setActualizando] = useState(false);
   const [mensaje, setMensaje] = useState("");
   const [superNombre, setSuperNombre] = useState("");
+
+  const [condominios, setCondominios] = useState<CondominioOpcion[]>([]);
+  const [condominioSeleccionadoId, setCondominioSeleccionadoId] = useState("");
+
   const [cuentas, setCuentas] = useState<AccesoPropietario[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [desbloqueandoId, setDesbloqueandoId] = useState<number | null>(null);
-  const [cambiandoEstadoId, setCambiandoEstadoId] = useState<number | null>(null);
+  const [reactivandoCuentaId, setReactivandoCuentaId] = useState<number | null>(null);
+  const [cambiandoVinculoId, setCambiandoVinculoId] = useState<number | null>(null);
 
   const [mostrarCrearAcceso, setMostrarCrearAcceso] = useState(false);
   const [cargandoDisponibles, setCargandoDisponibles] = useState(false);
@@ -164,44 +174,114 @@ export default function AccesosPropietariosPage() {
     }
 
     setSuperNombre(superData.nombre || "Full Administrador");
-    await cargarCuentas();
+    await cargarCondominios();
     setLoading(false);
   }
 
-  async function cargarCuentas() {
+  async function cargarCondominios() {
+    const { data, error } = await supabase.rpc(
+      "admin_listar_condominios_accesos_propietarios",
+    );
+
+    if (error) {
+      setMensaje("No fue posible cargar los condominios: " + error.message);
+      setCondominios([]);
+      setCuentas([]);
+      return;
+    }
+
+    const lista = (data || []) as CondominioOpcion[];
+    setCondominios(lista);
+
+    if (lista.length === 0) {
+      setMensaje("No hay condominios disponibles para administrar.");
+      setCuentas([]);
+      return;
+    }
+
+    const guardado = localStorage.getItem("vam_super_condominio_accesos") || "";
+    const guardadoValido = lista.some(
+      (item) => String(item.condominio_id) === guardado,
+    );
+
+    // Durante la implementación inicial se prioriza Lote 9 (id=1).
+    // Si el usuario ya seleccionó otro condominio, se conserva su selección.
+    const lote9Existe = lista.some((item) => Number(item.condominio_id) === 1);
+    const inicial = guardadoValido
+      ? guardado
+      : lote9Existe
+        ? "1"
+        : String(lista[0].condominio_id);
+
+    setCondominioSeleccionadoId(inicial);
+    await cargarCuentas(inicial);
+  }
+
+  async function seleccionarCondominio(id: string) {
+    setCondominioSeleccionadoId(id);
+    setBusqueda("");
+    setCuentas([]);
+    setMensaje("");
+    cerrarCrearAcceso(true);
+
+    if (!id) return;
+
+    localStorage.setItem("vam_super_condominio_accesos", id);
+    await cargarCuentas(id);
+  }
+
+  async function cargarCuentas(id = condominioSeleccionadoId) {
+    if (!id) {
+      setCuentas([]);
+      return;
+    }
+
     setActualizando(true);
     setMensaje("");
 
     const { data, error } = await supabase.rpc(
-      "admin_listar_accesos_propietarios"
+      "admin_listar_accesos_propietarios",
+      {
+        p_condominio_id: Number(id),
+      },
     );
 
     setActualizando(false);
 
     if (error) {
       setMensaje(
-        "No fue posible cargar los accesos de propietarios: " + error.message
+        "No fue posible cargar los accesos de propietarios: " + error.message,
       );
+      setCuentas([]);
       return;
     }
 
     setCuentas((data || []) as AccesoPropietario[]);
   }
 
-  async function cargarPropietariosSinAcceso() {
+  async function cargarPropietariosSinAcceso(id = condominioSeleccionadoId) {
+    if (!id) {
+      setPropietariosSinAcceso([]);
+      return;
+    }
+
     setCargandoDisponibles(true);
     setMensaje("");
 
     const { data, error } = await supabase.rpc(
-      "admin_listar_propietarios_sin_acceso"
+      "admin_listar_propietarios_sin_acceso",
+      {
+        p_condominio_id: Number(id),
+      },
     );
 
     setCargandoDisponibles(false);
 
     if (error) {
       setMensaje(
-        "No fue posible cargar los propietarios disponibles: " + error.message
+        "No fue posible cargar los propietarios disponibles: " + error.message,
       );
+      setPropietariosSinAcceso([]);
       return;
     }
 
@@ -209,17 +289,22 @@ export default function AccesosPropietariosPage() {
   }
 
   async function abrirCrearAcceso() {
+    if (!condominioSeleccionadoId) {
+      setMensaje("Seleccione un condominio antes de crear o vincular un acceso.");
+      return;
+    }
+
     setPropietarioSeleccionadoId("");
     setClaveTemporal("");
     setConfirmarClaveTemporal("");
     setMostrarClaveTemporal(false);
     setMostrarConfirmarClaveTemporal(false);
     setMostrarCrearAcceso(true);
-    await cargarPropietariosSinAcceso();
+    await cargarPropietariosSinAcceso(condominioSeleccionadoId);
   }
 
-  function cerrarCrearAcceso() {
-    if (creandoAcceso) return;
+  function cerrarCrearAcceso(forzar = false) {
+    if (creandoAcceso && !forzar) return;
 
     setMostrarCrearAcceso(false);
     setPropietarioSeleccionadoId("");
@@ -227,34 +312,43 @@ export default function AccesosPropietariosPage() {
     setConfirmarClaveTemporal("");
     setMostrarClaveTemporal(false);
     setMostrarConfirmarClaveTemporal(false);
+    setPropietariosSinAcceso([]);
   }
 
-  async function crearAccesoTemporal() {
+  async function crearOVincularAcceso() {
     const propietario = propietariosSinAcceso.find(
-      (item) => String(item.propietario_id) === propietarioSeleccionadoId
+      (item) => String(item.propietario_id) === propietarioSeleccionadoId,
     );
 
     if (!propietario) {
-      setMensaje("Seleccione el propietario al que desea crearle el acceso.");
+      setMensaje("Seleccione el propietario al que desea gestionar el acceso.");
       return;
     }
 
-    if (claveTemporal.length < 8) {
-      setMensaje("La clave temporal debe tener al menos 8 caracteres.");
-      return;
+    const tieneCuentaExistente = Boolean(propietario.cuenta_id_existente);
+
+    if (!tieneCuentaExistente) {
+      if (claveTemporal.length < 8) {
+        setMensaje("La clave temporal debe tener al menos 8 caracteres.");
+        return;
+      }
+
+      if (claveTemporal !== confirmarClaveTemporal) {
+        setMensaje("Las claves temporales no coinciden.");
+        return;
+      }
     }
 
-    if (claveTemporal !== confirmarClaveTemporal) {
-      setMensaje("Las claves temporales no coinciden.");
-      return;
-    }
+    const detalleCuenta = tieneCuentaExistente
+      ? `Esta cédula ya posee la cuenta VAM #${propietario.cuenta_id_existente}. Se agregará únicamente esta propiedad y no se modificará su contraseña.`
+      : "Se creará una nueva cuenta con clave temporal por 48 horas. El propietario deberá cambiarla al iniciar sesión.";
 
     const confirmar = window.confirm(
-      `¿Desea crear el acceso temporal para ${propietario.nombre_propietario}?\n\n` +
+      `¿Desea ${tieneCuentaExistente ? "vincular esta propiedad" : "crear el acceso"} para ${propietario.nombre_propietario}?\n\n` +
         `Condominio: ${propietario.condominio}\n` +
         `Unidad: ${propietario.unidad}\n` +
         `Cédula: ${formatearCedula(propietario.cedula)}\n\n` +
-        "La clave será temporal por 48 horas y el propietario deberá cambiarla al iniciar sesión."
+        detalleCuenta,
     );
 
     if (!confirmar) return;
@@ -269,44 +363,55 @@ export default function AccesosPropietariosPage() {
           p_propietario_id: propietario.propietario_id,
           p_unidad_id: propietario.unidad_id,
           p_condominio_id: propietario.condominio_id,
-          p_clave_temporal: claveTemporal,
-        }
+          p_clave_temporal: tieneCuentaExistente ? "" : claveTemporal,
+        },
       );
 
       if (error) {
-        setMensaje("No fue posible crear el acceso temporal: " + error.message);
+        setMensaje("No fue posible gestionar el acceso: " + error.message);
         return;
       }
 
       const respuesta = (data || {}) as {
         ok?: boolean;
+        codigo?: string;
         mensaje?: string;
         cuenta_id?: number;
         cedula?: string;
+        cuenta_existente?: boolean;
+        cuenta_activa?: boolean;
         clave_temporal_hasta?: string;
       };
 
       if (!respuesta.ok) {
-        setMensaje(
-          respuesta.mensaje || "No fue posible crear el acceso temporal."
-        );
+        setMensaje(respuesta.mensaje || "No fue posible gestionar el acceso.");
         return;
       }
 
-      window.alert(
-        `Acceso temporal creado correctamente.\n\n` +
-          `Propietario: ${propietario.nombre_propietario}\n` +
-          `Usuario: ${formatearCedula(propietario.cedula)}\n` +
-          `Clave temporal: ${claveTemporal}\n\n` +
-          "Entregue estos datos al propietario. La clave temporal vence en 48 horas y deberá cambiarla al iniciar sesión."
-      );
+      if (tieneCuentaExistente || respuesta.cuenta_existente) {
+        window.alert(
+          `Propiedad vinculada correctamente.\n\n` +
+            `Propietario: ${propietario.nombre_propietario}\n` +
+            `Usuario: ${formatearCedula(propietario.cedula)}\n` +
+            `Unidad: ${propietario.unidad}\n\n` +
+            `${respuesta.mensaje || "La contraseña existente no fue modificada."}`,
+        );
+      } else {
+        window.alert(
+          `Acceso temporal creado correctamente.\n\n` +
+            `Propietario: ${propietario.nombre_propietario}\n` +
+            `Usuario: ${formatearCedula(propietario.cedula)}\n` +
+            `Clave temporal: ${claveTemporal}\n\n` +
+            "Entregue estos datos al propietario. La clave temporal vence en 48 horas y deberá cambiarla al iniciar sesión.",
+        );
+      }
 
       await Promise.all([
-        cargarCuentas(),
-        cargarPropietariosSinAcceso(),
+        cargarCuentas(condominioSeleccionadoId),
+        cargarPropietariosSinAcceso(condominioSeleccionadoId),
       ]);
 
-      cerrarCrearAcceso();
+      cerrarCrearAcceso(true);
     } finally {
       setCreandoAcceso(false);
     }
@@ -321,11 +426,10 @@ export default function AccesosPropietariosPage() {
       propiedades[0]?.propietario || `Cuenta #${cuenta.cuenta_id}`;
 
     const confirmar = window.confirm(
-      `¿Desea desbloquear la cuenta de ${nombrePropietario}?\n\n` +
+      `¿Desea desbloquear la cuenta VAM de ${nombrePropietario}?\n\n` +
         `Cédula: ${formatearCedula(cuenta.cedula)}\n` +
         `Intentos fallidos: ${cuenta.intentos_fallidos || 0}\n\n` +
-        "Esta acción limpiará los intentos fallidos y eliminará el bloqueo temporal. " +
-        "No cambiará la contraseña del propietario."
+        "Esta acción es global para la cuenta: limpiará los intentos fallidos y el bloqueo temporal. No cambiará la contraseña ni los vínculos de propiedades.",
     );
 
     if (!confirmar) return;
@@ -338,7 +442,7 @@ export default function AccesosPropietariosPage() {
         "admin_desbloquear_cuenta_propietario",
         {
           p_cuenta_id: cuenta.cuenta_id,
-        }
+        },
       );
 
       if (error) {
@@ -352,23 +456,18 @@ export default function AccesosPropietariosPage() {
       };
 
       if (!respuesta.ok) {
-        setMensaje(
-          respuesta.mensaje || "No fue posible desbloquear la cuenta."
-        );
+        setMensaje(respuesta.mensaje || "No fue posible desbloquear la cuenta.");
         return;
       }
 
-      window.alert(
-        respuesta.mensaje || "Cuenta desbloqueada correctamente."
-      );
-
-      await cargarCuentas();
+      window.alert(respuesta.mensaje || "Cuenta desbloqueada correctamente.");
+      await cargarCuentas(condominioSeleccionadoId);
     } finally {
       setDesbloqueandoId(null);
     }
   }
 
-  async function cambiarEstadoCuenta(cuenta: AccesoPropietario) {
+  async function reactivarCuentaGlobal(cuenta: AccesoPropietario) {
     const propiedades = Array.isArray(cuenta.propiedades)
       ? cuenta.propiedades
       : [];
@@ -376,22 +475,15 @@ export default function AccesosPropietariosPage() {
     const nombrePropietario =
       propiedades[0]?.propietario || `Cuenta #${cuenta.cuenta_id}`;
 
-    const nuevoEstado = !cuenta.activo;
-    const accion = nuevoEstado ? "activar" : "inactivar";
-
-    const detalle = nuevoEstado
-      ? "El propietario podrá volver a iniciar sesión con su contraseña actual."
-      : "El propietario no podrá iniciar sesión y se cerrarán todas sus sesiones activas.";
-
     const confirmar = window.confirm(
-      `¿Desea ${accion} la cuenta de ${nombrePropietario}?\n\n` +
+      `¿Desea reactivar la cuenta VAM global de ${nombrePropietario}?\n\n` +
         `Cédula: ${formatearCedula(cuenta.cedula)}\n\n` +
-        detalle
+        "Esta acción reactiva la identidad VAM del propietario. Los accesos a cada condominio continúan controlados por sus vínculos individuales.",
     );
 
     if (!confirmar) return;
 
-    setCambiandoEstadoId(cuenta.cuenta_id);
+    setReactivandoCuentaId(cuenta.cuenta_id);
     setMensaje("");
 
     try {
@@ -399,14 +491,12 @@ export default function AccesosPropietariosPage() {
         "admin_cambiar_estado_cuenta_propietario",
         {
           p_cuenta_id: cuenta.cuenta_id,
-          p_activo: nuevoEstado,
-        }
+          p_activo: true,
+        },
       );
 
       if (error) {
-        setMensaje(
-          "No fue posible actualizar el estado de la cuenta: " + error.message
-        );
+        setMensaje("No fue posible reactivar la cuenta VAM: " + error.message);
         return;
       }
 
@@ -416,24 +506,92 @@ export default function AccesosPropietariosPage() {
       };
 
       if (!respuesta.ok) {
-        setMensaje(
-          respuesta.mensaje || "No fue posible actualizar el estado de la cuenta."
-        );
+        setMensaje(respuesta.mensaje || "No fue posible reactivar la cuenta VAM.");
+        return;
+      }
+
+      window.alert(respuesta.mensaje || "Cuenta VAM reactivada correctamente.");
+      await cargarCuentas(condominioSeleccionadoId);
+    } finally {
+      setReactivandoCuentaId(null);
+    }
+  }
+
+  async function cambiarEstadoVinculo(
+    cuenta: AccesoPropietario,
+    propiedad: PropiedadVinculada,
+  ) {
+    if (!condominioSeleccionadoId) return;
+
+    const nuevoEstado = !propiedad.vinculo_activo;
+    const accion = nuevoEstado ? "activar" : "inactivar";
+
+    const confirmar = window.confirm(
+      `¿Desea ${accion} el acceso de ${propiedad.propietario || "este propietario"} a esta propiedad?\n\n` +
+        `Condominio: ${propiedad.condominio}\n` +
+        `Unidad: ${propiedad.unidad}\n` +
+        `Cédula: ${formatearCedula(cuenta.cedula)}\n\n` +
+        "Esta acción solo afecta este vínculo. La cuenta VAM y las propiedades del propietario en otros condominios no serán modificadas.",
+    );
+
+    if (!confirmar) return;
+
+    setCambiandoVinculoId(propiedad.vinculo_id);
+    setMensaje("");
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "admin_cambiar_estado_vinculo_propietario",
+        {
+          p_vinculo_id: propiedad.vinculo_id,
+          p_condominio_id: Number(condominioSeleccionadoId),
+          p_activo: nuevoEstado,
+        },
+      );
+
+      if (error) {
+        setMensaje("No fue posible actualizar el acceso: " + error.message);
+        return;
+      }
+
+      const respuesta = (data || {}) as {
+        ok?: boolean;
+        mensaje?: string;
+      };
+
+      if (!respuesta.ok) {
+        setMensaje(respuesta.mensaje || "No fue posible actualizar el acceso.");
         return;
       }
 
       window.alert(
         respuesta.mensaje ||
           (nuevoEstado
-            ? "Cuenta activada correctamente."
-            : "Cuenta inactivada correctamente.")
+            ? "Acceso activado correctamente."
+            : "Acceso inactivado correctamente."),
       );
 
-      await cargarCuentas();
+      await cargarCuentas(condominioSeleccionadoId);
     } finally {
-      setCambiandoEstadoId(null);
+      setCambiandoVinculoId(null);
     }
   }
+
+  const condominioSeleccionado = useMemo(
+    () =>
+      condominios.find(
+        (item) => String(item.condominio_id) === condominioSeleccionadoId,
+      ) || null,
+    [condominios, condominioSeleccionadoId],
+  );
+
+  const propietarioSeleccionado = useMemo(
+    () =>
+      propietariosSinAcceso.find(
+        (item) => String(item.propietario_id) === propietarioSeleccionadoId,
+      ) || null,
+    [propietariosSinAcceso, propietarioSeleccionadoId],
+  );
 
   const cuentasFiltradas = useMemo(() => {
     const termino = busqueda.trim().toLowerCase();
@@ -454,15 +612,11 @@ export default function AccesosPropietariosPage() {
             propiedad.correo,
           ]
             .filter(Boolean)
-            .join(" ")
+            .join(" "),
         )
         .join(" ");
 
-      return [
-        cuenta.cedula,
-        formatearCedula(cuenta.cedula),
-        textoPropiedades,
-      ]
+      return [cuenta.cedula, formatearCedula(cuenta.cedula), textoPropiedades]
         .join(" ")
         .toLowerCase()
         .includes(termino);
@@ -470,11 +624,29 @@ export default function AccesosPropietariosPage() {
   }, [busqueda, cuentas]);
 
   const resumen = useMemo(() => {
+    let accesosActivos = 0;
+    let accesosInactivos = 0;
+
+    for (const cuenta of cuentas) {
+      const propiedades = Array.isArray(cuenta.propiedades)
+        ? cuenta.propiedades
+        : [];
+
+      for (const propiedad of propiedades) {
+        if (cuenta.activo && propiedad.vinculo_activo) {
+          accesosActivos += 1;
+        } else {
+          accesosInactivos += 1;
+        }
+      }
+    }
+
     return {
       total: cuentas.length,
-      activas: cuentas.filter((c) => estadoCuenta(c).texto === "Activa").length,
-      bloqueadas: cuentas.filter((c) => estadoCuenta(c).texto === "Bloqueada").length,
-      inactivas: cuentas.filter((c) => estadoCuenta(c).texto === "Inactiva").length,
+      accesosActivos,
+      accesosInactivos,
+      bloqueadas: cuentas.filter((c) => estadoCuenta(c).texto === "Cuenta bloqueada")
+        .length,
     };
   }, [cuentas]);
 
@@ -494,20 +666,20 @@ export default function AccesosPropietariosPage() {
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-8">
       <div className="mx-auto max-w-7xl space-y-6">
-        <section className="bg-white rounded-2xl border shadow-sm p-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <section className="rounded-2xl border bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
-                Panel Global SaaS
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                Panel Global SaaS · Accesos por condominio
               </p>
 
-              <h1 className="text-3xl font-black text-slate-900 mt-1">
+              <h1 className="mt-1 text-3xl font-black text-slate-900">
                 Accesos de propietarios
               </h1>
 
-              <p className="text-sm text-slate-500 mt-2">
-                Bienvenido, {superNombre}. Desde aquí puede administrar las
-                cuentas, accesos temporales, bloqueos y activaciones de propietarios.
+              <p className="mt-2 text-sm text-slate-500">
+                Bienvenido, {superNombre}. Cada condominio se administra de forma
+                independiente sin mezclar propietarios ni vínculos de otros lotes.
               </p>
             </div>
 
@@ -515,7 +687,7 @@ export default function AccesosPropietariosPage() {
               <button
                 type="button"
                 onClick={() => router.push("/super-admin")}
-                className="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 py-3 rounded-xl font-bold flex items-center gap-2"
+                className="flex items-center gap-2 rounded-xl bg-slate-200 px-4 py-3 font-bold text-slate-800 hover:bg-slate-300"
               >
                 <Building2 className="h-5 w-5" />
                 Menú principal
@@ -524,20 +696,19 @@ export default function AccesosPropietariosPage() {
               <button
                 type="button"
                 onClick={() => void abrirCrearAcceso()}
-                className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-3 rounded-xl font-bold flex items-center gap-2"
+                disabled={!condominioSeleccionadoId}
+                className="flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <PlusCircle className="h-5 w-5" />
-                Crear acceso temporal
+                Crear / vincular acceso
               </button>
 
               <button
                 type="button"
                 onClick={() =>
-                  router.push(
-                    "/super-admin/accesos-propietarios/codigos-activacion"
-                  )
+                  router.push("/super-admin/accesos-propietarios/codigos-activacion")
                 }
-                className="bg-blue-700 hover:bg-blue-800 text-white px-4 py-3 rounded-xl font-bold flex items-center gap-2"
+                className="flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-3 font-bold text-white hover:bg-blue-800"
               >
                 <KeyRound className="h-5 w-5" />
                 Códigos de activación
@@ -545,9 +716,9 @@ export default function AccesosPropietariosPage() {
 
               <button
                 type="button"
-                onClick={() => void cargarCuentas()}
-                disabled={actualizando}
-                className="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 py-3 rounded-xl font-bold flex items-center gap-2 disabled:opacity-60"
+                onClick={() => void cargarCuentas(condominioSeleccionadoId)}
+                disabled={actualizando || !condominioSeleccionadoId}
+                className="flex items-center gap-2 rounded-xl bg-slate-200 px-4 py-3 font-bold text-slate-800 hover:bg-slate-300 disabled:opacity-60"
               >
                 {actualizando ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
@@ -560,6 +731,33 @@ export default function AccesosPropietariosPage() {
           </div>
         </section>
 
+        <section className="rounded-2xl border border-blue-200 bg-white p-5 shadow-sm">
+          <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <div>
+              <label className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-500">
+                Condominio a administrar
+              </label>
+              <select
+                value={condominioSeleccionadoId}
+                onChange={(event) => void seleccionarCondominio(event.target.value)}
+                disabled={actualizando}
+                className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+              >
+                <option value="">Seleccione condominio</option>
+                {condominios.map((item) => (
+                  <option key={item.condominio_id} value={item.condominio_id}>
+                    {item.condominio}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="rounded-xl bg-blue-50 px-4 py-3 text-xs font-bold text-blue-800">
+              Vista aislada: {condominioSeleccionado?.condominio || "Sin selección"}
+            </div>
+          </div>
+        </section>
+
         {mensaje && (
           <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
             {mensaje}
@@ -567,10 +765,26 @@ export default function AccesosPropietariosPage() {
         )}
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <ResumenCard titulo="Cuentas" valor={resumen.total} icono={<UserRound className="h-5 w-5" />} />
-          <ResumenCard titulo="Activas" valor={resumen.activas} icono={<ShieldCheck className="h-5 w-5" />} />
-          <ResumenCard titulo="Bloqueadas" valor={resumen.bloqueadas} icono={<KeyRound className="h-5 w-5" />} />
-          <ResumenCard titulo="Inactivas" valor={resumen.inactivas} icono={<Clock3 className="h-5 w-5" />} />
+          <ResumenCard
+            titulo="Cuentas vinculadas"
+            valor={resumen.total}
+            icono={<UserRound className="h-5 w-5" />}
+          />
+          <ResumenCard
+            titulo="Accesos activos"
+            valor={resumen.accesosActivos}
+            icono={<ShieldCheck className="h-5 w-5" />}
+          />
+          <ResumenCard
+            titulo="Accesos inactivos"
+            valor={resumen.accesosInactivos}
+            icono={<UserX className="h-5 w-5" />}
+          />
+          <ResumenCard
+            titulo="Cuentas bloqueadas"
+            valor={resumen.bloqueadas}
+            icono={<KeyRound className="h-5 w-5" />}
+          />
         </section>
 
         <section className="rounded-2xl border bg-white p-4 shadow-sm">
@@ -580,7 +794,7 @@ export default function AccesosPropietariosPage() {
               type="search"
               value={busqueda}
               onChange={(event) => setBusqueda(event.target.value)}
-              placeholder="Buscar por propietario, cédula, condominio, unidad, teléfono o correo..."
+              placeholder="Buscar dentro de este condominio por propietario, cédula, unidad, teléfono o correo..."
               className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
           </div>
@@ -607,7 +821,7 @@ export default function AccesosPropietariosPage() {
 
                       <div>
                         <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                          Cuenta #{cuenta.cuenta_id}
+                          Cuenta VAM #{cuenta.cuenta_id}
                         </p>
                         <p className="text-lg font-black text-slate-900">
                           {propiedades[0]?.propietario || "Propietario"}
@@ -630,10 +844,7 @@ export default function AccesosPropietariosPage() {
                         <button
                           type="button"
                           onClick={() => void desbloquearCuenta(cuenta)}
-                          disabled={
-                            desbloqueandoId === cuenta.cuenta_id ||
-                            cambiandoEstadoId === cuenta.cuenta_id
-                          }
+                          disabled={desbloqueandoId === cuenta.cuenta_id}
                           className="inline-flex h-9 items-center gap-2 rounded-xl bg-amber-600 px-3 text-xs font-black text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {desbloqueandoId === cuenta.cuenta_id ? (
@@ -641,41 +852,46 @@ export default function AccesosPropietariosPage() {
                           ) : (
                             <UnlockKeyhole className="h-4 w-4" />
                           )}
-                          Desbloquear cuenta
+                          Desbloquear cuenta VAM
                         </button>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() => void cambiarEstadoCuenta(cuenta)}
-                        disabled={
-                          cambiandoEstadoId === cuenta.cuenta_id ||
-                          desbloqueandoId === cuenta.cuenta_id
-                        }
-                        className={`inline-flex h-9 items-center gap-2 rounded-xl px-3 text-xs font-black text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                          cuenta.activo
-                            ? "bg-red-700 hover:bg-red-800"
-                            : "bg-emerald-700 hover:bg-emerald-800"
-                        }`}
-                      >
-                        {cambiandoEstadoId === cuenta.cuenta_id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : cuenta.activo ? (
-                          <UserX className="h-4 w-4" />
-                        ) : (
-                          <UserCheck className="h-4 w-4" />
-                        )}
-                        {cuenta.activo ? "Inactivar cuenta" : "Activar cuenta"}
-                      </button>
+                      {!cuenta.activo && (
+                        <button
+                          type="button"
+                          onClick={() => void reactivarCuentaGlobal(cuenta)}
+                          disabled={reactivandoCuentaId === cuenta.cuenta_id}
+                          className="inline-flex h-9 items-center gap-2 rounded-xl bg-emerald-700 px-3 text-xs font-black text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {reactivandoCuentaId === cuenta.cuenta_id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <UserCheck className="h-4 w-4" />
+                          )}
+                          Reactivar cuenta VAM
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="grid gap-4 p-4 md:grid-cols-4 md:p-5">
-                  <Dato titulo="Último acceso" valor={formatearFecha(cuenta.ultimo_acceso)} />
-                  <Dato titulo="Sesiones activas" valor={String(cuenta.sesiones_activas || 0)} />
-                  <Dato titulo="Intentos fallidos" valor={String(cuenta.intentos_fallidos || 0)} />
-                  <Dato titulo="Cuenta creada" valor={formatearFecha(cuenta.fecha_creacion)} />
+                  <Dato
+                    titulo="Último acceso"
+                    valor={formatearFecha(cuenta.ultimo_acceso)}
+                  />
+                  <Dato
+                    titulo="Sesiones activas"
+                    valor={String(cuenta.sesiones_activas || 0)}
+                  />
+                  <Dato
+                    titulo="Intentos fallidos"
+                    valor={String(cuenta.intentos_fallidos || 0)}
+                  />
+                  <Dato
+                    titulo="Cuenta creada"
+                    valor={formatearFecha(cuenta.fecha_creacion)}
+                  />
                 </div>
 
                 {cuenta.bloqueado_hasta && (
@@ -688,7 +904,7 @@ export default function AccesosPropietariosPage() {
                   <div className="mb-3 flex items-center gap-2">
                     <Building2 className="h-4 w-4 text-slate-500" />
                     <h2 className="text-sm font-black text-slate-800">
-                      Propiedades vinculadas ({propiedades.length})
+                      Propiedades de este condominio ({propiedades.length})
                     </h2>
                   </div>
 
@@ -698,7 +914,7 @@ export default function AccesosPropietariosPage() {
                         key={propiedad.vinculo_id}
                         className="rounded-xl border border-slate-200 bg-white p-4"
                       >
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <p className="text-sm font-black text-slate-900">
                               {propiedad.condominio}
@@ -708,28 +924,66 @@ export default function AccesosPropietariosPage() {
                             </p>
                           </div>
 
-                          <span
-                            className={
-                              propiedad.vinculo_activo
-                                ? "rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black text-emerald-700"
-                                : "rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-600"
-                            }
-                          >
-                            {propiedad.vinculo_activo ? "Vinculada" : "Inactiva"}
-                          </span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={
+                                propiedad.vinculo_activo
+                                  ? "rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black text-emerald-700"
+                                  : "rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-600"
+                              }
+                            >
+                              {propiedad.vinculo_activo
+                                ? "Acceso activo"
+                                : "Acceso inactivo"}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void cambiarEstadoVinculo(cuenta, propiedad)
+                              }
+                              disabled={cambiandoVinculoId === propiedad.vinculo_id}
+                              className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-black text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                propiedad.vinculo_activo
+                                  ? "bg-red-700 hover:bg-red-800"
+                                  : "bg-emerald-700 hover:bg-emerald-800"
+                              }`}
+                            >
+                              {cambiandoVinculoId === propiedad.vinculo_id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : propiedad.vinculo_activo ? (
+                                <UserX className="h-3.5 w-3.5" />
+                              ) : (
+                                <UserCheck className="h-3.5 w-3.5" />
+                              )}
+                              {propiedad.vinculo_activo
+                                ? "Inactivar en este condominio"
+                                : "Activar en este condominio"}
+                            </button>
+                          </div>
                         </div>
 
                         <div className="mt-3 space-y-1 text-xs text-slate-600">
-                          <p><span className="font-bold">Propietario:</span> {propiedad.propietario || "-"}</p>
-                          <p><span className="font-bold">Teléfono:</span> {propiedad.telefono || "-"}</p>
-                          <p><span className="font-bold">Correo:</span> {propiedad.correo || "-"}</p>
+                          <p>
+                            <span className="font-bold">Propietario:</span>{" "}
+                            {propiedad.propietario || "-"}
+                          </p>
+                          <p>
+                            <span className="font-bold">Teléfono:</span>{" "}
+                            {propiedad.telefono || "-"}
+                          </p>
+                          <p>
+                            <span className="font-bold">Correo:</span>{" "}
+                            {propiedad.correo || "-"}
+                          </p>
                         </div>
                       </div>
                     ))}
 
                     {propiedades.length === 0 && (
                       <div className="rounded-xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-                        Esta cuenta no tiene propiedades vinculadas.
+                        Esta cuenta no tiene propiedades vinculadas en el condominio
+                        seleccionado.
                       </div>
                     )}
                   </div>
@@ -742,20 +996,20 @@ export default function AccesosPropietariosPage() {
             <div className="rounded-2xl border bg-white p-10 text-center shadow-sm">
               <UserRound className="mx-auto h-10 w-10 text-slate-300" />
               <p className="mt-3 text-sm font-black text-slate-700">
-                No se encontraron cuentas de propietarios.
+                No se encontraron cuentas vinculadas a este condominio.
               </p>
               <p className="mt-1 text-xs text-slate-500">
-                Revise el filtro o actualice la consulta.
+                Revise el filtro o utilice “Crear / vincular acceso”.
               </p>
             </div>
           )}
         </section>
 
         <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
-          Esta versión permite consultar, crear accesos temporales, desbloquear,
-          activar e inactivar cuentas de propietarios. Las claves temporales vencen
-          en 48 horas y el propietario debe reemplazarlas por una contraseña personal.
-          La contraseña actual nunca se muestra.
+          <span className="font-black">Versión 2.1 · Accesos por condominio.</span>{" "}
+          Una cédula mantiene una sola cuenta VAM, pero cada propiedad se activa o
+          inactiva mediante su vínculo independiente. Inactivar una propiedad aquí no
+          afecta los demás condominios del propietario.
         </section>
       </div>
 
@@ -776,26 +1030,26 @@ export default function AccesosPropietariosPage() {
 
                   <div>
                     <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/70">
-                      Soporte VAM
+                      Soporte VAM · {condominioSeleccionado?.condominio || "Condominio"}
                     </p>
 
                     <h2
                       id="titulo-crear-acceso-temporal"
                       className="mt-1 text-xl font-black"
                     >
-                      Crear acceso temporal
+                      Crear o vincular acceso
                     </h2>
 
                     <p className="mt-1 text-xs leading-5 text-emerald-100">
-                      El propietario utilizará su cédula como usuario y deberá
-                      cambiar esta clave en su primer acceso.
+                      Si la cédula ya posee una cuenta VAM, solo se agregará esta
+                      propiedad y se conservará su contraseña actual.
                     </p>
                   </div>
                 </div>
 
                 <button
                   type="button"
-                  onClick={cerrarCrearAcceso}
+                  onClick={() => cerrarCrearAcceso()}
                   disabled={creandoAcceso}
                   className="rounded-xl bg-white/10 p-2 text-white transition hover:bg-white/20 disabled:opacity-50"
                   aria-label="Cerrar"
@@ -808,21 +1062,25 @@ export default function AccesosPropietariosPage() {
             <div className="space-y-4 p-5">
               <div>
                 <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-600">
-                  Propietario
+                  Propietario / unidad pendiente de acceso
                 </label>
 
                 <select
                   value={propietarioSeleccionadoId}
-                  onChange={(event) =>
-                    setPropietarioSeleccionadoId(event.target.value)
-                  }
+                  onChange={(event) => {
+                    setPropietarioSeleccionadoId(event.target.value);
+                    setClaveTemporal("");
+                    setConfirmarClaveTemporal("");
+                  }}
                   disabled={cargandoDisponibles || creandoAcceso}
                   className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100"
                 >
                   <option value="">
                     {cargandoDisponibles
                       ? "Cargando propietarios..."
-                      : "Seleccione propietario"}
+                      : propietariosSinAcceso.length === 0
+                        ? "No hay propietarios pendientes"
+                        : "Seleccione propietario"}
                   </option>
 
                   {propietariosSinAcceso.map((propietario) => (
@@ -830,117 +1088,147 @@ export default function AccesosPropietariosPage() {
                       key={`${propietario.condominio_id}-${propietario.propietario_id}`}
                       value={propietario.propietario_id}
                     >
-                      {propietario.condominio} · {propietario.unidad} ·{" "}
-                      {propietario.nombre_propietario} ·{" "}
+                      {propietario.unidad} · {propietario.nombre_propietario} ·{" "}
                       {formatearCedula(propietario.cedula)}
+                      {propietario.cuenta_id_existente
+                        ? ` · Cuenta VAM #${propietario.cuenta_id_existente}`
+                        : " · Cuenta nueva"}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {propietarioSeleccionadoId && (() => {
-                const propietario = propietariosSinAcceso.find(
-                  (item) =>
-                    String(item.propietario_id) === propietarioSeleccionadoId
-                );
+              {propietarioSeleccionado && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-black text-slate-900">
+                        {propietarioSeleccionado.nombre_propietario}
+                      </p>
+                      <p className="mt-1 text-xs font-bold text-emerald-700">
+                        {propietarioSeleccionado.condominio} ·{" "}
+                        {propietarioSeleccionado.unidad}
+                      </p>
+                    </div>
 
-                if (!propietario) return null;
-
-                return (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-sm font-black text-slate-900">
-                      {propietario.nombre_propietario}
-                    </p>
-                    <p className="mt-1 text-xs font-bold text-emerald-700">
-                      {propietario.condominio} · {propietario.unidad}
-                    </p>
-                    <p className="mt-2 text-xs text-slate-600">
-                      Usuario:{" "}
-                      <span className="font-black">
-                        {formatearCedula(propietario.cedula)}
-                      </span>
-                    </p>
+                    <span
+                      className={
+                        propietarioSeleccionado.cuenta_id_existente
+                          ? "rounded-full bg-blue-100 px-2.5 py-1 text-[10px] font-black text-blue-800"
+                          : "rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-black text-amber-800"
+                      }
+                    >
+                      {propietarioSeleccionado.cuenta_id_existente
+                        ? `Cuenta VAM #${propietarioSeleccionado.cuenta_id_existente}`
+                        : "Cuenta nueva"}
+                    </span>
                   </div>
-                );
-              })()}
 
-              <div>
-                <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-600">
-                  Clave temporal
-                </label>
+                  <p className="mt-2 text-xs text-slate-600">
+                    Usuario: {" "}
+                    <span className="font-black">
+                      {formatearCedula(propietarioSeleccionado.cedula)}
+                    </span>
+                  </p>
 
-                <div className="relative">
-                  <input
-                    type={mostrarClaveTemporal ? "text" : "password"}
-                    value={claveTemporal}
-                    onChange={(event) => setClaveTemporal(event.target.value)}
-                    placeholder="Mínimo 8 caracteres"
-                    disabled={creandoAcceso}
-                    autoComplete="new-password"
-                    className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMostrarClaveTemporal((actual) => !actual)
-                    }
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    aria-label="Mostrar u ocultar clave temporal"
-                  >
-                    {mostrarClaveTemporal ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
+                  {propietarioSeleccionado.cuenta_id_existente && (
+                    <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs leading-5 text-blue-800">
+                      Esta cédula ya tiene una cuenta VAM. Al continuar se vinculará
+                      solamente {propietarioSeleccionado.unidad}; no se solicitará ni
+                      cambiará la contraseña existente.
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
 
-              <div>
-                <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-600">
-                  Confirmar clave temporal
-                </label>
+              {propietarioSeleccionado &&
+                !propietarioSeleccionado.cuenta_id_existente && (
+                  <>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-600">
+                        Clave temporal
+                      </label>
 
-                <div className="relative">
-                  <input
-                    type={mostrarConfirmarClaveTemporal ? "text" : "password"}
-                    value={confirmarClaveTemporal}
-                    onChange={(event) =>
-                      setConfirmarClaveTemporal(event.target.value)
-                    }
-                    placeholder="Repita la clave temporal"
-                    disabled={creandoAcceso}
-                    autoComplete="new-password"
-                    className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100"
-                  />
+                      <div className="relative">
+                        <input
+                          type={mostrarClaveTemporal ? "text" : "password"}
+                          value={claveTemporal}
+                          onChange={(event) => setClaveTemporal(event.target.value)}
+                          placeholder="Mínimo 8 caracteres"
+                          disabled={creandoAcceso}
+                          autoComplete="new-password"
+                          className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100"
+                        />
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMostrarConfirmarClaveTemporal((actual) => !actual)
-                    }
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    aria-label="Mostrar u ocultar confirmación"
-                  >
-                    {mostrarConfirmarClaveTemporal ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMostrarClaveTemporal((actual) => !actual)
+                          }
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                          aria-label="Mostrar u ocultar clave temporal"
+                        >
+                          {mostrarClaveTemporal ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
 
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-800">
-                La clave temporal vence en 48 horas. VAM no podrá ver la
-                contraseña personal que el propietario cree posteriormente.
-              </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-600">
+                        Confirmar clave temporal
+                      </label>
+
+                      <div className="relative">
+                        <input
+                          type={
+                            mostrarConfirmarClaveTemporal ? "text" : "password"
+                          }
+                          value={confirmarClaveTemporal}
+                          onChange={(event) =>
+                            setConfirmarClaveTemporal(event.target.value)
+                          }
+                          placeholder="Repita la clave temporal"
+                          disabled={creandoAcceso}
+                          autoComplete="new-password"
+                          className="h-12 w-full rounded-xl border border-slate-200 px-3.5 pr-12 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100"
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMostrarConfirmarClaveTemporal((actual) => !actual)
+                          }
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                          aria-label="Mostrar u ocultar confirmación"
+                        >
+                          {mostrarConfirmarClaveTemporal ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-800">
+                      La clave temporal vence en 48 horas. VAM no podrá ver la
+                      contraseña personal que el propietario cree posteriormente.
+                    </div>
+                  </>
+                )}
 
               <button
                 type="button"
-                onClick={() => void crearAccesoTemporal()}
-                disabled={creandoAcceso || cargandoDisponibles}
+                onClick={() => void crearOVincularAcceso()}
+                disabled={
+                  creandoAcceso ||
+                  cargandoDisponibles ||
+                  !propietarioSeleccionado
+                }
                 className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-black text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {creandoAcceso ? (
@@ -950,8 +1238,10 @@ export default function AccesosPropietariosPage() {
                 )}
 
                 {creandoAcceso
-                  ? "Creando acceso..."
-                  : "Crear acceso temporal"}
+                  ? "Procesando..."
+                  : propietarioSeleccionado?.cuenta_id_existente
+                    ? "Vincular propiedad a cuenta existente"
+                    : "Crear acceso temporal"}
               </button>
             </div>
           </section>
