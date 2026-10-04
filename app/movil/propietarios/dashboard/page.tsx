@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
 import {
+  ArrowLeft,
   Bell,
   BellRing,
   Building2,
@@ -85,7 +86,7 @@ type RespuestaComunicaciones = {
 
 const RPC_DASHBOARD_BALANCE = "vam_propietario_dashboard_balance";
 const RPC_LISTAR_COMUNICACIONES = "listar_comunicaciones_propietario";
-const MODULO_VERSION = "2.1";
+const MODULO_VERSION = "2.2";
 
 function normalizarRespuestaBalance(data: unknown): RespuestaBalance {
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -335,14 +336,29 @@ export default function DashboardPropietariosPage() {
     }
   }
 
-  function cerrarSesion() {
+  function limpiarContextoPropietario() {
     localStorage.removeItem("propietario_actual");
     localStorage.removeItem("propietario_token");
     localStorage.removeItem("propietario_token_expira");
     localStorage.removeItem("condominio_id");
     localStorage.removeItem("condominio_nombre");
     localStorage.removeItem("condominio_logo_url");
-    router.replace("/movil/propietarios/login");
+  }
+
+  function volverAlInicioUnificado() {
+    // Cambiar de modulo NO cierra la sesion Supabase.
+    limpiarContextoPropietario();
+    router.replace("/movil/inicio-unificado");
+  }
+
+  async function cerrarSesion() {
+    await supabase.auth.signOut();
+    limpiarContextoPropietario();
+    localStorage.removeItem("vam_contexto_usuario");
+    localStorage.removeItem("directiva_actual");
+    localStorage.removeItem("usuario_nombre");
+    localStorage.removeItem("usuario_rol");
+    router.replace("/movil/acceso-unificado");
   }
 
   const accesos: Acceso[] = useMemo(
@@ -452,6 +468,16 @@ export default function DashboardPropietariosPage() {
         <div className="mx-auto max-w-lg">
           <div className="flex items-center justify-between">
             <div className="flex min-w-0 items-center gap-3">
+              <button
+                type="button"
+                onClick={volverAlInicioUnificado}
+                aria-label="Volver a Mi cuenta VAM"
+                title="Volver a Mi cuenta VAM"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/10 text-white transition hover:bg-white/20"
+              >
+                <ArrowLeft size={19} />
+              </button>
+
               {propietario.condominio_logo_url ? (
                 <img
                   src={propietario.condominio_logo_url}

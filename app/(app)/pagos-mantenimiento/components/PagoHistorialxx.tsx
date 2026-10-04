@@ -1,26 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { Eye, Loader2, ReceiptText } from "lucide-react";
+import { Eye, ReceiptText } from "lucide-react";
 import type { Pago } from "../types";
-import { supabase } from "@/app/lib/supabaseClient";
 import DataTable from "@/components/vam/enterprise/DataTable";
 import EmptyState from "@/components/vam/enterprise/EmptyState";
-
-/*
- * VAM Administración de Condominios
- * Componente: Historial de pagos aplicados
- * Versión: v1.1
- * Fecha: 03/10/2026
- *
- * Cambios:
- * - La columna "Comprobante" pasa a identificarse como "Recibo banco".
- * - El comprobante bancario ya no se abre directamente desde comprobante_url.
- * - Usa una API segura que genera URL firmada cuando el archivo está en
- *   comprobantes-pagos-propietarios o comprobantes-pagos.
- * - Se diferencia "Recibo banco" del "Recibo VAM".
- */
 
 type Props = {
   pagos: Pago[];
@@ -34,61 +18,6 @@ function dinero(valor: number | null | undefined) {
 }
 
 export default function PagoHistorial({ pagos, loading }: Props) {
-  const [abriendoPagoId, setAbriendoPagoId] = useState<number | null>(null);
-
-  async function abrirReciboBanco(pagoId: number) {
-    setAbriendoPagoId(pagoId);
-
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        throw new Error("La sesión administrativa no está disponible.");
-      }
-
-      const respuesta = await fetch(
-        `/api/pagos-mantenimiento/comprobante?pago_id=${encodeURIComponent(
-          pagoId,
-        )}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          cache: "no-store",
-        },
-      );
-
-      const data = await respuesta.json().catch(() => ({}));
-
-      if (!respuesta.ok || data?.ok !== true || !data?.url) {
-        throw new Error(
-          String(
-            data?.mensaje ||
-              data?.error ||
-              "No fue posible abrir el recibo bancario.",
-          ),
-        );
-      }
-
-      window.open(String(data.url), "_blank", "noopener,noreferrer");
-    } catch (error: any) {
-      console.error(
-        "[PagoHistorial] Error abriendo recibo bancario:",
-        error?.message || error,
-      );
-
-      alert(
-        error?.message ||
-          "No fue posible abrir el recibo bancario del pago.",
-      );
-    } finally {
-      setAbriendoPagoId(null);
-    }
-  }
-
   return (
     <div className="rounded-2xl border bg-white shadow-sm">
       <div className="border-b p-4">
@@ -119,8 +48,8 @@ export default function PagoHistorial({ pagos, loading }: Props) {
               <th className="px-4 py-3 text-left">Método</th>
               <th className="px-4 py-3 text-left">Origen</th>
               <th className="px-4 py-3 text-left">Referencia</th>
-              <th className="px-4 py-3 text-center">Recibo banco</th>
-              <th className="px-4 py-3 text-center">Recibo VAM</th>
+              <th className="px-4 py-3 text-center">Comprobante</th>
+              <th className="px-4 py-3 text-center">Recibo</th>
             </tr>
           </thead>
 
@@ -148,23 +77,17 @@ export default function PagoHistorial({ pagos, loading }: Props) {
 
                 <td className="px-4 py-3 text-center">
                   {p.comprobante_url ? (
-                    <button
-                      type="button"
-                      onClick={() => void abrirReciboBanco(p.id)}
-                      disabled={abriendoPagoId === p.id}
-                      className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700 hover:bg-slate-200 disabled:opacity-50"
+                    <a
+                      href={p.comprobante_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700 hover:bg-slate-200"
                     >
-                      {abriendoPagoId === p.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Eye className="h-3.5 w-3.5" />
-                      )}
-                      {abriendoPagoId === p.id ? "Abriendo" : "Ver recibo"}
-                    </button>
+                      <Eye className="h-3.5 w-3.5" />
+                      Ver
+                    </a>
                   ) : (
-                    <span className="text-xs text-slate-400">
-                      Sin archivo
-                    </span>
+                    <span className="text-xs text-slate-400">Sin archivo</span>
                   )}
                 </td>
 
@@ -174,7 +97,7 @@ export default function PagoHistorial({ pagos, loading }: Props) {
                     className="inline-flex items-center gap-1 rounded-lg bg-purple-700 px-3 py-1 text-xs font-bold text-white hover:bg-purple-800"
                   >
                     <ReceiptText className="h-3.5 w-3.5" />
-                    Recibo VAM
+                    Recibo
                   </Link>
                 </td>
               </tr>
@@ -182,10 +105,6 @@ export default function PagoHistorial({ pagos, loading }: Props) {
           </tbody>
         </DataTable>
       )}
-
-      <div className="border-t bg-slate-50 px-4 py-2 text-right text-[10px] font-semibold text-slate-400">
-        Historial de pagos aplicados · v1.1
-      </div>
     </div>
   );
 }

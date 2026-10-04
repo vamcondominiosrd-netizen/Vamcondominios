@@ -1,7 +1,42 @@
 "use client";
 
+/*
+ * VAM Administración de Condominios
+ * Módulo: Reportes / Pagos por Propietarios
+ * Versión: v2.0
+ * Fecha de versión: 02/10/2026
+ *
+ * CAMBIOS v2.0
+ * - Actualizado al formato visual Enterprise de VAM.
+ * - Retirado el bloque mensual agregado para enfocar el reporte en cada propietario.
+ * - Se conserva la consulta anual por apartamento y estado mes a mes.
+ * - Se mantienen totales facturados, pagados, pendientes y unidades con deuda.
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/app/lib/supabaseClient";
+import {
+  AlertTriangle,
+  Banknote,
+  BarChart3,
+  ClipboardCheck,
+  Coins,
+  CreditCard,
+  FileSpreadsheet,
+  Landmark,
+  ReceiptText,
+  Users,
+  WalletCards,
+} from "lucide-react";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import ModuleActions from "@/components/vam/enterprise/ModuleActions";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import StatCard from "@/components/vam/enterprise/StatCard";
+import DataTable from "@/components/vam/enterprise/DataTable";
+import EmptyState from "@/components/vam/enterprise/EmptyState";
 
 type Unidad = {
   id: number;
@@ -72,16 +107,7 @@ type FilaEstado = {
   mesesPendientes: number;
 };
 
-type ResumenMes = {
-  mes: number;
-  nombre: string;
-  cantidad: number;
-  facturado: number;
-  pagado: number;
-  pendiente: number;
-};
-
-const meses = [
+const MESES = [
   "Enero",
   "Febrero",
   "Marzo",
@@ -104,9 +130,7 @@ export default function ReportePagosPropietariosPage() {
   const [apartamentoSeleccionado, setApartamentoSeleccionado] = useState("");
 
   const [unidades, setUnidades] = useState<Unidad[]>([]);
-  const [propietarios, setPropietarios] = useState<PropietarioApartamento[]>(
-    []
-  );
+  const [propietarios, setPropietarios] = useState<PropietarioApartamento[]>([]);
   const [cargos, setCargos] = useState<CargoPeriodico[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
 
@@ -125,21 +149,26 @@ export default function ReportePagosPropietariosPage() {
       return;
     }
 
-    cargarDatos(id, anio);
+    void cargarDatos(id, anio);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function cargarDatos(id: string, anioSeleccionado: number) {
+    if (!id) return;
+
     setLoading(true);
     setMensaje("");
 
-    await Promise.all([
-      cargarUnidades(id),
-      cargarPropietarios(id),
-      cargarCargos(id, anioSeleccionado),
-      cargarPagos(id, anioSeleccionado),
-    ]);
-
-    setLoading(false);
+    try {
+      await Promise.all([
+        cargarUnidades(id),
+        cargarPropietarios(id),
+        cargarCargos(id, anioSeleccionado),
+        cargarPagos(id, anioSeleccionado),
+      ]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function cargarUnidades(id: string) {
@@ -152,6 +181,7 @@ export default function ReportePagosPropietariosPage() {
 
     if (error) {
       setMensaje("Error cargando unidades: " + error.message);
+      setUnidades([]);
       return;
     }
 
@@ -169,6 +199,7 @@ export default function ReportePagosPropietariosPage() {
 
     if (error) {
       setMensaje("Error cargando propietarios: " + error.message);
+      setPropietarios([]);
       return;
     }
 
@@ -187,12 +218,13 @@ export default function ReportePagosPropietariosPage() {
 
     if (error) {
       setMensaje("Error cargando cargos: " + error.message);
+      setCargos([]);
       return;
     }
 
-    const lista = ((data as CargoPeriodico[]) || []).filter((c) => {
-      const tipo = normalizar(c.tipo_cargo);
-      const anioCargo = obtenerAnioCargo(c);
+    const lista = ((data as CargoPeriodico[]) || []).filter((cargo) => {
+      const tipo = normalizar(cargo.tipo_cargo);
+      const anioCargo = obtenerAnioCargo(cargo);
 
       const esTipoMantenimiento =
         tipo === "MANTENIMIENTO" || tipo === "ORDINARIO";
@@ -219,6 +251,7 @@ export default function ReportePagosPropietariosPage() {
 
     if (error) {
       setMensaje("Error cargando pagos: " + error.message);
+      setPagos([]);
       return;
     }
 
@@ -232,7 +265,7 @@ export default function ReportePagosPropietariosPage() {
     setApartamentoSeleccionado("");
 
     if (condominioId) {
-      cargarDatos(condominioId, nuevoAnio);
+      void cargarDatos(condominioId, nuevoAnio);
     }
   }
 
@@ -268,7 +301,8 @@ export default function ReportePagosPropietariosPage() {
 
     return (
       propietarios.find(
-        (p) => normalizar(p.no_apartamento) === codigoUnidad
+        (propietario) =>
+          normalizar(propietario.no_apartamento) === codigoUnidad
       ) || null
     );
   }
@@ -276,14 +310,14 @@ export default function ReportePagosPropietariosPage() {
   function crearFilaEstado(unidad: Unidad): FilaEstado {
     const propietario = buscarPropietarioPorUnidad(unidad);
 
-    const mesesEstado: MesEstado[] = meses.map((nombreMes, index) => {
+    const mesesEstado: MesEstado[] = MESES.map((nombreMes, index) => {
       const numeroMes = index + 1;
 
-      const cargosMes = cargos.filter((c) => {
-        const mesCargo = obtenerMesCargo(c);
+      const cargosMes = cargos.filter((cargo) => {
+        const mesCargo = obtenerMesCargo(cargo);
 
         return (
-          Number(c.unidad_id) === Number(unidad.id) &&
+          Number(cargo.unidad_id) === Number(unidad.id) &&
           Number(mesCargo) === numeroMes
         );
       });
@@ -300,17 +334,17 @@ export default function ReportePagosPropietariosPage() {
       }
 
       const monto = cargosMes.reduce(
-        (sum, c) => sum + Number(c.monto || 0),
+        (sum, cargo) => sum + Number(cargo.monto || 0),
         0
       );
 
       const pagado = cargosMes.reduce(
-        (sum, c) => sum + Number(c.monto_pagado || 0),
+        (sum, cargo) => sum + Number(cargo.monto_pagado || 0),
         0
       );
 
       const balance = cargosMes.reduce(
-        (sum, c) => sum + Number(c.balance || 0),
+        (sum, cargo) => sum + Number(cargo.balance || 0),
         0
       );
 
@@ -320,8 +354,6 @@ export default function ReportePagosPropietariosPage() {
         estado = "PAGADO";
       } else if (pagado > 0 && balance > 0) {
         estado = "PARCIAL";
-      } else {
-        estado = "PENDIENTE";
       }
 
       return {
@@ -335,28 +367,30 @@ export default function ReportePagosPropietariosPage() {
     });
 
     const totalFacturado = mesesEstado.reduce(
-      (sum, m) => sum + Number(m.monto || 0),
+      (sum, mes) => sum + Number(mes.monto || 0),
       0
     );
 
     const totalPagado = mesesEstado.reduce(
-      (sum, m) => sum + Number(m.pagado || 0),
+      (sum, mes) => sum + Number(mes.pagado || 0),
       0
     );
 
     const totalPendiente = mesesEstado.reduce(
-      (sum, m) => sum + Number(m.balance || 0),
+      (sum, mes) => sum + Number(mes.balance || 0),
       0
     );
 
-    const mesesPagados = mesesEstado.filter((m) => m.estado === "PAGADO").length;
+    const mesesPagados = mesesEstado.filter(
+      (mes) => mes.estado === "PAGADO"
+    ).length;
 
     const mesesParciales = mesesEstado.filter(
-      (m) => m.estado === "PARCIAL"
+      (mes) => mes.estado === "PARCIAL"
     ).length;
 
     const mesesPendientes = mesesEstado.filter(
-      (m) => m.estado === "PENDIENTE"
+      (mes) => mes.estado === "PENDIENTE"
     ).length;
 
     return {
@@ -376,7 +410,9 @@ export default function ReportePagosPropietariosPage() {
   }
 
   const filas = useMemo(() => {
-    return unidades.map((u) => crearFilaEstado(u));
+    return unidades.map((unidad) => crearFilaEstado(unidad));
+    // pagos se conserva como dependencia para que el reporte se refresque
+    // junto con la consulta anual de pagos del módulo original.
   }, [unidades, propietarios, cargos, pagos]);
 
   const filaSeleccionada = useMemo(() => {
@@ -384,7 +420,9 @@ export default function ReportePagosPropietariosPage() {
 
     return (
       filas.find(
-        (f) => normalizar(f.apartamento) === normalizar(apartamentoSeleccionado)
+        (fila) =>
+          normalizar(fila.apartamento) ===
+          normalizar(apartamentoSeleccionado)
       ) || null
     );
   }, [filas, apartamentoSeleccionado]);
@@ -393,70 +431,41 @@ export default function ReportePagosPropietariosPage() {
     if (!apartamentoSeleccionado) return filas;
 
     return filas.filter(
-      (f) => normalizar(f.apartamento) === normalizar(apartamentoSeleccionado)
+      (fila) =>
+        normalizar(fila.apartamento) ===
+        normalizar(apartamentoSeleccionado)
     );
   }, [filas, apartamentoSeleccionado]);
 
-  const resumenMeses = useMemo<ResumenMes[]>(() => {
-    return meses.map((nombreMes, index) => {
-      const numeroMes = index + 1;
-
-      const cargosMes = cargos.filter((c) => obtenerMesCargo(c) === numeroMes);
-
-      const facturado = cargosMes.reduce(
-        (sum, c) => sum + Number(c.monto || 0),
-        0
-      );
-
-      const pagado = cargosMes.reduce(
-        (sum, c) => sum + Number(c.monto_pagado || 0),
-        0
-      );
-
-      const pendiente = cargosMes.reduce(
-        (sum, c) => sum + Number(c.balance || 0),
-        0
-      );
-
-      return {
-        mes: numeroMes,
-        nombre: nombreMes,
-        cantidad: cargosMes.length,
-        facturado,
-        pagado,
-        pendiente,
-      };
-    });
-  }, [cargos]);
-
   const totalFacturadoGeneral = filasFiltradas.reduce(
-    (sum, f) => sum + f.totalFacturado,
+    (sum, fila) => sum + fila.totalFacturado,
     0
   );
 
   const totalPagadoGeneral = filasFiltradas.reduce(
-    (sum, f) => sum + f.totalPagado,
+    (sum, fila) => sum + fila.totalPagado,
     0
   );
 
   const totalPendienteGeneral = filasFiltradas.reduce(
-    (sum, f) => sum + f.totalPendiente,
+    (sum, fila) => sum + fila.totalPendiente,
     0
   );
 
   const unidadesConDeuda = filasFiltradas.filter(
-    (f) => f.totalPendiente > 0
+    (fila) => fila.totalPendiente > 0
   ).length;
 
   function dinero(valor: number | null | undefined) {
     return Number(valor || 0).toLocaleString("es-DO", {
       minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     });
   }
 
   function claseEstado(estado: MesEstado["estado"]) {
     if (estado === "PAGADO") {
-      return "bg-green-100 text-green-700 border-green-200";
+      return "bg-emerald-100 text-emerald-700 border-emerald-200";
     }
 
     if (estado === "PARCIAL") {
@@ -478,54 +487,109 @@ export default function ReportePagosPropietariosPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-3xl border shadow-sm p-6">
-        <h1 className="text-3xl font-black text-slate-900">
-          Relación de Pagos por Propietario
-        </h1>
+    <PageContainer>
+      <ModuleMenu
+        title="Finanzas"
+        subtitle="Control financiero del condominio: pagos, gastos, solicitudes, caja chica, bancos, reportes y configuraciones."
+        tone="blue"
+        items={[
+          {
+            href: "/finanzas",
+            label: "Inicio finanzas",
+            icon: WalletCards,
+          },
+          {
+            href: "/pagos-mantenimiento",
+            label: "Pagos",
+            icon: CreditCard,
+          },
+          {
+            href: "/gastos",
+            label: "Gastos",
+            icon: ReceiptText,
+          },
+          {
+            href: "/solicitudes-pago",
+            label: "Solicitudes",
+            icon: ClipboardCheck,
+          },
+          {
+            href: "/banco",
+            label: "Banco / Fondos",
+            icon: Landmark,
+          },
+          {
+            href: "/finanzas/caja-chica",
+            label: "Caja chica",
+            icon: Coins,
+          },
+          {
+            href: "/reportes",
+            label: "Reportes",
+            icon: BarChart3,
+          },
+          {
+            href: "/finanzas/configuraciones/presupuesto",
+            label: "Presupuesto",
+            icon: Banknote,
+          },
+        ]}
+      />
 
-        <p className="text-slate-500 mt-2">
-          Vista mensual de pagos realizados, pagos parciales y meses pendientes
-          por apartamento.
-        </p>
-
-        <p className="text-sm text-blue-700 font-bold mt-3">
-          Condominio activo: {condominioNombre || "No seleccionado"}
-        </p>
-      </div>
+      <ModuleToolbar
+        title="Pagos por Propietarios"
+        subtitle="Consulta anual de cuotas pagadas, pagos parciales y balances pendientes por apartamento."
+        icon={Users}
+        actions={
+          <ModuleActions
+            onRefresh={() => {
+              if (condominioId) {
+                void cargarDatos(condominioId, anio);
+              }
+            }}
+          />
+        }
+      />
 
       {mensaje && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 rounded-xl p-4 text-sm">
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-800">
           {mensaje}
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border shadow-sm p-5">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+      <SectionCard
+        title="Filtros del reporte"
+        subtitle={`Condominio activo: ${
+          condominioNombre || "No seleccionado"
+        }`}
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
-            <label className="block text-sm font-semibold mb-2">Año</label>
+            <label className="mb-1 block text-sm font-semibold text-slate-700">
+              Año
+            </label>
             <select
               value={anio}
               onChange={(e) => cambiarAnio(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
             >
-              {[2024, 2025, 2026, 2027, 2028].map((y) => (
-                <option key={y} value={y}>
-                  {y}
+              {[2024, 2025, 2026, 2027, 2028].map((valor) => (
+                <option key={valor} value={valor}>
+                  {valor}
                 </option>
               ))}
             </select>
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-2">
-              Seleccionar apartamento
+            <label className="mb-1 block text-sm font-semibold text-slate-700">
+              Apartamento / propietario
             </label>
 
             <select
               value={apartamentoSeleccionado}
               onChange={(e) => setApartamentoSeleccionado(e.target.value)}
-              className="border rounded-xl px-4 py-3 w-full bg-white"
+              className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
             >
               <option value="">Todos los apartamentos</option>
 
@@ -539,250 +603,230 @@ export default function ReportePagosPropietariosPage() {
         </div>
 
         {filaSeleccionada && (
-          <div className="mt-4 bg-blue-50 border border-blue-200 rounded-2xl p-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
-              <div>
-                <p className="text-xs text-blue-700 font-bold">
-                  Apartamento seleccionado
-                </p>
+          <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 md:grid-cols-4">
+            <div>
+              <p className="text-xs font-bold uppercase text-blue-700">
+                Apartamento
+              </p>
+              <p className="mt-1 text-lg font-black text-slate-900">
+                {filaSeleccionada.apartamento}
+              </p>
+            </div>
 
-                <h2 className="text-xl font-black text-slate-900 mt-1">
-                  {filaSeleccionada.apartamento}
-                </h2>
-              </div>
+            <div>
+              <p className="text-xs font-bold uppercase text-blue-700">
+                Propietario
+              </p>
+              <p className="mt-1 font-black text-slate-900">
+                {filaSeleccionada.propietario}
+              </p>
+            </div>
 
-              <div>
-                <p className="text-xs text-blue-700 font-bold">Propietario</p>
+            <div>
+              <p className="text-xs font-bold uppercase text-blue-700">
+                Teléfono
+              </p>
+              <p className="mt-1 font-black text-slate-900">
+                {filaSeleccionada.telefono}
+              </p>
+            </div>
 
-                <p className="font-black text-slate-900 mt-1">
-                  {filaSeleccionada.propietario}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs text-blue-700 font-bold">Teléfono</p>
-
-                <p className="font-black text-slate-900 mt-1">
-                  {filaSeleccionada.telefono}
-                </p>
-              </div>
-
+            <div className="flex items-end">
               <button
                 type="button"
                 onClick={() => setApartamentoSeleccionado("")}
-                className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-3 rounded-xl font-bold"
+                className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800"
               >
                 Limpiar filtro
               </button>
             </div>
           </div>
         )}
+      </SectionCard>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title="Total facturado"
+          value={`RD$ ${dinero(totalFacturadoGeneral)}`}
+          subtitle={`Año ${anio}`}
+          icon={FileSpreadsheet}
+          tone="blue"
+        />
+
+        <StatCard
+          title="Total pagado"
+          value={`RD$ ${dinero(totalPagadoGeneral)}`}
+          subtitle="Aplicado a cargos"
+          icon={CreditCard}
+          tone="green"
+        />
+
+        <StatCard
+          title="Total pendiente"
+          value={`RD$ ${dinero(totalPendienteGeneral)}`}
+          subtitle="Balance de mantenimiento"
+          icon={AlertTriangle}
+          tone="red"
+        />
+
+        <StatCard
+          title="Unidades con deuda"
+          value={unidadesConDeuda}
+          subtitle={`${filasFiltradas.length} unidad(es) consultada(s)`}
+          icon={Users}
+          tone="amber"
+        />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <ResumenCard
-          titulo="Total facturado"
-          valor={totalFacturadoGeneral}
-          color="text-blue-700"
-        />
-
-        <ResumenCard
-          titulo="Total pagado"
-          valor={totalPagadoGeneral}
-          color="text-green-700"
-        />
-
-        <ResumenCard
-          titulo="Total pendiente"
-          valor={totalPendienteGeneral}
-          color="text-red-700"
-        />
-
-        <ResumenCard
-          titulo="Unidades con deuda"
-          valor={unidadesConDeuda}
-          color="text-amber-700"
-          esCantidad
-        />
-      </div>
-
-      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
-        <div className="p-4 border-b">
-          <h2 className="font-black text-lg">Resumen de cargos por mes</h2>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-xs">
-            <thead className="bg-slate-100">
+      <SectionCard
+        title="Pagos y deudas por propietario"
+        subtitle="Detalle mensual de cuotas de mantenimiento por apartamento."
+        action={
+          <div className="text-right">
+            <p className="text-xs font-bold uppercase text-slate-400">
+              Registros
+            </p>
+            <p className="text-lg font-black text-slate-900">
+              {filasFiltradas.length}
+            </p>
+          </div>
+        }
+      >
+        {loading ? (
+          <div className="py-12 text-center text-sm font-semibold text-slate-500">
+            Cargando información...
+          </div>
+        ) : filasFiltradas.length === 0 ? (
+          <EmptyState
+            title="Sin información"
+            description="No hay pagos o cargos para los filtros seleccionados."
+          />
+        ) : (
+          <DataTable>
+            <thead className="bg-slate-100 text-xs uppercase text-slate-600">
               <tr>
-                <th className="p-3 border text-left">Mes</th>
-                <th className="p-3 border text-center">Cantidad cargos</th>
-                <th className="p-3 border text-right">Facturado</th>
-                <th className="p-3 border text-right">Pagado</th>
-                <th className="p-3 border text-right">Pendiente</th>
+                <th className="sticky left-0 z-20 min-w-28 border-b border-r bg-slate-100 px-3 py-3 text-left">
+                  Apartamento
+                </th>
+                <th className="min-w-52 border-b border-r px-3 py-3 text-left">
+                  Propietario
+                </th>
+                <th className="min-w-32 border-b border-r px-3 py-3 text-left">
+                  Teléfono
+                </th>
+
+                {MESES.map((mes) => (
+                  <th
+                    key={mes}
+                    className="min-w-28 border-b border-r px-3 py-3 text-center"
+                  >
+                    {mes.slice(0, 3)}
+                  </th>
+                ))}
+
+                <th className="min-w-32 border-b border-r px-3 py-3 text-right">
+                  Facturado
+                </th>
+                <th className="min-w-32 border-b border-r px-3 py-3 text-right">
+                  Pagado
+                </th>
+                <th className="min-w-32 border-b border-r px-3 py-3 text-right">
+                  Pendiente
+                </th>
+                <th className="min-w-24 border-b px-3 py-3 text-center">
+                  Meses pend.
+                </th>
               </tr>
             </thead>
 
-            <tbody>
-              {resumenMeses.map((r) => (
-                <tr key={r.mes}>
-                  <td className="p-3 border font-bold">{r.nombre}</td>
-                  <td className="p-3 border text-center">{r.cantidad}</td>
-                  <td className="p-3 border text-right">
-                    RD$ {dinero(r.facturado)}
+            <tbody className="divide-y divide-slate-200">
+              {filasFiltradas.map((fila) => (
+                <tr key={fila.unidad_id} className="bg-white hover:bg-slate-50">
+                  <td className="sticky left-0 z-10 border-r bg-white px-3 py-3 font-black text-slate-900">
+                    {fila.apartamento}
                   </td>
-                  <td className="p-3 border text-right text-green-700">
-                    RD$ {dinero(r.pagado)}
+
+                  <td className="border-r px-3 py-3">
+                    <div className="font-bold text-slate-900">
+                      {fila.propietario}
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-400">
+                      Cuota: RD$ {dinero(fila.cuota)}
+                    </div>
                   </td>
-                  <td className="p-3 border text-right text-red-700 font-bold">
-                    RD$ {dinero(r.pendiente)}
+
+                  <td className="border-r px-3 py-3 text-slate-600">
+                    {fila.telefono}
+                  </td>
+
+                  {fila.meses.map((mes) => (
+                    <td
+                      key={mes.mes}
+                      className="border-r px-2 py-2 text-center"
+                    >
+                      <div
+                        className={`rounded-lg border px-2 py-1.5 text-[11px] font-black ${claseEstado(
+                          mes.estado
+                        )}`}
+                        title={`Monto: RD$ ${dinero(
+                          mes.monto
+                        )} | Pagado: RD$ ${dinero(
+                          mes.pagado
+                        )} | Balance: RD$ ${dinero(mes.balance)}`}
+                      >
+                        {textoEstado(mes.estado)}
+                      </div>
+
+                      {mes.estado !== "SIN_CARGO" && (
+                        <div className="mt-1 text-[10px] font-semibold text-slate-500">
+                          RD$ {dinero(mes.pagado)}
+                        </div>
+                      )}
+                    </td>
+                  ))}
+
+                  <td className="border-r px-3 py-3 text-right font-bold text-slate-800">
+                    RD$ {dinero(fila.totalFacturado)}
+                  </td>
+
+                  <td className="border-r px-3 py-3 text-right font-black text-emerald-700">
+                    RD$ {dinero(fila.totalPagado)}
+                  </td>
+
+                  <td className="border-r px-3 py-3 text-right font-black text-red-700">
+                    RD$ {dinero(fila.totalPendiente)}
+                  </td>
+
+                  <td className="px-3 py-3 text-center">
+                    <span
+                      className={`inline-flex min-w-9 items-center justify-center rounded-full px-2 py-1 text-xs font-black ${
+                        fila.mesesPendientes > 0
+                          ? "bg-red-100 text-red-700"
+                          : "bg-emerald-100 text-emerald-700"
+                      }`}
+                    >
+                      {fila.mesesPendientes}
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
-        <div className="p-4 border-b">
-          <h2 className="font-black text-lg">
-            Pagos mes por mes de propietarios
-          </h2>
-        </div>
-
-        {loading ? (
-          <div className="p-6">Cargando información...</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-xs">
-              <thead className="bg-slate-100">
-                <tr>
-                  <th className="p-3 border text-left sticky left-0 bg-slate-100 z-10">
-                    Apartamento
-                  </th>
-                  <th className="p-3 border text-left">Propietario</th>
-                  <th className="p-3 border text-left">Teléfono</th>
-
-                  {meses.map((m) => (
-                    <th key={m} className="p-3 border text-center">
-                      {m.slice(0, 3)}
-                    </th>
-                  ))}
-
-                  <th className="p-3 border text-right">Facturado</th>
-                  <th className="p-3 border text-right">Pagado</th>
-                  <th className="p-3 border text-right">Pendiente</th>
-                  <th className="p-3 border text-center">Meses Pend.</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filasFiltradas.map((fila) => (
-                  <tr key={fila.unidad_id} className="hover:bg-slate-50">
-                    <td className="p-3 border font-black sticky left-0 bg-white z-10">
-                      {fila.apartamento}
-                    </td>
-
-                    <td className="p-3 border min-w-52">
-                      {fila.propietario}
-                    </td>
-
-                    <td className="p-3 border">{fila.telefono}</td>
-
-                    {fila.meses.map((mes) => (
-                      <td key={mes.mes} className="p-2 border text-center">
-                        <div
-                          className={`border rounded-lg px-2 py-1 font-bold ${claseEstado(
-                            mes.estado
-                          )}`}
-                          title={`Monto: RD$ ${dinero(
-                            mes.monto
-                          )} | Pagado: RD$ ${dinero(
-                            mes.pagado
-                          )} | Balance: RD$ ${dinero(mes.balance)}`}
-                        >
-                          {textoEstado(mes.estado)}
-                        </div>
-
-                        {mes.estado !== "SIN_CARGO" && (
-                          <div className="text-[10px] text-slate-500 mt-1">
-                            RD$ {dinero(mes.pagado)}
-                          </div>
-                        )}
-                      </td>
-                    ))}
-
-                    <td className="p-3 border text-right font-bold">
-                      RD$ {dinero(fila.totalFacturado)}
-                    </td>
-
-                    <td className="p-3 border text-right font-bold text-green-700">
-                      RD$ {dinero(fila.totalPagado)}
-                    </td>
-
-                    <td className="p-3 border text-right font-bold text-red-700">
-                      RD$ {dinero(fila.totalPendiente)}
-                    </td>
-
-                    <td className="p-3 border text-center font-black text-red-700">
-                      {fila.mesesPendientes}
-                    </td>
-                  </tr>
-                ))}
-
-                {filasFiltradas.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={19}
-                      className="p-6 border text-center text-slate-500"
-                    >
-                      No hay información para mostrar.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          </DataTable>
         )}
+      </SectionCard>
+
+      <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-blue-900">
+        <strong>Nota:</strong> Este reporte se basa en los cargos generados en{" "}
+        <strong>cargos_periodicos</strong>. Un mes aparece como pagado cuando el
+        balance del cargo está en cero. Se consideran cargos de mantenimiento
+        los tipos <strong>ORDINARIO</strong> y <strong>MANTENIMIENTO</strong>.
+        Si el campo <strong>mes</strong> está vacío, el sistema obtiene el mes
+        desde <strong>periodo</strong>.
       </div>
 
-      <div className="bg-slate-50 border rounded-xl p-4 text-sm text-slate-600">
-        <p>
-          <strong>Nota:</strong> Este reporte se basa en los cargos generados en{" "}
-          <strong>cargos_periodicos</strong>. Un mes aparecerá como pagado
-          cuando el balance del cargo esté en cero. También toma como cargos de
-          mantenimiento los tipos <strong>ORDINARIO</strong> y{" "}
-          <strong>MANTENIMIENTO</strong>. Si el campo <strong>mes</strong> viene
-          vacío, el sistema obtiene el mes desde <strong>periodo</strong>.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function ResumenCard({
-  titulo,
-  valor,
-  color,
-  esCantidad = false,
-}: {
-  titulo: string;
-  valor: number;
-  color: string;
-  esCantidad?: boolean;
-}) {
-  return (
-    <div className="bg-white rounded-2xl border shadow-sm p-5">
-      <p className="text-sm text-slate-500">{titulo}</p>
-
-      <h2 className={`text-2xl font-black mt-2 ${color}`}>
-        {esCantidad
-          ? Number(valor || 0).toLocaleString("es-DO")
-          : `RD$ ${Number(valor || 0).toLocaleString("es-DO", {
-              minimumFractionDigits: 2,
-            })}`}
-      </h2>
-    </div>
+      <p className="text-right text-[10px] font-semibold text-slate-400">
+        Reportes · Pagos por Propietarios · v2.0
+      </p>
+    </PageContainer>
   );
 }

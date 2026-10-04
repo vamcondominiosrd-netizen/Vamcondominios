@@ -2,13 +2,13 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    id: "/movil/",
+    id: "/movil/propietarios/",
     name: "VAM Condominios",
     short_name: "VAM",
     description:
-      "Acceso móvil unificado de VAM Condominios para propietarios y miembros de directiva.",
-    start_url: "/movil/acceso-unificado",
-    scope: "/movil/",
+      "Portal de propietarios de VAM Condominios para consultar estado de cuenta, pagos, recibos, anuncios y servicios del condominio.",
+    start_url: "/movil/propietarios/login",
+    scope: "/movil/propietarios/",
     display: "standalone",
     background_color: "#ffffff",
     theme_color: "#0f172a",

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
 import {
   AlertCircle,
-  ArrowLeft,
   ChevronRight,
   ClipboardCheck,
   Landmark,
@@ -92,12 +91,7 @@ function esPendienteFirma(estado: unknown, rol: unknown) {
 }
 
 function leerSesion(): SesionDirectiva | null {
-  for (const clave of [
-    "directiva_actual",
-    "usuario_actual",
-    "sesion_usuario",
-    "usuario",
-  ]) {
+  for (const clave of ["directiva_actual", "usuario_actual", "sesion_usuario", "usuario"]) {
     const raw = localStorage.getItem(clave);
     if (!raw) continue;
 
@@ -142,8 +136,7 @@ function leerSesion(): SesionDirectiva | null {
     rol: localStorage.getItem("usuario_rol") || "Directiva",
     condominio_id: condominioId,
     condominio_nombre:
-      localStorage.getItem("condominio_nombre") ||
-      `Condominio ${condominioId}`,
+      localStorage.getItem("condominio_nombre") || `Condominio ${condominioId}`,
     condominio_logo_url: localStorage.getItem("condominio_logo_url"),
   };
 }
@@ -158,68 +151,58 @@ export default function InicioDirectivaPage() {
   const [actualizando, setActualizando] = useState(false);
   const [error, setError] = useState("");
 
-  const cargar = useCallback(
-    async (s: SesionDirectiva, refresco = false) => {
-      refresco ? setActualizando(true) : setCargando(true);
-      setError("");
+  const cargar = useCallback(async (s: SesionDirectiva, refresco = false) => {
+    refresco ? setActualizando(true) : setCargando(true);
+    setError("");
 
-      try {
-        const { data: accesoData, error: accesoError } = await supabase.rpc(
-          "vam_validar_acceso_directiva_unificado",
-          { p_condominio_id: Number(s.condominio_id) },
-        );
+    try {
+      const { data: accesoData, error: accesoError } = await supabase.rpc(
+        "validar_acceso_directiva",
+        { p_condominio_id: Number(s.condominio_id) },
+      );
 
-        if (accesoError) throw accesoError;
+      if (accesoError) throw accesoError;
 
-        const acceso = (accesoData || {}) as RespuestaAcceso;
-        if (!acceso.ok) {
-          throw new Error(
-            acceso.mensaje ||
-              "No fue posible validar el acceso de Directiva.",
-          );
-        }
-
-        const rol = acceso.rol || s.rol || "Directiva";
-        setRolValidado(rol);
-
-        if (!esPresidente(rol) && !esTesorero(rol)) {
-          setPendientes(0);
-          setMontoPendiente(0);
-          return;
-        }
-
-        const { data, error: solicitudesError } = await supabase
-          .from("solicitudes_pago")
-          .select("id, estado, total")
-          .eq("condominio_id", Number(s.condominio_id));
-
-        if (solicitudesError) throw solicitudesError;
-
-        const lista = ((data || []) as SolicitudResumen[]).filter((item) =>
-          esPendienteFirma(item.estado, rol),
-        );
-
-        setPendientes(lista.length);
-        setMontoPendiente(
-          lista.reduce((total, item) => total + n(item.total), 0),
-        );
-      } catch (e: any) {
-        console.error(e);
-        setError(
-          e?.message || "No fue posible cargar el menú de Directiva.",
-        );
-      } finally {
-        setCargando(false);
-        setActualizando(false);
+      const acceso = (accesoData || {}) as RespuestaAcceso;
+      if (!acceso.ok) {
+        throw new Error(acceso.mensaje || "No fue posible validar el acceso de Directiva.");
       }
-    },
-    [],
-  );
+
+      const rol = acceso.rol || s.rol || "Directiva";
+      setRolValidado(rol);
+
+      if (!esPresidente(rol) && !esTesorero(rol)) {
+        setPendientes(0);
+        setMontoPendiente(0);
+        return;
+      }
+
+      const { data, error: solicitudesError } = await supabase
+        .from("solicitudes_pago")
+        .select("id, estado, total")
+        .eq("condominio_id", Number(s.condominio_id));
+
+      if (solicitudesError) throw solicitudesError;
+
+      const lista = ((data || []) as SolicitudResumen[]).filter((item) =>
+        esPendienteFirma(item.estado, rol),
+      );
+
+      setPendientes(lista.length);
+      setMontoPendiente(lista.reduce((total, item) => total + n(item.total), 0));
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "No fue posible cargar el menú de Directiva.");
+    } finally {
+      setCargando(false);
+      setActualizando(false);
+    }
+  }, []);
 
   useEffect(() => {
     const s = leerSesion();
     if (!s) {
-      router.replace("/movil/inicio-unificado");
+      router.replace("/");
       return;
     }
 
@@ -238,7 +221,8 @@ export default function InicioDirectivaPage() {
       ? "Presidente"
       : "Directiva";
 
-  function limpiarContextoDirectiva() {
+  async function cerrarSesion() {
+    await supabase.auth.signOut();
     localStorage.removeItem("directiva_actual");
     localStorage.removeItem("usuario_actual");
     localStorage.removeItem("sesion_usuario");
@@ -249,22 +233,7 @@ export default function InicioDirectivaPage() {
     localStorage.removeItem("condominio_id");
     localStorage.removeItem("condominio_nombre");
     localStorage.removeItem("condominio_logo_url");
-  }
-
-  function volverAlInicioUnificado() {
-    // Cambiar de modulo NO cierra la sesion Supabase.
-    limpiarContextoDirectiva();
-    router.replace("/movil/inicio-unificado");
-  }
-
-  async function cerrarSesion() {
-    await supabase.auth.signOut();
-    limpiarContextoDirectiva();
-    localStorage.removeItem("vam_contexto_usuario");
-    localStorage.removeItem("propietario_actual");
-    localStorage.removeItem("propietario_token");
-    localStorage.removeItem("propietario_token_expira");
-    router.replace("/movil/acceso-unificado");
+    router.replace("/");
   }
 
   if (cargando) {
@@ -288,16 +257,6 @@ export default function InicioDirectivaPage() {
         <div className="mx-auto max-w-lg">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <button
-                type="button"
-                onClick={volverAlInicioUnificado}
-                aria-label="Volver a Mi cuenta VAM"
-                title="Volver a Mi cuenta VAM"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/10 text-white transition hover:bg-white/20"
-              >
-                <ArrowLeft size={19} />
-              </button>
-
               {sesion.condominio_logo_url ? (
                 <img
                   src={sesion.condominio_logo_url}
@@ -314,9 +273,7 @@ export default function InicioDirectivaPage() {
                 <p className="truncate text-xs font-semibold text-blue-100">
                   {sesion.condominio_nombre}
                 </p>
-                <h1 className="truncate text-lg font-black">
-                  Portal de Directiva
-                </h1>
+                <h1 className="truncate text-lg font-black">Portal de Directiva</h1>
                 <p className="mt-0.5 truncate text-[11px] text-blue-100">
                   {sesion.usuario_nombre} · {rolValidado || sesion.rol}
                 </p>
@@ -331,10 +288,7 @@ export default function InicioDirectivaPage() {
                 aria-label="Actualizar"
                 className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 disabled:opacity-50"
               >
-                <RefreshCw
-                  size={18}
-                  className={actualizando ? "animate-spin" : ""}
-                />
+                <RefreshCw size={18} className={actualizando ? "animate-spin" : ""} />
               </button>
               <button
                 type="button"
@@ -363,9 +317,7 @@ export default function InicioDirectivaPage() {
         {puedeFirmar && (
           <button
             type="button"
-            onClick={() =>
-              router.push("/movil/directiva/solicitudes-pagos")
-            }
+            onClick={() => router.push("/movil/directiva/solicitudes-pagos")}
             className={`w-full overflow-hidden rounded-[1.7rem] border p-5 text-left shadow-lg ${
               pendientes > 0
                 ? "border-amber-300 bg-gradient-to-br from-amber-50 to-white"
@@ -396,20 +348,14 @@ export default function InicioDirectivaPage() {
 
                 <div className="mt-4 flex items-end gap-4">
                   <div>
-                    <p className="text-3xl font-black text-slate-950">
-                      {pendientes}
-                    </p>
-                    <p className="text-xs font-semibold text-slate-500">
-                      pendientes
-                    </p>
+                    <p className="text-3xl font-black text-slate-950">{pendientes}</p>
+                    <p className="text-xs font-semibold text-slate-500">pendientes</p>
                   </div>
                   <div className="border-l border-slate-200 pl-4">
                     <p className="text-sm font-black text-slate-800">
                       {moneda.format(montoPendiente)}
                     </p>
-                    <p className="text-xs text-slate-500">
-                      monto por revisar
-                    </p>
+                    <p className="text-xs text-slate-500">monto por revisar</p>
                   </div>
                 </div>
 
@@ -423,64 +369,46 @@ export default function InicioDirectivaPage() {
                   </p>
                 )}
               </div>
-              <ChevronRight
-                className="mt-2 shrink-0 text-slate-400"
-                size={21}
-              />
+              <ChevronRight className="mt-2 shrink-0 text-slate-400" size={21} />
             </div>
           </button>
         )}
 
         <section className="grid grid-cols-2 gap-3">
           <MenuCard
-            titulo="Estado financiero"
-            descripcion="Informe mensual validado: banco, gastos, cierres y cuotas pendientes."
-            icono={<BarChart3 size={22} />}
-            onClick={() =>
-              router.push("/movil/directiva/estados-financieros")
-            }
+            titulo="Morosidad"
+            descripcion="Deudas, unidades morosas y antigüedad."
+            icono={<Users size={22} />}
+            onClick={() => router.push("/movil/directiva/morosidad")}
           />
-
           <MenuCard
             titulo="Finanzas"
             descripcion="Ingresos, gastos, banco y cierres."
             icono={<Landmark size={22} />}
             onClick={() => router.push("/movil/directiva/finanzas")}
           />
-
           <MenuCard
             titulo="Caja chica"
             descripcion="Fondos, gastos y soportes."
             icono={<WalletCards size={22} />}
             onClick={() => router.push("/movil/directiva/caja-chica")}
           />
-
           <MenuCard
-            titulo="Pagos propietarios"
-            descripcion="Cuotas pagadas, parciales y pendientes por apartamento."
-            icono={<ClipboardCheck size={22} />}
-            onClick={() =>
-              router.push("/movil/directiva/pagos-propietarios")
-            }
-          />
-
-          <MenuCard
-            titulo="Morosidad"
-            descripcion="Deudas, unidades morosas y antigüedad."
-            icono={<Users size={22} />}
-            onClick={() => router.push("/movil/directiva/morosidad")}
+            titulo="Estado financiero"
+            descripcion="Informe mensual validado: banco, gastos, cierres y cuotas pendientes."
+            icono={<BarChart3 size={22} />}
+            onClick={() => router.push("/movil/directiva/estados-financieros")}
           />
         </section>
 
         {!puedeFirmar && (
           <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-xs leading-5 text-blue-900">
-            Su cargo de Directiva no tiene firmas de solicitudes de pago
-            asignadas. Puede consultar las demás opciones del menú.
+            Su cargo de Directiva no tiene firmas de solicitudes de pago asignadas. Puede consultar las demás opciones del menú.
           </div>
         )}
 
         <p className="pt-2 text-right text-[10px] font-semibold text-slate-400">
-          Directiva Inicio · v2.3
+          Directiva Inicio · v2.2
         </p>
       </div>
     </main>
@@ -507,12 +435,8 @@ function MenuCard({
       <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-800">
         {icono}
       </span>
-      <h2 className="mt-4 text-base font-black text-slate-900">
-        {titulo}
-      </h2>
-      <p className="mt-1 text-xs leading-5 text-slate-500">
-        {descripcion}
-      </p>
+      <h2 className="mt-4 text-base font-black text-slate-900">{titulo}</h2>
+      <p className="mt-1 text-xs leading-5 text-slate-500">{descripcion}</p>
       <div className="mt-3 flex items-center gap-1 text-xs font-black text-blue-800">
         Ver <ChevronRight size={15} />
       </div>

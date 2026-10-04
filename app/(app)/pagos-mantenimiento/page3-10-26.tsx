@@ -3,30 +3,8 @@
 /*
  * VAM Administración de Condominios
  * Módulo: Pagos de Mantenimiento
- * Versión: v1.0.5
- * Fecha de versión: 03/10/2026
- *
- * CAMBIOS v1.0.5
- * - Muestra dentro de Pago Mantenimiento el comprobante enviado por el propietario.
- * - Conserva el comprobante original recuperado desde pagos_movil.
- * - Permite abrir comprobantes con URL completa o ruta privada del bucket
- *   comprobantes-pagos-propietarios mediante URL firmada.
- * - No modifica el flujo de registro ni la generación del recibo.
- *
- * CAMBIOS v1.0.4
- * - Corrige recuperación del comprobante móvil usando únicamente columnas
- *   confirmadas de pagos_movil.
- * - Elimina tipo_fondo y otros campos no existentes de la consulta directa.
- * - Cuando el comprobante se recupera desde pagos_movil, el fondo usa
- *   ORDINARIO como valor seguro por defecto para pagos de mantenimiento.
- *
- * CAMBIOS v1.0.3
- * - Si el pago viene desde Comprobantes del propietario, ya no depende únicamente
- *   de localStorage para recuperar la información preparada.
- * - Si falta o está desactualizado vam_pago_movil_preparar, recupera pagos_movil
- *   directamente por pago_movil_id + condominio_id y reconstruye el contexto.
- * - Precarga unidad, fondo, fecha, monto, método, referencia y comprobante original.
- * - Mantiene el flujo final hacia /recibos/pago/mantenimiento/{pago_id}.
+ * Versión: v1.0.2
+ * Fecha de versión: 02/10/2026
  *
  * CAMBIOS v1.0.1
  * - Se valida en el frontend el control matemático devuelto por el motor de pagos.
@@ -113,8 +91,8 @@ type PagoMovilPreparado = {
 };
 
 const MODULO_NOMBRE = "Pagos de Mantenimiento";
-const MODULO_VERSION = "v1.0.5";
-const MODULO_FECHA_VERSION = "03/10/2026";
+const MODULO_VERSION = "v1.0.2";
+const MODULO_FECHA_VERSION = "02/10/2026";
 
 function normalizarTexto(valor: string) {
   return valor
@@ -131,40 +109,6 @@ function fechaLocalISO() {
   const dia = String(hoy.getDate()).padStart(2, "0");
 
   return `${anio}-${mes}-${dia}`;
-}
-
-
-function obtenerContextoPagoMovilQuery() {
-  if (typeof window === "undefined") {
-    return { origen: "", pagoMovilId: 0 };
-  }
-
-  const params = new URLSearchParams(window.location.search);
-
-  return {
-    origen: String(params.get("origen") || "").trim().toLowerCase(),
-    pagoMovilId: Number(params.get("pago_movil_id") || 0),
-  };
-}
-
-function normalizarMetodoPagoFormulario(valor?: string | null) {
-  const metodo = normalizarTexto(String(valor || ""));
-
-  if (metodo === "TRANSFERENCIA") return "Transferencia";
-  if (metodo === "DEPOSITO") return "Depósito";
-  if (metodo === "EFECTIVO") return "Efectivo";
-  if (metodo === "CHEQUE") return "Cheque";
-
-  return String(valor || "").trim();
-}
-
-function normalizarFondoFormulario(valor?: string | null) {
-  const fondo = normalizarTexto(String(valor || ""));
-
-  if (fondo === "EXTRAORDINARIO") return "EXTRAORDINARIO";
-  if (fondo === "RESERVA") return "RESERVA";
-
-  return "ORDINARIO";
 }
 
 function obtenerPagoMovilPreparadoActivo(): PagoMovilPreparado | null {
@@ -260,8 +204,6 @@ export default function PagosMantenimientoPage() {
   const [metodoPago, setMetodoPago] = useState("");
   const [referencia, setReferencia] = useState("");
   const [comprobante, setComprobante] = useState<File | null>(null);
-  const [comprobanteMovilOriginal, setComprobanteMovilOriginal] = useState("");
-  const [abriendoComprobanteMovil, setAbriendoComprobanteMovil] = useState(false);
 
   const [balancePendienteUnidad, setBalancePendienteUnidad] = useState(0);
   const [saldoFavorDisponible, setSaldoFavorDisponible] = useState(0);
@@ -335,195 +277,12 @@ export default function PagosMantenimientoPage() {
     cargarUnidades(id);
     cargarCuentas(id);
     cargarPagos(id);
-    void cargarPagoMovilPreparadoInicial(id);
 
     // Los pagos históricos se cargan únicamente cuando el usuario
     // selecciona una unidad. Esto evita traer todo el histórico del
     // condominio al abrir la pantalla y reduce errores de red innecesarios.
     setPagosHistoricos([]);
   }, [router]);
-
-  function aplicarPagoMovilPreparadoAlFormulario(
-    preparado: PagoMovilPreparado,
-  ) {
-    setComprobanteMovilOriginal(
-      String(preparado.comprobante_url || "").trim(),
-    );
-
-    setUnidadId(String(preparado.unidad_id || ""));
-    setTipoFondo(normalizarFondoFormulario(preparado.tipo_fondo));
-
-    if (preparado.fecha_pago) {
-      setFechaPago(String(preparado.fecha_pago).split("T")[0]);
-    }
-
-    const montoPreparado = Number(preparado.monto || 0);
-    if (montoPreparado > 0) {
-      setMonto(String(montoPreparado));
-    }
-
-    if (preparado.metodo_pago) {
-      setMetodoPago(
-        normalizarMetodoPagoFormulario(preparado.metodo_pago),
-      );
-    }
-
-    if (preparado.referencia) {
-      setReferencia(String(preparado.referencia));
-    }
-  }
-
-  async function buscarPagoMovilPreparadoDesdeBD(
-    idCondominio: string,
-  ): Promise<PagoMovilPreparado | null> {
-    const contexto = obtenerContextoPagoMovilQuery();
-
-    if (
-      contexto.origen !== "propietario" ||
-      !contexto.pagoMovilId ||
-      !idCondominio
-    ) {
-      return null;
-    }
-
-    const { data, error } = await supabase
-      .from("pagos_movil")
-      .select(
-        "id,condominio_id,unidad_id,estado,pago_id,comprobante_url,monto,fecha_pago,referencia,recibido_at,revisado_at",
-      )
-      .eq("id", contexto.pagoMovilId)
-      .eq("condominio_id", Number(idCondominio))
-      .maybeSingle();
-
-    if (error) {
-      console.error(
-        "[Pagos Mantenimiento] Error recuperando comprobante móvil:",
-        error.message,
-      );
-      return null;
-    }
-
-    if (!data) return null;
-
-    const preparado: PagoMovilPreparado = {
-      version: 3,
-      origen: "propietario",
-      preparado_at: new Date().toISOString(),
-      pago_movil_id: Number((data as any).id),
-      condominio_id: Number((data as any).condominio_id),
-      unidad_id: Number((data as any).unidad_id),
-
-      // pagos_movil no contiene tipo_fondo en el esquema actual.
-      // Este flujo corresponde al pago ordinario de mantenimiento.
-      tipo_fondo: "ORDINARIO",
-
-      fecha_pago: String(
-        (data as any).fecha_pago ||
-          (data as any).recibido_at ||
-          fechaLocalISO(),
-      ).split("T")[0],
-      monto: Number((data as any).monto || 0),
-      referencia: String((data as any).referencia || ""),
-      comprobante_url: (data as any).comprobante_url || null,
-      recibido_at: (data as any).recibido_at || null,
-    };
-
-    if (
-      !preparado.pago_movil_id ||
-      !preparado.condominio_id ||
-      !preparado.unidad_id
-    ) {
-      return null;
-    }
-
-    localStorage.setItem(
-      "vam_pago_movil_preparar",
-      JSON.stringify(preparado),
-    );
-    localStorage.setItem(
-      "vam_pago_movil_preparar_id",
-      String(preparado.pago_movil_id),
-    );
-
-    return preparado;
-  }
-
-  async function cargarPagoMovilPreparadoInicial(idCondominio: string) {
-    const contexto = obtenerContextoPagoMovilQuery();
-
-    if (
-      contexto.origen !== "propietario" ||
-      !contexto.pagoMovilId
-    ) {
-      return;
-    }
-
-    let preparado = obtenerPagoMovilPreparadoActivo();
-
-    if (!preparado) {
-      preparado = await buscarPagoMovilPreparadoDesdeBD(idCondominio);
-    }
-
-    if (!preparado) {
-      setMensaje(
-        `No fue posible recuperar el comprobante móvil #${contexto.pagoMovilId}. Revise que siga disponible en Comprobantes.`,
-      );
-      return;
-    }
-
-    aplicarPagoMovilPreparadoAlFormulario(preparado);
-
-    agregarBitacora(
-      `Comprobante móvil #${preparado.pago_movil_id} preparado para registrar el pago.`,
-    );
-  }
-
-  async function abrirComprobanteMovilOriginal() {
-    const almacenado = String(comprobanteMovilOriginal || "").trim();
-
-    if (!almacenado) {
-      alert("Este pago móvil no tiene comprobante asociado.");
-      return;
-    }
-
-    setAbriendoComprobanteMovil(true);
-
-    try {
-      if (/^https?:\/\//i.test(almacenado)) {
-        window.open(almacenado, "_blank", "noopener,noreferrer");
-        return;
-      }
-
-      const ruta = almacenado
-        .replace(/^\/+/, "")
-        .replace(/^comprobantes-pagos-propietarios\//, "");
-
-      const { data, error } = await supabase.storage
-        .from("comprobantes-pagos-propietarios")
-        .createSignedUrl(ruta, 600);
-
-      if (error || !data?.signedUrl) {
-        throw new Error(
-          error?.message ||
-            "No fue posible generar el acceso temporal al comprobante.",
-        );
-      }
-
-      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-    } catch (error: any) {
-      console.error(
-        "[Pagos Mantenimiento] Error abriendo comprobante móvil:",
-        error?.message || error,
-      );
-
-      alert(
-        "No fue posible abrir el comprobante del propietario: " +
-          (error?.message || "Error desconocido."),
-      );
-    } finally {
-      setAbriendoComprobanteMovil(false);
-    }
-  }
 
   async function cargarConfiguracionCargos(id: string) {
     const { data, error } = await supabase
@@ -1089,7 +848,6 @@ export default function PagosMantenimientoPage() {
     setMetodoPago("");
     setReferencia("");
     setComprobante(null);
-    setComprobanteMovilOriginal("");
     setTransaccionHistoricaId("");
     setDescripcionHistorica("");
     setObservacionHistorica("");
@@ -1104,7 +862,6 @@ export default function PagosMantenimientoPage() {
 
     if (tipo === "ACTIVO" && unidadSeleccionada && condominioId) {
       cargarSituacionPagoUnidad(condominioId, unidadSeleccionada.id);
-      void cargarPagoMovilPreparadoInicial(condominioId);
     }
 
     const inputFile = document.getElementById(
@@ -1437,16 +1194,7 @@ export default function PagosMantenimientoPage() {
       return;
     }
 
-    let pagoMovilPreparado = obtenerPagoMovilPreparadoActivo();
-
-    if (!pagoMovilPreparado) {
-      pagoMovilPreparado =
-        await buscarPagoMovilPreparadoDesdeBD(condominioId);
-
-      if (pagoMovilPreparado) {
-        aplicarPagoMovilPreparadoAlFormulario(pagoMovilPreparado);
-      }
-    }
+    const pagoMovilPreparado = obtenerPagoMovilPreparadoActivo();
 
     if (
       pagoMovilPreparado &&
@@ -2078,7 +1826,6 @@ export default function PagosMantenimientoPage() {
       setMetodoPago("");
       setReferencia("");
       setComprobante(null);
-      setComprobanteMovilOriginal("");
 
       const inputFile = document.getElementById(
         "comprobante",
@@ -2449,35 +2196,6 @@ export default function PagosMantenimientoPage() {
                   saldo a favor para períodos futuros.
                 </div>
               )}
-            </div>
-          )}
-
-          {comprobanteMovilOriginal && (
-            <div className="rounded-2xl border border-violet-200 bg-white p-4 shadow-sm">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-xs font-black uppercase tracking-wide text-violet-700">
-                    Comprobante enviado por el propietario
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-slate-800">
-                    El comprobante original está vinculado a este pago móvil.
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Se conservará y se asociará al pago definitivo al registrar.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => void abrirComprobanteMovilOriginal()}
-                  disabled={abriendoComprobanteMovil}
-                  className="inline-flex items-center justify-center rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-black text-white hover:bg-violet-800 disabled:opacity-50"
-                >
-                  {abriendoComprobanteMovil
-                    ? "Abriendo..."
-                    : "Ver comprobante"}
-                </button>
-              </div>
             </div>
           )}
 

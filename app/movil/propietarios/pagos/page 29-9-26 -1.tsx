@@ -3,13 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
-import {
-  ArrowLeft,
-  Upload,
-  CheckCircle,
-  Clock3,
-  ChevronRight,
-} from "lucide-react";
+import { ArrowLeft, Upload, CheckCircle } from "lucide-react";
 
 type PropietarioActual = {
   propietario_id: number;
@@ -39,7 +33,7 @@ type RespuestaPagosContexto = {
 
 const RPC_PAGOS_CONTEXTO = "vam_propietario_pagos_contexto";
 const API_REGISTRAR_PAGO = "/api/propietarios/pagos/registrar";
-const MODULO_VERSION = "2.1";
+const MODULO_VERSION = "2.0";
 
 function normalizarRespuesta<T>(data: unknown): T {
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -88,8 +82,6 @@ export default function PagosPropietariosPage() {
   const [loading, setLoading] = useState(false);
   const [mensaje, setMensaje] = useState("");
   const [exito, setExito] = useState(false);
-  const [ultimoPagoEnviadoId, setUltimoPagoEnviadoId] =
-    useState<number | null>(null);
 
   useEffect(() => {
     void inicializar();
@@ -167,14 +159,6 @@ export default function PagosPropietariosPage() {
 
       setPropietario(prop);
       setFechaPago(fechaLocalHoy());
-
-      const ultimoPagoGuardado = Number(
-        localStorage.getItem("ultimo_pago_movil_id") || 0
-      );
-
-      setUltimoPagoEnviadoId(
-        ultimoPagoGuardado > 0 ? ultimoPagoGuardado : null
-      );
 
       await cargarContextoPagos(prop, token);
     } catch (error) {
@@ -391,20 +375,10 @@ export default function PagosPropietariosPage() {
         );
       }
 
-      const pagoMovilId = Number(resultado?.pago_id || 0);
-
-      if (pagoMovilId > 0) {
-        localStorage.setItem(
-          "ultimo_pago_movil_id",
-          String(pagoMovilId)
-        );
-        setUltimoPagoEnviadoId(pagoMovilId);
-      }
-
       setExito(true);
       setMensaje(
         resultado?.mensaje ||
-          "Comprobante enviado correctamente. Puede dar seguimiento hasta que VAM lo reciba y aplique el pago a su cuenta."
+          "Pago enviado correctamente. Quedará pendiente de validación."
       );
 
       setConcepto("Pago de mantenimiento");
@@ -452,27 +426,6 @@ export default function PagosPropietariosPage() {
         </p>
       </header>
 
-      <button
-        type="button"
-        onClick={() =>
-          router.push("/movil/propietarios/pagos/seguimiento")
-        }
-        className="w-full rounded-3xl border border-blue-200 bg-blue-50 p-4 text-left shadow-sm transition hover:bg-blue-100"
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-black text-blue-900">
-              Mis pagos enviados
-            </p>
-            <p className="mt-1 text-xs leading-5 text-blue-700">
-              Consulte si su comprobante fue enviado, recibido por VAM o aplicado a su cuenta.
-            </p>
-          </div>
-
-          <ChevronRight className="h-5 w-5 shrink-0 text-blue-700" />
-        </div>
-      </button>
-
       <section className="bg-white rounded-3xl border shadow-sm p-5">
         <p className="text-sm font-bold text-slate-500">Balance pendiente</p>
 
@@ -517,91 +470,6 @@ export default function PagosPropietariosPage() {
           {exito && <CheckCircle className="inline mr-1" size={16} />}
           {mensaje}
         </div>
-      )}
-
-      {exito && ultimoPagoEnviadoId && (
-        <section className="rounded-3xl border border-emerald-200 bg-white p-5 shadow-sm">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-              <CheckCircle size={22} />
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-black text-slate-900">
-                Seguimiento de mi pago
-              </p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">
-                VAM recibió correctamente el envío digital. Ahora puede consultar el avance del comprobante.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-5 space-y-0">
-            <div className="flex gap-3">
-              <div className="flex flex-col items-center">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-emerald-600 bg-emerald-600 text-white">
-                  <CheckCircle size={17} />
-                </div>
-                <div className="h-10 w-0.5 bg-slate-200" />
-              </div>
-
-              <div className="pb-4 pt-1">
-                <div className="text-sm font-black text-slate-900">
-                  Comprobante enviado
-                </div>
-                <div className="mt-1 text-xs text-emerald-700">
-                  Enviado correctamente
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <div className="flex flex-col items-center">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-slate-300 bg-white text-slate-400">
-                  <Clock3 size={16} />
-                </div>
-                <div className="h-10 w-0.5 bg-slate-200" />
-              </div>
-
-              <div className="pb-4 pt-1">
-                <div className="text-sm font-black text-slate-900">
-                  Recibido por VAM
-                </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  Pendiente de confirmación
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <div className="flex flex-col items-center">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-slate-300 bg-white text-slate-400">
-                  <Clock3 size={16} />
-                </div>
-              </div>
-
-              <div className="pt-1">
-                <div className="text-sm font-black text-slate-900">
-                  Pago aplicado a su cuenta
-                </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  Pendiente de aplicación
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() =>
-              router.push("/movil/propietarios/pagos/seguimiento")
-            }
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-700 py-3.5 font-black text-white hover:bg-blue-800"
-          >
-            Ver seguimiento de mi pago
-            <ChevronRight size={18} />
-          </button>
-        </section>
       )}
 
       <section className="bg-white rounded-3xl border shadow-sm p-5 space-y-4">

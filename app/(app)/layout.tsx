@@ -101,6 +101,11 @@ const submenuResidencial: MenuItem[] = [
 const submenuFinanciero: MenuItem[] = [
   { href: "/finanzas", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pagos-mantenimiento", label: "Mantenimiento", icon: WalletCards },
+  {
+    href: "/finanzas/comprobantes-propietarios",
+    label: "Comprobantes",
+    icon: FileText,
+  },
   { href: "/gastos", label: "Gastos", icon: FileText },
   { href: "/finanzas/caja-chica", label: "Caja Chica", icon: WalletCards },
   { href: "/banco", label: "Banco", icon: Building2 },
