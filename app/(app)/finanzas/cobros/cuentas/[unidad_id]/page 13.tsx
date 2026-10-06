@@ -185,19 +185,15 @@ function mostrarTelefonoWhatsApp(valor: string) {
 function reemplazarVariables(
   contenido: string,
   resumen: ResumenUnidad,
-  condominioNombre: string,
-  deudaAlDia: number,
-  periodoInicialAlDia?: string | null,
-  periodoFinalAlDia?: string | null
+  condominioNombre: string
 ) {
   const valores: Record<string, string> = {
     "{{propietario}}": resumen.nombre_propietario || "Propietario(a)",
     "{{unidad}}": resumen.unidad_codigo || "-",
     "{{condominio}}": resumen.condominio_nombre || condominioNombre || "Condominio",
-    // {{balance}} representa la deuda total pendiente al día, no solo la vencida.
-    "{{balance}}": dinero(deudaAlDia),
-    "{{periodo_inicial}}": periodoInicialAlDia || resumen.periodo_inicial || "-",
-    "{{periodo_final}}": periodoFinalAlDia || resumen.periodo_final || "-",
+    "{{balance}}": dinero(resumen.balance_vencido),
+    "{{periodo_inicial}}": resumen.periodo_inicial || "-",
+    "{{periodo_final}}": resumen.periodo_final || "-",
     "{{dias_vencido}}": String(resumen.dias_vencido || 0),
     "{{fecha_vencimiento}}": fechaCorta(resumen.fecha_vencimiento_mas_antigua),
   };
@@ -548,13 +544,6 @@ export default function CuentaCobroDetallePage() {
     [cargos]
   );
 
-  // Deuda al día = todos los cargos abiertos de la unidad, incluyendo el período actual.
-  // La vista vw_cobros_deuda_unidades mantiene el balance vencido, que puede excluir
-  // la cuota corriente mientras todavía está dentro de su fecha regular de pago.
-  const periodoInicialAlDia = cargos[0]?.periodo || resumen?.periodo_inicial || null;
-  const periodoFinalAlDia =
-    cargos[cargos.length - 1]?.periodo || resumen?.periodo_final || null;
-
   const exclusionesActivas = exclusiones.filter((item) => item.activa).length;
 
   const agenteActual = useMemo(
@@ -582,19 +571,9 @@ export default function CuentaCobroDetallePage() {
     return reemplazarVariables(
       plantillaActual.contenido,
       resumen,
-      condominioNombre,
-      totalBalance,
-      periodoInicialAlDia,
-      periodoFinalAlDia
+      condominioNombre
     );
-  }, [
-    resumen,
-    plantillaActual,
-    condominioNombre,
-    totalBalance,
-    periodoInicialAlDia,
-    periodoFinalAlDia,
-  ]);
+  }, [resumen, plantillaActual, condominioNombre]);
 
   const exclusionBloquea = useMemo(() => {
     if (!agenteActual) return exclusiones.some((item) => item.activa && !item.agente_id);
@@ -679,22 +658,6 @@ export default function CuentaCobroDetallePage() {
       ? new Date(programadoPara).toISOString()
       : new Date().toISOString();
 
-    // La tabla cobros_cola_mensajes exige una clave de deduplicación.
-    // Usamos minuto programado + contexto del destinatario para evitar que un
-    // doble clic genere dos mensajes idénticos, sin bloquear recordatorios
-    // programados para otros momentos.
-    const minutoProgramado = fechaProgramada.slice(0, 16);
-    const claveDeduplicacion = [
-      "WA",
-      resumen.condominio_id,
-      resumen.unidad_id,
-      resumen.propietario_id,
-      agenteActual.id,
-      plantillaActual.id,
-      telefonoDestino.replace(/\D/g, ""),
-      minutoProgramado.replace(/[^0-9]/g, ""),
-    ].join(":");
-
     const { error: colaError } = await supabase
       .from("cobros_cola_mensajes")
       .insert({
@@ -707,20 +670,13 @@ export default function CuentaCobroDetallePage() {
         estado: "PENDIENTE",
         programado_para: fechaProgramada,
         contenido: vistaPreviaWhatsApp.trim(),
-        clave_deduplicacion: claveDeduplicacion,
       });
 
     setEncolando(false);
 
     if (colaError) {
-      const esDuplicado =
-        colaError.code === "23505" ||
-        String(colaError.message || "").toLowerCase().includes("duplicate");
-
       setMensajeWhatsApp(
-        esDuplicado
-          ? "Ese mismo mensaje ya fue agregado a la cola para ese número y horario. Revise la cola antes de volver a programarlo."
-          : "No se pudo agregar el mensaje a la cola: " + colaError.message
+        "No se pudo agregar el mensaje a la cola: " + colaError.message
       );
       return;
     }
@@ -826,9 +782,9 @@ export default function CuentaCobroDetallePage() {
         <>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <StatCard
-              title="Deuda al día"
-              value={`RD$ ${dinero(totalBalance)}`}
-              subtitle={`Vencido: RD$ ${dinero(resumen.balance_vencido)}`}
+              title="Balance vencido"
+              value={`RD$ ${dinero(resumen.balance_vencido)}`}
+              subtitle={`${resumen.cantidad_cargos_vencidos || 0} cargo(s)`}
               icon={CircleDollarSign}
               tone="red"
             />
@@ -863,8 +819,8 @@ export default function CuentaCobroDetallePage() {
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
             <section className="xl:col-span-2">
               <SectionCard
-                title="Cargos pendientes"
-                subtitle="Detalle de obligaciones abiertas, incluyendo el período actual."
+                title="Cargos vencidos"
+                subtitle="Detalle de obligaciones pendientes y parciales."
               >
                 {cargos.length === 0 ? (
                   <EmptyState
@@ -1081,8 +1037,8 @@ export default function CuentaCobroDetallePage() {
                           icon={Phone}
                         />
                         <Dato
-                          label="Deuda al día"
-                          value={`RD$ ${dinero(totalBalance)}`}
+                          label="Balance actual"
+                          value={`RD$ ${dinero(resumen.balance_vencido)}`}
                         />
                       </div>
                     )}
@@ -1090,8 +1046,8 @@ export default function CuentaCobroDetallePage() {
                     {telefonosDisponibles.length > 1 && (
                       <div className="mt-2">
                         <Dato
-                          label="Deuda al día"
-                          value={`RD$ ${dinero(totalBalance)}`}
+                          label="Balance actual"
+                          value={`RD$ ${dinero(resumen.balance_vencido)}`}
                         />
                       </div>
                     )}

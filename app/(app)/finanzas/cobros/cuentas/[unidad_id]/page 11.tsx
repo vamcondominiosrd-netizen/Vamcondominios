@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   ArrowLeft,
   Bot,
@@ -12,10 +12,8 @@ import {
   FileText,
   History,
   ListChecks,
-  MessageCircle,
   Phone,
   RefreshCw,
-  Send,
   ShieldOff,
   Users,
   WalletCards,
@@ -74,33 +72,6 @@ type Exclusion = {
   agente_nombre: string | null;
 };
 
-
-
-type AgenteWhatsApp = {
-  id: number;
-  nombre: string;
-  plantilla_id: number | null;
-  activo: boolean;
-  canal: string;
-};
-
-type PlantillaWhatsApp = {
-  id: number;
-  nombre: string;
-  contenido: string;
-  activa: boolean;
-  canal: string;
-};
-
-type PropietarioContacto = {
-  id: number;
-  no_apartamento: string | null;
-  nombre_propietario: string | null;
-  telefono: string | null;
-  correo: string | null;
-  estado: string | null;
-};
-
 type ColaMensaje = {
   id: number;
   canal: string;
@@ -128,86 +99,6 @@ function fechaHora(valor?: string | null) {
   return new Date(valor).toLocaleString("es-DO");
 }
 
-
-function normalizarUnidad(valor?: string | null) {
-  return String(valor || "")
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, "");
-}
-
-function normalizarTelefonoWhatsApp(valor?: string | null) {
-  let digitos = String(valor || "").replace(/\D/g, "");
-
-  if (digitos.startsWith("001") && digitos.length === 13) {
-    digitos = digitos.slice(2);
-  }
-
-  if (digitos.length === 10) return `1${digitos}`;
-  if (digitos.length === 11 && digitos.startsWith("1")) return digitos;
-
-  return "";
-}
-
-function extraerTelefonosWhatsApp(valor?: string | null) {
-  const texto = String(valor || "").trim();
-  if (!texto) return [] as string[];
-
-  const coincidencias =
-    texto.match(
-      /(?:\+?1[\s().-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4}/g
-    ) || [];
-
-  const candidatos =
-    coincidencias.length > 0
-      ? coincidencias
-      : texto.split(/[\/,;|\n]+/g);
-
-  const telefonos = candidatos
-    .map((item) => normalizarTelefonoWhatsApp(item))
-    .filter(Boolean);
-
-  return Array.from(new Set(telefonos));
-}
-
-function mostrarTelefonoWhatsApp(valor: string) {
-  const digitos = String(valor || "").replace(/\D/g, "");
-  const local =
-    digitos.length === 11 && digitos.startsWith("1")
-      ? digitos.slice(1)
-      : digitos;
-
-  if (local.length !== 10) return valor;
-
-  return `+1 (${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`;
-}
-
-function reemplazarVariables(
-  contenido: string,
-  resumen: ResumenUnidad,
-  condominioNombre: string,
-  deudaAlDia: number,
-  periodoInicialAlDia?: string | null,
-  periodoFinalAlDia?: string | null
-) {
-  const valores: Record<string, string> = {
-    "{{propietario}}": resumen.nombre_propietario || "Propietario(a)",
-    "{{unidad}}": resumen.unidad_codigo || "-",
-    "{{condominio}}": resumen.condominio_nombre || condominioNombre || "Condominio",
-    // {{balance}} representa la deuda total pendiente al día, no solo la vencida.
-    "{{balance}}": dinero(deudaAlDia),
-    "{{periodo_inicial}}": periodoInicialAlDia || resumen.periodo_inicial || "-",
-    "{{periodo_final}}": periodoFinalAlDia || resumen.periodo_final || "-",
-    "{{dias_vencido}}": String(resumen.dias_vencido || 0),
-    "{{fecha_vencimiento}}": fechaCorta(resumen.fecha_vencimiento_mas_antigua),
-  };
-
-  return Object.entries(valores).reduce(
-    (texto, [variable, valor]) => texto.split(variable).join(valor),
-    contenido
-  );
-}
-
 function claseEstado(estado?: string | null) {
   const valor = String(estado || "").toUpperCase();
 
@@ -228,9 +119,7 @@ function claseEstado(estado?: string | null) {
 
 export default function CuentaCobroDetallePage() {
   const params = useParams();
-  const searchParams = useSearchParams();
   const unidadId = String(params?.unidad_id || "");
-  const abrirWhatsApp = searchParams.get("whatsapp") === "1";
 
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
@@ -239,14 +128,6 @@ export default function CuentaCobroDetallePage() {
   const [cargos, setCargos] = useState<CargoVencido[]>([]);
   const [exclusiones, setExclusiones] = useState<Exclusion[]>([]);
   const [cola, setCola] = useState<ColaMensaje[]>([]);
-  const [agentesWhatsApp, setAgentesWhatsApp] = useState<AgenteWhatsApp[]>([]);
-  const [plantillasWhatsApp, setPlantillasWhatsApp] = useState<PlantillaWhatsApp[]>([]);
-  const [agenteSeleccionado, setAgenteSeleccionado] = useState("");
-  const [plantillaSeleccionada, setPlantillaSeleccionada] = useState("");
-  const [programadoPara, setProgramadoPara] = useState("");
-  const [telefonoSeleccionado, setTelefonoSeleccionado] = useState("");
-  const [encolando, setEncolando] = useState(false);
-  const [mensajeWhatsApp, setMensajeWhatsApp] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -281,8 +162,6 @@ export default function CuentaCobroDetallePage() {
       cargosResp,
       exclusionesResp,
       colaResp,
-      agentesResp,
-      plantillasResp,
     ] = await Promise.all([
       supabase
         .from("vw_cobros_deuda_unidades")
@@ -342,103 +221,12 @@ export default function CuentaCobroDetallePage() {
         .eq("unidad_id", Number(idUnidad))
         .order("created_at", { ascending: false })
         .limit(10),
-
-      supabase
-        .from("cobros_agentes")
-        .select("id,nombre,plantilla_id,activo,canal")
-        .eq("condominio_id", Number(idCondominio))
-        .eq("canal", "WHATSAPP")
-        .eq("activo", true)
-        .order("prioridad", { ascending: true }),
-
-      supabase
-        .from("cobros_plantillas")
-        .select("id,nombre,contenido,activa,canal")
-        .eq("condominio_id", Number(idCondominio))
-        .eq("canal", "WHATSAPP")
-        .eq("activa", true)
-        .order("es_predeterminada", { ascending: false })
-        .order("nombre", { ascending: true }),
     ]);
 
     if (resumenResp.error) {
       setError("No se pudo cargar el resumen: " + resumenResp.error.message);
-      setResumen(null);
     } else {
-      let resumenFinal = (resumenResp.data || null) as ResumenUnidad | null;
-
-      /*
-       * La vista de deuda puede devolver propietario_id nulo en registros
-       * históricos o cuando la asociación no quedó materializada en la vista.
-       * La cola de cobros exige propietario_id NOT NULL, por eso resolvemos
-       * el propietario real usando condominio + código de unidad.
-       */
-      if (resumenFinal && !resumenFinal.propietario_id) {
-        const { data: propietariosData, error: propietariosError } =
-          await supabase
-            .from("propietarios_apartamentos")
-            .select(
-              "id,no_apartamento,nombre_propietario,telefono,correo,estado"
-            )
-            .eq("condominio_id", Number(idCondominio));
-
-        if (!propietariosError) {
-          const codigoUnidad = normalizarUnidad(resumenFinal.unidad_codigo);
-          const candidatos = ((propietariosData || []) as PropietarioContacto[])
-            .filter(
-              (item) =>
-                normalizarUnidad(item.no_apartamento) === codigoUnidad
-            );
-
-          const nombreResumen = String(
-            resumenFinal.nombre_propietario || ""
-          )
-            .trim()
-            .toLowerCase();
-
-          const porNombre = nombreResumen
-            ? candidatos.find(
-                (item) =>
-                  String(item.nombre_propietario || "")
-                    .trim()
-                    .toLowerCase() === nombreResumen
-              )
-            : null;
-
-          const activo = candidatos.find(
-            (item) =>
-              String(item.estado || "activo")
-                .trim()
-                .toLowerCase() === "activo"
-          );
-
-          const propietarioResuelto = porNombre || activo || candidatos[0];
-
-          if (propietarioResuelto) {
-            resumenFinal = {
-              ...resumenFinal,
-              propietario_id: Number(propietarioResuelto.id),
-              nombre_propietario:
-                resumenFinal.nombre_propietario ||
-                propietarioResuelto.nombre_propietario,
-              telefono:
-                resumenFinal.telefono || propietarioResuelto.telefono,
-              correo: resumenFinal.correo || propietarioResuelto.correo,
-            };
-          }
-        }
-      }
-
-      setResumen(resumenFinal);
-
-      const telefonosDetectados = extraerTelefonosWhatsApp(
-        resumenFinal?.telefono
-      );
-      setTelefonoSeleccionado((actual) =>
-        actual && telefonosDetectados.includes(actual)
-          ? actual
-          : telefonosDetectados[0] || ""
-      );
+      setResumen((resumenResp.data || null) as ResumenUnidad | null);
     }
 
     if (cargosResp.error) {
@@ -493,43 +281,6 @@ export default function CuentaCobroDetallePage() {
       setCola(listaCola);
     }
 
-    const agentes = agentesResp.error
-      ? []
-      : ((agentesResp.data || []) as AgenteWhatsApp[]);
-    const plantillas = plantillasResp.error
-      ? []
-      : ((plantillasResp.data || []) as PlantillaWhatsApp[]);
-
-    setAgentesWhatsApp(agentes);
-    setPlantillasWhatsApp(plantillas);
-
-    setAgenteSeleccionado((actual) => {
-      if (actual && agentes.some((item) => String(item.id) === actual)) return actual;
-      return agentes[0] ? String(agentes[0].id) : "";
-    });
-
-    setPlantillaSeleccionada((actual) => {
-      if (actual && plantillas.some((item) => String(item.id) === actual)) return actual;
-
-      const plantillaAgente = agentes[0]?.plantilla_id
-        ? plantillas.find((item) => item.id === agentes[0].plantilla_id)
-        : null;
-
-      return plantillaAgente
-        ? String(plantillaAgente.id)
-        : plantillas[0]
-          ? String(plantillas[0].id)
-          : "";
-    });
-
-    if (!programadoPara) {
-      const ahora = new Date();
-      const local = new Date(ahora.getTime() - ahora.getTimezoneOffset() * 60000)
-        .toISOString()
-        .slice(0, 16);
-      setProgramadoPara(local);
-    }
-
     setLoading(false);
   }
 
@@ -548,190 +299,7 @@ export default function CuentaCobroDetallePage() {
     [cargos]
   );
 
-  // Deuda al día = todos los cargos abiertos de la unidad, incluyendo el período actual.
-  // La vista vw_cobros_deuda_unidades mantiene el balance vencido, que puede excluir
-  // la cuota corriente mientras todavía está dentro de su fecha regular de pago.
-  const periodoInicialAlDia = cargos[0]?.periodo || resumen?.periodo_inicial || null;
-  const periodoFinalAlDia =
-    cargos[cargos.length - 1]?.periodo || resumen?.periodo_final || null;
-
   const exclusionesActivas = exclusiones.filter((item) => item.activa).length;
-
-  const agenteActual = useMemo(
-    () => agentesWhatsApp.find((item) => String(item.id) === agenteSeleccionado) || null,
-    [agentesWhatsApp, agenteSeleccionado]
-  );
-
-  const plantillaActual = useMemo(
-    () =>
-      plantillasWhatsApp.find((item) => String(item.id) === plantillaSeleccionada) ||
-      null,
-    [plantillasWhatsApp, plantillaSeleccionada]
-  );
-
-  const telefonosDisponibles = useMemo(
-    () => extraerTelefonosWhatsApp(resumen?.telefono),
-    [resumen?.telefono]
-  );
-
-  const telefonoDestino =
-    telefonoSeleccionado || telefonosDisponibles[0] || "";
-
-  const vistaPreviaWhatsApp = useMemo(() => {
-    if (!resumen || !plantillaActual) return "";
-    return reemplazarVariables(
-      plantillaActual.contenido,
-      resumen,
-      condominioNombre,
-      totalBalance,
-      periodoInicialAlDia,
-      periodoFinalAlDia
-    );
-  }, [
-    resumen,
-    plantillaActual,
-    condominioNombre,
-    totalBalance,
-    periodoInicialAlDia,
-    periodoFinalAlDia,
-  ]);
-
-  const exclusionBloquea = useMemo(() => {
-    if (!agenteActual) return exclusiones.some((item) => item.activa && !item.agente_id);
-
-    return exclusiones.some(
-      (item) =>
-        item.activa &&
-        (item.agente_id === null || Number(item.agente_id) === Number(agenteActual.id))
-    );
-  }, [exclusiones, agenteActual]);
-
-  function cambiarAgenteWhatsApp(valor: string) {
-    setAgenteSeleccionado(valor);
-
-    const agente = agentesWhatsApp.find((item) => String(item.id) === valor);
-    if (!agente?.plantilla_id) return;
-
-    const existe = plantillasWhatsApp.some(
-      (item) => Number(item.id) === Number(agente.plantilla_id)
-    );
-
-    if (existe) setPlantillaSeleccionada(String(agente.plantilla_id));
-  }
-
-  async function agregarWhatsAppACola() {
-    setMensajeWhatsApp("");
-
-    if (!resumen) return;
-
-    if (!telefonoDestino) {
-      setMensajeWhatsApp("El propietario no tiene un teléfono válido para WhatsApp.");
-      return;
-    }
-
-    if (!agenteActual) {
-      setMensajeWhatsApp("Debe seleccionar un agente WhatsApp activo.");
-      return;
-    }
-
-    if (!plantillaActual) {
-      setMensajeWhatsApp("Debe seleccionar una plantilla WhatsApp activa.");
-      return;
-    }
-
-    if (!vistaPreviaWhatsApp.trim()) {
-      setMensajeWhatsApp("La plantilla seleccionada no tiene contenido.");
-      return;
-    }
-
-    if (exclusionBloquea) {
-      setMensajeWhatsApp(
-        "Esta unidad tiene una exclusión activa que bloquea el envío con el agente seleccionado."
-      );
-      return;
-    }
-
-    const pendienteExistente = cola.some((item) => {
-      const estado = String(item.estado || "").toUpperCase();
-      return (
-        String(item.canal || "").toUpperCase() === "WHATSAPP" &&
-        !["ENVIADO", "ENTREGADO", "LEIDO", "FALLIDO", "CANCELADO"].includes(estado)
-      );
-    });
-
-    if (pendienteExistente) {
-      const continuar = window.confirm(
-        "Esta unidad ya tiene un mensaje WhatsApp pendiente o en proceso. ¿Desea agregar otro?"
-      );
-      if (!continuar) return;
-    }
-
-    if (!resumen.propietario_id) {
-      setMensajeWhatsApp(
-        "No se pudo identificar el propietario de esta unidad. Revise la asociación del propietario antes de enviar."
-      );
-      return;
-    }
-
-    setEncolando(true);
-
-    const fechaProgramada = programadoPara
-      ? new Date(programadoPara).toISOString()
-      : new Date().toISOString();
-
-    // La tabla cobros_cola_mensajes exige una clave de deduplicación.
-    // Usamos minuto programado + contexto del destinatario para evitar que un
-    // doble clic genere dos mensajes idénticos, sin bloquear recordatorios
-    // programados para otros momentos.
-    const minutoProgramado = fechaProgramada.slice(0, 16);
-    const claveDeduplicacion = [
-      "WA",
-      resumen.condominio_id,
-      resumen.unidad_id,
-      resumen.propietario_id,
-      agenteActual.id,
-      plantillaActual.id,
-      telefonoDestino.replace(/\D/g, ""),
-      minutoProgramado.replace(/[^0-9]/g, ""),
-    ].join(":");
-
-    const { error: colaError } = await supabase
-      .from("cobros_cola_mensajes")
-      .insert({
-        condominio_id: resumen.condominio_id,
-        propietario_id: resumen.propietario_id,
-        unidad_id: resumen.unidad_id,
-        agente_id: agenteActual.id,
-        canal: "WHATSAPP",
-        destino: telefonoDestino,
-        estado: "PENDIENTE",
-        programado_para: fechaProgramada,
-        contenido: vistaPreviaWhatsApp.trim(),
-        clave_deduplicacion: claveDeduplicacion,
-      });
-
-    setEncolando(false);
-
-    if (colaError) {
-      const esDuplicado =
-        colaError.code === "23505" ||
-        String(colaError.message || "").toLowerCase().includes("duplicate");
-
-      setMensajeWhatsApp(
-        esDuplicado
-          ? "Ese mismo mensaje ya fue agregado a la cola para ese número y horario. Revise la cola antes de volver a programarlo."
-          : "No se pudo agregar el mensaje a la cola: " + colaError.message
-      );
-      return;
-    }
-
-    setMensajeWhatsApp(
-      `Mensaje WhatsApp agregado a la cola correctamente para ${mostrarTelefonoWhatsApp(
-        telefonoDestino
-      )}.`
-    );
-    await cargarDetalle(condominioId, unidadId);
-  }
 
   return (
     <PageContainer>
@@ -826,9 +394,9 @@ export default function CuentaCobroDetallePage() {
         <>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <StatCard
-              title="Deuda al día"
-              value={`RD$ ${dinero(totalBalance)}`}
-              subtitle={`Vencido: RD$ ${dinero(resumen.balance_vencido)}`}
+              title="Balance vencido"
+              value={`RD$ ${dinero(resumen.balance_vencido)}`}
+              subtitle={`${resumen.cantidad_cargos_vencidos || 0} cargo(s)`}
               icon={CircleDollarSign}
               tone="red"
             />
@@ -863,8 +431,8 @@ export default function CuentaCobroDetallePage() {
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
             <section className="xl:col-span-2">
               <SectionCard
-                title="Cargos pendientes"
-                subtitle="Detalle de obligaciones abiertas, incluyendo el período actual."
+                title="Cargos vencidos"
+                subtitle="Detalle de obligaciones pendientes y parciales."
               >
                 {cargos.length === 0 ? (
                   <EmptyState
@@ -970,170 +538,6 @@ export default function CuentaCobroDetallePage() {
                     label="Correo"
                     value={resumen.correo || "Sin correo"}
                   />
-                </div>
-              </SectionCard>
-
-
-
-              <SectionCard
-                title="WhatsApp individual"
-                subtitle="Prepare un recordatorio para esta unidad sin ejecutar un envío masivo."
-              >
-                <div
-                  id="whatsapp-individual"
-                  className={`space-y-4 ${abrirWhatsApp ? "ring-2 ring-emerald-300 ring-offset-4 rounded-xl" : ""}`}
-                >
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-                    <div className="flex items-start gap-2">
-                      <MessageCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                      <div>
-                        <p className="font-black">Envío manual individual</p>
-                        <p className="mt-1 text-xs">
-                          Este mensaje se agrega a la cola del robot. El envío real lo
-                          realizará el procesador de WhatsApp cuando esté conectado.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-black uppercase text-slate-500">
-                      Agente WhatsApp
-                    </label>
-                    <select
-                      value={agenteSeleccionado}
-                      onChange={(e) => cambiarAgenteWhatsApp(e.target.value)}
-                      className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
-                    >
-                      <option value="">Seleccione agente</option>
-                      {agentesWhatsApp.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-black uppercase text-slate-500">
-                      Plantilla
-                    </label>
-                    <select
-                      value={plantillaSeleccionada}
-                      onChange={(e) => setPlantillaSeleccionada(e.target.value)}
-                      className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
-                    >
-                      <option value="">Seleccione plantilla</option>
-                      {plantillasWhatsApp.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-black uppercase text-slate-500">
-                      Programar para
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={programadoPara}
-                      onChange={(e) => setProgramadoPara(e.target.value)}
-                      className="w-full rounded-xl border px-4 py-3 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-black uppercase text-slate-500">
-                      Número de WhatsApp
-                    </label>
-
-                    {telefonosDisponibles.length > 1 ? (
-                      <>
-                        <select
-                          value={telefonoDestino}
-                          onChange={(e) =>
-                            setTelefonoSeleccionado(e.target.value)
-                          }
-                          className="w-full rounded-xl border bg-white px-4 py-3 text-sm font-bold text-slate-800"
-                        >
-                          {telefonosDisponibles.map((telefono) => (
-                            <option key={telefono} value={telefono}>
-                              {mostrarTelefonoWhatsApp(telefono)}
-                            </option>
-                          ))}
-                        </select>
-                        <p className="mt-1 text-xs font-semibold text-blue-700">
-                          Se detectaron {telefonosDisponibles.length} números en el
-                          campo de teléfono. Seleccione a cuál desea enviar.
-                        </p>
-                      </>
-                    ) : (
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <Dato
-                          label="Destino WhatsApp"
-                          value={
-                            telefonoDestino
-                              ? mostrarTelefonoWhatsApp(telefonoDestino)
-                              : "Sin teléfono válido"
-                          }
-                          icon={Phone}
-                        />
-                        <Dato
-                          label="Deuda al día"
-                          value={`RD$ ${dinero(totalBalance)}`}
-                        />
-                      </div>
-                    )}
-
-                    {telefonosDisponibles.length > 1 && (
-                      <div className="mt-2">
-                        <Dato
-                          label="Deuda al día"
-                          value={`RD$ ${dinero(totalBalance)}`}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <p className="mb-1 text-xs font-black uppercase text-slate-500">
-                      Vista previa
-                    </p>
-                    <div className="min-h-32 whitespace-pre-wrap rounded-xl border bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">
-                      {vistaPreviaWhatsApp ||
-                        "Seleccione un agente y una plantilla para generar la vista previa."}
-                    </div>
-                  </div>
-
-                  {exclusionBloquea && (
-                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
-                      Existe una exclusión activa para esta unidad o para el agente seleccionado.
-                    </div>
-                  )}
-
-                  {mensajeWhatsApp && (
-                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-800">
-                      {mensajeWhatsApp}
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={agregarWhatsAppACola}
-                    disabled={
-                      encolando ||
-                      !telefonoDestino ||
-                      !agenteActual ||
-                      !plantillaActual ||
-                      exclusionBloquea
-                    }
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                  >
-                    <Send className="h-4 w-4" />
-                    {encolando ? "Agregando..." : "Agregar a cola WhatsApp"}
-                  </button>
                 </div>
               </SectionCard>
 

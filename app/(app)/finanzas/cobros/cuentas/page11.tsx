@@ -11,7 +11,6 @@ import {
   FileText,
   History,
   ListChecks,
-  MessageCircle,
   RefreshCw,
   Search,
   ShieldOff,
@@ -254,21 +253,6 @@ export default function CobrosCuentasPage() {
         </div>
       )}
 
-      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-        <div className="flex items-start gap-3">
-          <div className="rounded-xl bg-white p-2 text-emerald-700 shadow-sm">
-            <MessageCircle className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="font-black text-emerald-900">WhatsApp de Cobros</p>
-            <p className="mt-1 text-sm text-emerald-800">
-              El robot seguirá atendiendo los envíos automáticos. Para un envío
-              manual individual, utilice el botón WhatsApp de la unidad.
-            </p>
-          </div>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <StatCard
           title="Balance vencido"
@@ -440,30 +424,13 @@ export default function CobrosCuentasPage() {
                       </td>
 
                       <td className="px-4 py-4 text-center">
-                        <div className="flex flex-wrap justify-center gap-2">
-                          <Link
-                            href={`/finanzas/cobros/cuentas/${item.unidad_id}`}
-                            className="inline-flex items-center gap-2 rounded-xl bg-blue-100 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-200"
-                          >
-                            <Eye className="h-4 w-4" />
-                            Ver cuenta
-                          </Link>
-
-                          {String(item.telefono || "").trim() ? (
-                            <Link
-                              href={`/finanzas/cobros/cuentas/${item.unidad_id}?whatsapp=1`}
-                              className="inline-flex items-center gap-2 rounded-xl bg-emerald-100 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-200"
-                            >
-                              <MessageCircle className="h-4 w-4" />
-                              WhatsApp
-                            </Link>
-                          ) : (
-                            <span className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-500">
-                              <MessageCircle className="h-4 w-4" />
-                              Sin teléfono
-                            </span>
-                          )}
-                        </div>
+                        <Link
+                          href={`/finanzas/cobros/cuentas/${item.unidad_id}`}
+                          className="inline-flex items-center gap-2 rounded-xl bg-blue-100 px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-200"
+                        >
+                          <Eye className="h-4 w-4" />
+                          Ver cuenta
+                        </Link>
                       </td>
                     </tr>
                   );

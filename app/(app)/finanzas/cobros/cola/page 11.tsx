@@ -12,8 +12,6 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  Send,
-  Loader2,
   ShieldOff,
   Trash2,
   Users,
@@ -127,8 +125,6 @@ export default function CobrosColaPage() {
   const [loading, setLoading] = useState(true);
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
-  const [enviandoId, setEnviandoId] = useState<number | null>(null);
-  const [enviandoPendientes, setEnviandoPendientes] = useState(false);
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
@@ -307,123 +303,6 @@ export default function CobrosColaPage() {
     (item) => item.estado === "ENVIADO"
   ).length;
 
-  async function llamarApiWhatsApp(payload: Record<string, unknown>) {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-
-    if (!token) {
-      throw new Error("La sesión expiró. Inicie sesión nuevamente.");
-    }
-
-    const respuesta = await fetch("/api/whatsapp/enviar", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const resultado = await respuesta.json().catch(() => ({}));
-
-    if (!respuesta.ok || resultado?.ok === false) {
-      throw new Error(
-        resultado?.mensaje ||
-          resultado?.error ||
-          "No se pudo completar el envío por WhatsApp."
-      );
-    }
-
-    return resultado;
-  }
-
-  async function enviarMensajeAhora(item: ColaMensaje) {
-    if (item.canal !== "WHATSAPP") {
-      alert("El envío directo disponible en esta fase es solamente para WhatsApp.");
-      return;
-    }
-
-    if (!["PENDIENTE", "REINTENTO", "FALLIDO"].includes(item.estado)) {
-      alert("Este mensaje no está disponible para envío.");
-      return;
-    }
-
-    const confirmar = confirm(
-      `¿Enviar ahora el WhatsApp de la unidad ${item.unidad_codigo} a ${item.destino}?`
-    );
-
-    if (!confirmar) return;
-
-    setEnviandoId(item.id);
-    setError("");
-    setMensaje("");
-
-    try {
-      const resultado = await llamarApiWhatsApp({
-        cola_id: item.id,
-        condominio_id: Number(condominioId),
-        forzar: true,
-      });
-
-      setMensaje(
-        resultado?.mensaje ||
-          `Mensaje de ${item.unidad_codigo} enviado correctamente por WhatsApp.`
-      );
-      await cargarMensajes(condominioId);
-    } catch (e: any) {
-      setError(e?.message || "No se pudo enviar el mensaje por WhatsApp.");
-      await cargarMensajes(condominioId);
-    } finally {
-      setEnviandoId(null);
-    }
-  }
-
-  async function enviarPendientesWhatsApp() {
-    const disponibles = mensajes.filter(
-      (item) =>
-        item.canal === "WHATSAPP" &&
-        ["PENDIENTE", "REINTENTO"].includes(item.estado) &&
-        (!item.programado_para ||
-          new Date(item.programado_para).getTime() <= Date.now())
-    );
-
-    if (disponibles.length === 0) {
-      alert("No hay mensajes de WhatsApp pendientes y vencidos para enviar ahora.");
-      return;
-    }
-
-    const confirmar = confirm(
-      `¿Desea enviar ahora ${disponibles.length} mensaje(s) de WhatsApp pendiente(s)?`
-    );
-
-    if (!confirmar) return;
-
-    setEnviandoPendientes(true);
-    setError("");
-    setMensaje("");
-
-    try {
-      const resultado = await llamarApiWhatsApp({
-        condominio_id: Number(condominioId),
-        procesar_pendientes: true,
-      });
-
-      const enviados = Number(resultado?.enviados || 0);
-      const fallidos = Number(resultado?.fallidos || 0);
-
-      setMensaje(
-        resultado?.mensaje ||
-          `Proceso completado. Enviados: ${enviados}. Fallidos: ${fallidos}.`
-      );
-      await cargarMensajes(condominioId);
-    } catch (e: any) {
-      setError(e?.message || "No se pudieron procesar los mensajes pendientes.");
-      await cargarMensajes(condominioId);
-    } finally {
-      setEnviandoPendientes(false);
-    }
-  }
-
   async function cancelarMensaje(item: ColaMensaje) {
     if (!["PENDIENTE", "REINTENTO", "FALLIDO"].includes(item.estado)) {
       alert("Solo se pueden cancelar mensajes pendientes, fallidos o en reintento.");
@@ -565,31 +444,15 @@ export default function CobrosColaPage() {
         }.`}
         icon={ListChecks}
         actions={
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={enviarPendientesWhatsApp}
-              disabled={loading || enviandoPendientes}
-              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white hover:bg-emerald-700 disabled:bg-slate-300"
-            >
-              {enviandoPendientes ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
-              Enviar pendientes WhatsApp
-            </button>
-
-            <button
-              type="button"
-              onClick={() => cargarMensajes()}
-              disabled={loading || enviandoPendientes}
-              className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:bg-slate-100"
-            >
-              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-              Actualizar
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => cargarMensajes()}
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:bg-slate-100"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Actualizar
+          </button>
         }
       />
 
@@ -641,7 +504,7 @@ export default function CobrosColaPage() {
 
       <SectionCard
         title="Mensajes en cola"
-        subtitle="Administra la cola y permite enviar mensajes de WhatsApp mediante el proveedor configurado."
+        subtitle="Esta pantalla administra la cola; no realiza el envío directo al proveedor."
       >
         <div className="mb-5 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_210px_210px]">
           <div className="flex items-center rounded-xl border bg-white px-3">
@@ -782,25 +645,6 @@ export default function CobrosColaPage() {
                   </div>
 
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    {item.canal === "WHATSAPP" &&
-                      ["PENDIENTE", "REINTENTO", "FALLIDO"].includes(
-                        item.estado
-                      ) && (
-                        <button
-                          type="button"
-                          onClick={() => enviarMensajeAhora(item)}
-                          disabled={enviandoId === item.id || enviandoPendientes}
-                          className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-700 disabled:bg-slate-300"
-                        >
-                          {enviandoId === item.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Send className="h-4 w-4" />
-                          )}
-                          Enviar ahora
-                        </button>
-                      )}
-
                     {["PENDIENTE", "REINTENTO", "FALLIDO"].includes(
                       item.estado
                     ) && (
@@ -849,11 +693,9 @@ export default function CobrosColaPage() {
         <div className="flex items-start gap-3">
           <CalendarClock className="mt-0.5 h-5 w-5 flex-none" />
           <p>
-            <strong>Importante:</strong> los botones de envío llaman al endpoint
-            seguro <code>/api/whatsapp/enviar</code>. Si el proveedor de Meta
-            todavía no está configurado en Vercel, el sistema conservará el
-            mensaje en la cola y mostrará el error de configuración sin marcarlo
-            como enviado.
+            <strong>Importante:</strong> la cola administra los mensajes
+            preparados por los agentes. El envío real se habilitará cuando se
+            configure el proveedor de WhatsApp, correo o SMS.
           </p>
         </div>
       </div>

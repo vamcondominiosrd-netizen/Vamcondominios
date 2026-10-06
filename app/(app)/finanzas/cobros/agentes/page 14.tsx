@@ -13,8 +13,6 @@ import {
   History,
   ListChecks,
   MailCheck,
-  MessageCircle,
-  ShieldCheck,
   RefreshCw,
   Save,
   Search,
@@ -249,13 +247,6 @@ export default function CobrosAgentesPage() {
   const activos = agentes.filter((item) => item.activo).length;
   const inactivos = agentes.length - activos;
   const conPlantilla = agentes.filter((item) => item.plantilla_id).length;
-  const agentesWhatsApp = agentes.filter((item) => item.canal === "WHATSAPP").length;
-  const whatsappListos = agentes.filter(
-    (item) =>
-      item.canal === "WHATSAPP" &&
-      item.activo &&
-      Boolean(item.plantilla_id)
-  ).length;
 
   function limpiarFormulario() {
     setForm(FORM_INICIAL);
@@ -310,13 +301,6 @@ export default function CobrosAgentesPage() {
 
     if (Number(form.prioridad) < 1 || Number(form.prioridad) > 10) {
       alert("La prioridad debe estar entre 1 y 10.");
-      return false;
-    }
-
-    if (form.canal === "WHATSAPP" && form.activo && !form.plantilla_id) {
-      alert(
-        "Para activar un agente de WhatsApp debe asignarle una plantilla activa."
-      );
       return false;
     }
 
@@ -644,34 +628,6 @@ export default function CobrosAgentesPage() {
         />
       </div>
 
-      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-start gap-3">
-            <div className="rounded-xl bg-white p-2 text-emerald-700 shadow-sm">
-              <MessageCircle className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="font-black text-emerald-900">Robot WhatsApp</p>
-              <p className="mt-1 text-xs text-emerald-800">
-                Los agentes WhatsApp usan las mismas reglas de Cobros Inteligentes.
-                La plantilla, el horario y las condiciones deben estar configurados
-                antes de ponerlos en producción.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2 text-xs font-black">
-            <span className="rounded-lg bg-white px-3 py-2 text-emerald-800">
-              {agentesWhatsApp} agente(s) WhatsApp
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-lg bg-white px-3 py-2 text-emerald-800">
-              <ShieldCheck className="h-4 w-4" />
-              {whatsappListos} activo(s) con plantilla
-            </span>
-          </div>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[420px_1fr]">
         <SectionCard
           title={form.id ? "Editar agente" : "Nuevo agente"}
@@ -749,7 +705,7 @@ export default function CobrosAgentesPage() {
                   }
                   className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
                 >
-                  <option value="WHATSAPP">WhatsApp · Robot</option>
+                  <option value="WHATSAPP">WhatsApp</option>
                   <option value="CORREO">Correo</option>
                   <option value="SMS">SMS</option>
                   <option value="NOTIFICACION">Notificación</option>
@@ -782,12 +738,6 @@ export default function CobrosAgentesPage() {
               {plantillasDelCanal.length === 0 && (
                 <p className="mt-2 text-xs font-semibold text-amber-700">
                   No existen plantillas activas para este canal.
-                </p>
-              )}
-
-              {form.canal === "WHATSAPP" && (
-                <p className="mt-2 text-xs font-semibold text-emerald-700">
-                  La plantilla es obligatoria antes de activar el Robot WhatsApp.
                 </p>
               )}
             </div>
@@ -913,14 +863,11 @@ export default function CobrosAgentesPage() {
                 </div>
                 <div>
                   <p className="font-black text-violet-900">
-                    {form.canal === "WHATSAPP"
-                      ? "Control del Robot WhatsApp"
-                      : "Control de envío por correo"}
+                    Control de envío por correo
                   </p>
                   <p className="mt-1 text-xs text-violet-700">
-                    {form.canal === "WHATSAPP"
-                      ? "Configure primero el agente en modo prueba. La plantilla y las reglas se validarán antes de habilitar envíos automáticos a propietarios."
-                      : "Permite validar el contenido antes de enviarlo a los propietarios y recibir una copia de control."}
+                    Permite validar el contenido antes de enviarlo a los propietarios
+                    y recibir una copia de control.
                   </p>
                 </div>
               </div>
@@ -941,9 +888,7 @@ export default function CobrosAgentesPage() {
                     className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
                   >
                     <option value="PRUEBA">
-                      {form.canal === "WHATSAPP"
-                        ? "Prueba: validar antes de enviar al propietario"
-                        : "Prueba: enviar solamente a la administración"}
+                      Prueba: enviar solamente a la administración
                     </option>
                     <option value="PRODUCCION">
                       Producción: enviar al propietario
@@ -1163,13 +1108,6 @@ export default function CobrosAgentesPage() {
                         <span className="rounded-full bg-blue-100 px-2.5 py-1 text-[11px] font-black text-blue-700">
                           {agente.canal}
                         </span>
-
-                        {agente.canal === "WHATSAPP" && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-black text-emerald-700">
-                            <MessageCircle className="h-3 w-3" />
-                            ROBOT
-                          </span>
-                        )}
                       </div>
 
                       <p className="mt-1 text-sm text-slate-600">

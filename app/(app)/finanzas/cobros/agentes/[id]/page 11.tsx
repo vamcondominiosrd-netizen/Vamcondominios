@@ -13,8 +13,6 @@ import {
   FileText,
   History,
   ListChecks,
-  MessageCircle,
-  ShieldCheck,
   RefreshCw,
   Save,
   ShieldOff,
@@ -45,7 +43,6 @@ type Agente = {
   fecha_inicio: string | null;
   fecha_fin: string | null;
   plantilla_id: number | null;
-  modo_envio?: "PRUEBA" | "PRODUCCION";
 };
 
 type Horario = {
@@ -234,24 +231,6 @@ export default function ConfigurarAgentePage() {
     () => horarios.filter((item) => item.activo).length,
     [horarios]
   );
-
-  const esWhatsApp = agente?.canal === "WHATSAPP";
-
-  const faltantesRobotWhatsApp = useMemo(() => {
-    if (!agente || agente.canal !== "WHATSAPP") return [];
-
-    const faltantes: string[] = [];
-
-    if (!agente.plantilla_id) faltantes.push("plantilla");
-    if (horariosActivos === 0) faltantes.push("horario activo");
-    if (!condicionId || !condicionForm.activo) faltantes.push("condiciones activas");
-    if (!agente.activo) faltantes.push("agente activo");
-
-    return faltantes;
-  }, [agente, horariosActivos, condicionId, condicionForm.activo]);
-
-  const robotWhatsAppListo =
-    esWhatsApp && faltantesRobotWhatsApp.length === 0;
 
   function validarHorario() {
     if (!horarioForm.hora_inicio || !horarioForm.hora_fin) {
@@ -536,7 +515,7 @@ export default function ConfigurarAgentePage() {
         />
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <StatCard
               title="Estado"
               value={agente.activo ? "Activo" : "Inactivo"}
@@ -568,94 +547,7 @@ export default function ConfigurarAgentePage() {
               icon={CalendarClock}
               tone="slate"
             />
-
-            <StatCard
-              title="Robot WhatsApp"
-              value={
-                agente.canal !== "WHATSAPP"
-                  ? "No aplica"
-                  : robotWhatsAppListo
-                  ? "Listo"
-                  : "Pendiente"
-              }
-              subtitle={
-                agente.canal !== "WHATSAPP"
-                  ? "Canal distinto de WhatsApp"
-                  : robotWhatsAppListo
-                  ? "Reglas completas"
-                  : `${faltantesRobotWhatsApp.length} requisito(s) pendiente(s)`
-              }
-              icon={MessageCircle}
-              tone={robotWhatsAppListo ? "green" : "amber"}
-            />
           </div>
-
-          {esWhatsApp && (
-            <SectionCard
-              title="Robot WhatsApp"
-              subtitle="Validación de preparación del agente antes de conectarlo al motor de envío."
-            >
-              <div
-                className={`rounded-2xl border p-4 ${
-                  robotWhatsAppListo
-                    ? "border-emerald-200 bg-emerald-50"
-                    : "border-amber-200 bg-amber-50"
-                }`}
-              >
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={`rounded-xl bg-white p-2 shadow-sm ${
-                        robotWhatsAppListo
-                          ? "text-emerald-700"
-                          : "text-amber-700"
-                      }`}
-                    >
-                      {robotWhatsAppListo ? (
-                        <ShieldCheck className="h-5 w-5" />
-                      ) : (
-                        <MessageCircle className="h-5 w-5" />
-                      )}
-                    </div>
-
-                    <div>
-                      <p
-                        className={`font-black ${
-                          robotWhatsAppListo
-                            ? "text-emerald-900"
-                            : "text-amber-900"
-                        }`}
-                      >
-                        {robotWhatsAppListo
-                          ? "Agente preparado para WhatsApp"
-                          : "Configuración incompleta para WhatsApp"}
-                      </p>
-                      <p
-                        className={`mt-1 text-xs ${
-                          robotWhatsAppListo
-                            ? "text-emerald-800"
-                            : "text-amber-800"
-                        }`}
-                      >
-                        {robotWhatsAppListo
-                          ? "Tiene plantilla, horario, condiciones activas y el agente está habilitado."
-                          : `Pendiente: ${faltantesRobotWhatsApp.join(", ")}.`}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 text-xs font-black">
-                    <span className="rounded-lg bg-white px-3 py-2 text-slate-700">
-                      Plantilla: {agente.plantilla_id ? `#${agente.plantilla_id}` : "Sin asignar"}
-                    </span>
-                    <span className="rounded-lg bg-white px-3 py-2 text-slate-700">
-                      Modo: {agente.modo_envio || "PRUEBA"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </SectionCard>
-          )}
 
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
             <SectionCard

@@ -679,22 +679,6 @@ export default function CuentaCobroDetallePage() {
       ? new Date(programadoPara).toISOString()
       : new Date().toISOString();
 
-    // La tabla cobros_cola_mensajes exige una clave de deduplicación.
-    // Usamos minuto programado + contexto del destinatario para evitar que un
-    // doble clic genere dos mensajes idénticos, sin bloquear recordatorios
-    // programados para otros momentos.
-    const minutoProgramado = fechaProgramada.slice(0, 16);
-    const claveDeduplicacion = [
-      "WA",
-      resumen.condominio_id,
-      resumen.unidad_id,
-      resumen.propietario_id,
-      agenteActual.id,
-      plantillaActual.id,
-      telefonoDestino.replace(/\D/g, ""),
-      minutoProgramado.replace(/[^0-9]/g, ""),
-    ].join(":");
-
     const { error: colaError } = await supabase
       .from("cobros_cola_mensajes")
       .insert({
@@ -707,20 +691,13 @@ export default function CuentaCobroDetallePage() {
         estado: "PENDIENTE",
         programado_para: fechaProgramada,
         contenido: vistaPreviaWhatsApp.trim(),
-        clave_deduplicacion: claveDeduplicacion,
       });
 
     setEncolando(false);
 
     if (colaError) {
-      const esDuplicado =
-        colaError.code === "23505" ||
-        String(colaError.message || "").toLowerCase().includes("duplicate");
-
       setMensajeWhatsApp(
-        esDuplicado
-          ? "Ese mismo mensaje ya fue agregado a la cola para ese número y horario. Revise la cola antes de volver a programarlo."
-          : "No se pudo agregar el mensaje a la cola: " + colaError.message
+        "No se pudo agregar el mensaje a la cola: " + colaError.message
       );
       return;
     }
