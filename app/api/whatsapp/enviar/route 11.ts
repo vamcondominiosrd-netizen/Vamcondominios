@@ -178,29 +178,11 @@ async function usuarioAutorizado(
   return Boolean(acceso);
 }
 
-function fechaHoyRD() {
-  const partes = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Santo_Domingo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const valor = (tipo: string) => partes.find((p) => p.type === tipo)?.value || "";
-  return `${valor("year")}-${valor("month")}-${valor("day")}`;
-}
-
-function fechaISO(valor: string | null | undefined) {
-  const fecha = String(valor || "").slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null;
-}
-
 async function contextoMensaje(
   admin: ReturnType<typeof createClient>,
   item: ColaMensaje
 ) {
-  // No confiamos en balance_vencido guardado en la cola: puede tener cero
-  // o haberse vuelto obsoleto por pagos posteriores a la programación.
-  const [unidadResp, propietarioResp, cargosResp] = await Promise.all([
+  const [{ data: unidad }, { data: propietario }] = await Promise.all([
     admin
       .from("unidades")
       .select("codigo, propietario_nombre")
@@ -213,53 +195,19 @@ async function contextoMensaje(
       .eq("id", item.propietario_id)
       .eq("condominio_id", item.condominio_id)
       .maybeSingle(),
-    admin
-      .from("cargos_periodicos")
-      .select("id,periodo,balance,fecha_vencimiento")
-      .eq("condominio_id", item.condominio_id)
-      .eq("unidad_id", item.unidad_id)
-      .gt("balance", 0)
-      .in("estado", ["PENDIENTE", "PARCIAL"])
-      .order("periodo", { ascending: true }),
   ]);
 
-  if (unidadResp.error) throw new Error(`No se pudo consultar la unidad: ${unidadResp.error.message}`);
-  if (propietarioResp.error) throw new Error(`No se pudo consultar el propietario: ${propietarioResp.error.message}`);
-  if (cargosResp.error) throw new Error(`No se pudo consultar la deuda: ${cargosResp.error.message}`);
-  if (!unidadResp.data || !propietarioResp.data) {
-    throw new Error("Unidad o propietario no encontrado. Se canceló el envío para evitar una cobranza incorrecta.");
-  }
-
-  const cargos = cargosResp.data || [];
-  const hoyRD = fechaHoyRD();
-  if (cargos.some((cargo) => !fechaISO(cargo.fecha_vencimiento))) {
-    throw new Error("Hay cargos sin fecha de vencimiento. Revise la deuda antes de enviar WhatsApp.");
-  }
-  const total = cargos.reduce((sum, cargo) => sum + Number(cargo.balance || 0), 0);
-  if (!Number.isFinite(total) || total <= 0) {
-    throw new Error("La unidad no tiene deuda pendiente. Se evitó enviar un recordatorio desactualizado.");
-  }
-
-  const vencidos = cargos.filter((cargo) => (fechaISO(cargo.fecha_vencimiento) || "") < hoyRD);
-  const totalVencido = vencidos.reduce((sum, cargo) => sum + Number(cargo.balance || 0), 0);
-  const primeraFecha = vencidos
-    .map((cargo) => fechaISO(cargo.fecha_vencimiento) || "")
-    .sort()[0];
-  const diasVencido = primeraFecha
-    ? Math.max(0, Math.floor((Date.parse(`${hoyRD}T00:00:00Z`) - Date.parse(`${primeraFecha}T00:00:00Z`)) / 86_400_000))
-    : 0;
-  const periodosVencidos = Array.from(new Set(vencidos.map((cargo) => String(cargo.periodo || "")).filter(Boolean))).sort();
-
   return {
-    propietario: propietarioResp.data.nombre_propietario || unidadResp.data.propietario_nombre || "Propietario(a)",
-    unidad: unidadResp.data.codigo || String(item.unidad_id),
-    // En Meta el texto dice "RD$ {{3}}". Solo enviamos la cifra para no duplicar RD$.
-    balance: dinero(total),
-    balance_vencido: dinero(totalVencido),
-    periodo_inicial: cargos[0]?.periodo || "-",
-    periodo_final: cargos[cargos.length - 1]?.periodo || "-",
-    dias_vencido: String(diasVencido),
-    cantidad_periodos: String(periodosVencidos.length),
+    propietario:
+      propietario?.nombre_propietario ||
+      unidad?.propietario_nombre ||
+      "Propietario(a)",
+    unidad: unidad?.codigo || String(item.unidad_id),
+    balance: `RD$ ${dinero(item.balance_vencido)}`,
+    periodo_inicial: item.periodo_inicial || "-",
+    periodo_final: item.periodo_final || "-",
+    dias_vencido: String(item.dias_vencido || 0),
+    cantidad_periodos: String(item.cantidad_periodos || 0),
   };
 }
 
@@ -272,7 +220,6 @@ function valorVariable(
     propietario: contexto.propietario,
     unidad: contexto.unidad,
     balance: contexto.balance,
-    balance_vencido: contexto.balance_vencido,
     periodo_inicial: contexto.periodo_inicial,
     periodo_final: contexto.periodo_final,
     dias_vencido: contexto.dias_vencido,
@@ -297,9 +244,6 @@ async function enviarAMeta(
   let body: Record<string, unknown>;
 
   if (config.modo === "TEXT") {
-    // Antes de admitir TEXT, exigir que exista deuda real; la modalidad TEXT
-    // solo está permitida dentro de una conversación WhatsApp de 24 horas.
-    await contextoMensaje(admin, item);
     if (!item.contenido.trim()) {
       throw new Error("El mensaje no tiene contenido para enviar.");
     }

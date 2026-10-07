@@ -170,31 +170,6 @@ function extraerTelefonosWhatsApp(valor?: string | null) {
   return Array.from(new Set(telefonos));
 }
 
-function fechaHoyRD() {
-  // Usar la fecha civil de República Dominicana, sin depender de la zona horaria del navegador.
-  const partes = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Santo_Domingo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const valor = (tipo: string) => partes.find((p) => p.type === tipo)?.value || "";
-  return `${valor("year")}-${valor("month")}-${valor("day")}`;
-}
-
-function fechaISO(valor?: string | null) {
-  const texto = String(valor || "").slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(texto) ? texto : null;
-}
-
-function diasEntreFechas(fechaInicial?: string | null, fechaFinal?: string | null) {
-  const inicial = fechaISO(fechaInicial);
-  const final = fechaISO(fechaFinal);
-  if (!inicial || !final) return 0;
-  const milisegundos = Date.parse(`${final}T00:00:00Z`) - Date.parse(`${inicial}T00:00:00Z`);
-  return Math.max(0, Math.floor(milisegundos / 86_400_000));
-}
-
 function mostrarTelefonoWhatsApp(valor: string) {
   const digitos = String(valor || "").replace(/\D/g, "");
   const local =
@@ -262,7 +237,6 @@ export default function CuentaCobroDetallePage() {
 
   const [resumen, setResumen] = useState<ResumenUnidad | null>(null);
   const [cargos, setCargos] = useState<CargoVencido[]>([]);
-  const [cargosConError, setCargosConError] = useState(false);
   const [exclusiones, setExclusiones] = useState<Exclusion[]>([]);
   const [cola, setCola] = useState<ColaMensaje[]>([]);
   const [agentesWhatsApp, setAgentesWhatsApp] = useState<AgenteWhatsApp[]>([]);
@@ -469,10 +443,8 @@ export default function CuentaCobroDetallePage() {
 
     if (cargosResp.error) {
       setError("No se pudieron cargar los cargos: " + cargosResp.error.message);
-      setCargosConError(true);
       setCargos([]);
     } else {
-      setCargosConError(false);
       setCargos((cargosResp.data || []) as CargoVencido[]);
     }
 
@@ -576,29 +548,9 @@ export default function CuentaCobroDetallePage() {
     [cargos]
   );
 
-  // Deuda al día = todos los cargos abiertos, incluyendo los aún no vencidos.
-  // Deuda vencida = únicamente cargos cuya fecha de vencimiento ya pasó en RD.
-  // No usar el balance de la vista vw_cobros_deuda_unidades para generar la cola:
-  // podría mostrar cero incluso cuando existen cargos realmente vencidos.
-  const hoyRD = fechaHoyRD();
-  const cargosVencidos = useMemo(
-    () => cargos.filter((cargo) => {
-      const fecha = fechaISO(cargo.fecha_vencimiento);
-      return Boolean(fecha && fecha < hoyRD);
-    }),
-    [cargos, hoyRD]
-  );
-  const totalVencido = useMemo(
-    () => cargosVencidos.reduce((sum, cargo) => sum + Number(cargo.balance || 0), 0),
-    [cargosVencidos]
-  );
-  const fechasPendientesDeValidar = cargos.some((cargo) => !fechaISO(cargo.fecha_vencimiento));
-  const primerVencimiento =
-    cargosVencidos.map((cargo) => fechaISO(cargo.fecha_vencimiento) || "").sort()[0] || null;
-  const diasVencidoCalculados = diasEntreFechas(primerVencimiento, hoyRD);
-  const periodosVencidos = Array.from(
-    new Set(cargosVencidos.map((cargo) => cargo.periodo).filter((p): p is string => Boolean(p)))
-  ).sort();
+  // Deuda al día = todos los cargos abiertos de la unidad, incluyendo el período actual.
+  // La vista vw_cobros_deuda_unidades mantiene el balance vencido, que puede excluir
+  // la cuota corriente mientras todavía está dentro de su fecha regular de pago.
   const periodoInicialAlDia = cargos[0]?.periodo || resumen?.periodo_inicial || null;
   const periodoFinalAlDia =
     cargos[cargos.length - 1]?.periodo || resumen?.periodo_final || null;
@@ -671,17 +623,6 @@ export default function CuentaCobroDetallePage() {
     setMensajeWhatsApp("");
 
     if (!resumen) return;
-
-    if (cargosConError || fechasPendientesDeValidar || !Number.isFinite(totalBalance) || totalBalance <= 0) {
-      setMensajeWhatsApp(
-        cargosConError
-          ? "No se pueden consultar los cargos. Actualice la cuenta antes de generar el mensaje."
-          : fechasPendientesDeValidar
-            ? "Existen cargos sin fecha de vencimiento válida. Revise los cargos antes de comunicar la deuda."
-            : "No hay deuda pendiente válida para generar este recordatorio."
-      );
-      return;
-    }
 
     if (!telefonoDestino) {
       setMensajeWhatsApp("El propietario no tiene un teléfono válido para WhatsApp.");
@@ -761,19 +702,11 @@ export default function CuentaCobroDetallePage() {
         propietario_id: resumen.propietario_id,
         unidad_id: resumen.unidad_id,
         agente_id: agenteActual.id,
-        plantilla_id: plantillaActual.id,
         canal: "WHATSAPP",
         destino: telefonoDestino,
         estado: "PENDIENTE",
         programado_para: fechaProgramada,
         contenido: vistaPreviaWhatsApp.trim(),
-        // Este campo es SOLO deuda vencida: nunca almacenar aquí el saldo total.
-        balance_vencido: totalVencido,
-        cantidad_periodos: periodosVencidos.length,
-        periodo_inicial: periodosVencidos[0] || null,
-        periodo_final: periodosVencidos[periodosVencidos.length - 1] || null,
-        fecha_vencimiento_mas_antigua: primerVencimiento,
-        dias_vencido: diasVencidoCalculados,
         clave_deduplicacion: claveDeduplicacion,
       });
 
@@ -895,7 +828,7 @@ export default function CuentaCobroDetallePage() {
             <StatCard
               title="Deuda al día"
               value={`RD$ ${dinero(totalBalance)}`}
-              subtitle={`Vencido: RD$ ${dinero(totalVencido)}`}
+              subtitle={`Vencido: RD$ ${dinero(resumen.balance_vencido)}`}
               icon={CircleDollarSign}
               tone="red"
             />
@@ -918,8 +851,10 @@ export default function CuentaCobroDetallePage() {
 
             <StatCard
               title="Antigüedad"
-              value={`${diasVencidoCalculados} días`}
-              subtitle={`Desde ${fechaCorta(primerVencimiento)}`}
+              value={`${resumen.dias_vencido || 0} días`}
+              subtitle={`Desde ${fechaCorta(
+                resumen.fecha_vencimiento_mas_antigua
+              )}`}
               icon={CalendarClock}
               tone="amber"
             />
@@ -1170,17 +1105,7 @@ export default function CuentaCobroDetallePage() {
                       {vistaPreviaWhatsApp ||
                         "Seleccione un agente y una plantilla para generar la vista previa."}
                     </div>
-                    <p className="mt-2 text-xs text-amber-700">
-                      Esta es la vista previa de VAM. WhatsApp enviará la plantilla aprobada
-                      que esté configurada en Meta/Vercel, que puede tener un texto diferente.
-                    </p>
                   </div>
-
-                  {fechasPendientesDeValidar && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
-                      Hay cargos sin fecha de vencimiento válida. Actualice los cargos antes de preparar la cobranza.
-                    </div>
-                  )}
 
                   {exclusionBloquea && (
                     <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
@@ -1202,10 +1127,7 @@ export default function CuentaCobroDetallePage() {
                       !telefonoDestino ||
                       !agenteActual ||
                       !plantillaActual ||
-                      exclusionBloquea ||
-                      cargosConError ||
-                      fechasPendientesDeValidar ||
-                      totalBalance <= 0
+                      exclusionBloquea
                     }
                     className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
