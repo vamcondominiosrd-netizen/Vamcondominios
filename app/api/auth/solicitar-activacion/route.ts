@@ -46,12 +46,13 @@ function hoyRD() {
   }).format(new Date());
 }
 
-function respuestaGenerica() {
+function respuestaEnlaceEnviado() {
   return NextResponse.json(
     {
       ok: true,
       mensaje:
-        "Si el correo está registrado en VAM, recibirá un enlace seguro para activar o recuperar su acceso.",
+        "Se procesó correctamente la solicitud de acceso.",
+      estado: "ENLACE_ENVIADO",
     },
     {
       status: 200,
@@ -192,7 +193,10 @@ export async function POST(request: Request) {
     );
 
     if (propietarios.length === 0 && directivas.length === 0) {
-      return respuestaGenerica();
+      return NextResponse.json(
+        { ok: true, estado: "NO_REGISTRADO", mensaje: "No existe un acceso activo asociado a este correo." },
+        { status: 200, headers: { "Cache-Control": "no-store, max-age=0", Pragma: "no-cache" } }
+      );
     }
 
     const nombre =
@@ -231,7 +235,7 @@ export async function POST(request: Request) {
         );
       }
 
-      return respuestaGenerica();
+      return respuestaEnlaceEnviado();
     }
 
     const { error: recoveryError } =
@@ -255,7 +259,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return respuestaGenerica();
+    return respuestaEnlaceEnviado();
   } catch (error) {
     console.error("solicitar-activacion: error inesperado", error);
 
