@@ -418,11 +418,7 @@ async function procesarMensaje(
         estado: "ENVIADO",
         intentos: siguienteIntento,
         enviado_at: new Date().toISOString(),
-        meta_message_id: resultadoMeta.meta_message_id,
-        meta_estado: "sent",
         ultimo_error: null,
-        meta_error_codigo: null,
-        meta_error_detalle: null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", item.id)
