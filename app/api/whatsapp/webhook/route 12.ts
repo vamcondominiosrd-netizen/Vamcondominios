@@ -131,26 +131,7 @@ export async function POST(request: NextRequest) {
     rawBody = await request.text();
 
     const firma = request.headers.get("x-hub-signature-256");
-    const appSecretConfigurado = Boolean(process.env.WHATSAPP_APP_SECRET?.trim());
-
-    // Diagnóstico seguro: nunca imprime el App Secret ni el valor de la firma.
-    console.log("WA_WEBHOOK_DIAGNOSTICO", {
-      firma_presente: Boolean(firma),
-      firma_formato_sha256: Boolean(firma?.startsWith("sha256=")),
-      firma_longitud: firma?.length || 0,
-      app_secret_configurado: appSecretConfigurado,
-      body_length: rawBody.length,
-      user_agent: request.headers.get("user-agent") || "",
-    });
-
     if (!verificarFirma(rawBody, firma)) {
-      console.warn("WA_WEBHOOK_FIRMA_RECHAZADA", {
-        firma_presente: Boolean(firma),
-        firma_formato_sha256: Boolean(firma?.startsWith("sha256=")),
-        firma_longitud: firma?.length || 0,
-        app_secret_configurado: appSecretConfigurado,
-      });
-
       return json({ ok: false, mensaje: "Firma de Meta no válida." }, 401);
     }
 
