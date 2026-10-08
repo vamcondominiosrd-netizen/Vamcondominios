@@ -13,6 +13,10 @@ const publicAuthKey =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
+const appUrlConfigurada = String(process.env.VAM_APP_URL || "")
+  .trim()
+  .replace(/\/+$/, "");
+
 type Body = {
   email?: string;
 };
@@ -78,8 +82,7 @@ async function buscarUsuarioAuthPorEmail(
     }
 
     const encontrado = (data.users || []).find(
-      (usuario) =>
-        normalizarCorreo(usuario.email) === email
+      (usuario) => normalizarCorreo(usuario.email) === email
     );
 
     if (encontrado) return encontrado;
@@ -87,6 +90,18 @@ async function buscarUsuarioAuthPorEmail(
   }
 
   return null;
+}
+
+function obtenerAppUrl(request: Request) {
+  if (appUrlConfigurada) return appUrlConfigurada;
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Falta configurar VAM_APP_URL con el dominio oficial de producción."
+    );
+  }
+
+  return new URL(request.url).origin;
 }
 
 export async function POST(request: Request) {
@@ -112,6 +127,9 @@ export async function POST(request: Request) {
       );
     }
 
+    const appUrl = obtenerAppUrl(request);
+    const redirectTo = `${appUrl}/movil/activar-cuenta/confirmar`;
+
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         autoRefreshToken: false,
@@ -136,9 +154,7 @@ export async function POST(request: Request) {
         .limit(25),
       supabaseAdmin
         .from("directiva_condominio")
-        .select(
-          "id, nombre, correo, estado, fecha_inicio, fecha_fin"
-        )
+        .select("id, nombre, correo, estado, fecha_inicio, fecha_fin")
         .ilike("correo", email)
         .limit(25),
     ]);
@@ -175,7 +191,6 @@ export async function POST(request: Request) {
         (!registro.fecha_fin || registro.fecha_fin >= hoy)
     );
 
-    // Respuesta deliberadamente genérica para no revelar si el correo existe.
     if (propietarios.length === 0 && directivas.length === 0) {
       return respuestaGenerica();
     }
@@ -184,11 +199,6 @@ export async function POST(request: Request) {
       directivas[0]?.nombre ||
       propietarios[0]?.nombre_propietario ||
       "Usuario VAM";
-
-    const redirectTo = new URL(
-      "/movil/activar-cuenta/confirmar",
-      request.url
-    ).toString();
 
     const authUser = await buscarUsuarioAuthPorEmail(
       supabaseAdmin,
@@ -224,8 +234,6 @@ export async function POST(request: Request) {
       return respuestaGenerica();
     }
 
-    // Si la cuenta ya existe, el mismo flujo sirve para recuperar/establecer
-    // una nueva contraseña sin revelar públicamente que la cuenta existe.
     const { error: recoveryError } =
       await supabasePublico.auth.resetPasswordForEmail(email, {
         redirectTo,
@@ -255,7 +263,9 @@ export async function POST(request: Request) {
       {
         ok: false,
         error:
-          "No fue posible procesar la activación en este momento.",
+          error instanceof Error
+            ? error.message
+            : "No fue posible procesar la activación en este momento.",
       },
       { status: 500 }
     );
