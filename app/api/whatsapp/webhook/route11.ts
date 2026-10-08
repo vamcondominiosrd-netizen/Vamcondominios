@@ -137,46 +137,9 @@ export async function POST(request: NextRequest) {
 
     const payload = JSON.parse(rawBody || "{}");
 
-    /*
-     * Meta puede entregar dos formas durante nuestras pruebas:
-     *
-     * 1) Webhook real de producción:
-     *    { object, entry: [{ changes: [{ field: "messages", value: {...} }] }] }
-     *
-     * 2) Ejemplo enviado desde "Test" en el dashboard:
-     *    { field: "messages", value: {...} }
-     *
-     * Normalizamos ambas formas para que el mismo procesador maneje pruebas
-     * y eventos reales.
-     */
-    const changesNormalizados: Array<{
-      entryId: string | null;
-      field: string;
-      value: any;
-    }> = [];
-
-    if (payload?.object === "whatsapp_business_account") {
-      for (const entry of payload?.entry || []) {
-        for (const change of entry?.changes || []) {
-          changesNormalizados.push({
-            entryId: entry?.id ? String(entry.id) : null,
-            field: String(change?.field || ""),
-            value: change?.value || {},
-          });
-        }
-      }
-    } else if (payload?.field && payload?.value) {
-      // Forma simplificada usada por el probador de Webhooks de Meta.
-      changesNormalizados.push({
-        entryId: null,
-        field: String(payload.field || ""),
-        value: payload.value || {},
-      });
-    }
-
-    // Meta espera una respuesta rápida 200 incluso si no hay eventos relevantes.
-    if (changesNormalizados.length === 0) {
-      return json({ ok: true, procesados: 0, ignorados: 1 });
+    // Meta espera una respuesta rápida 200 incluso si no hay estados relevantes.
+    if (payload?.object !== "whatsapp_business_account") {
+      return json({ ok: true, procesados: 0 });
     }
 
     const admin = getSupabaseAdmin();
@@ -184,13 +147,14 @@ export async function POST(request: NextRequest) {
     let sinRelacion = 0;
     let errores = 0;
 
-    for (const change of changesNormalizados) {
-      if (change.field !== "messages") continue;
+    for (const entry of payload?.entry || []) {
+      for (const change of entry?.changes || []) {
+        if (change?.field !== "messages") continue;
 
-      const value = change.value || {};
-      const statuses = Array.isArray(value?.statuses) ? value.statuses : [];
+        const value = change?.value || {};
+        const statuses = Array.isArray(value?.statuses) ? value.statuses : [];
 
-      for (const status of statuses) {
+        for (const status of statuses) {
           try {
             const metaMessageId = String(status?.id || "").trim();
             const estadoMeta = String(status?.status || "").trim().toLowerCase();
@@ -225,7 +189,7 @@ export async function POST(request: NextRequest) {
                 error_detalle: errorInfo.detalle,
                 payload: {
                   object: payload?.object || null,
-                  entry_id: change.entryId,
+                  entry_id: entry?.id || null,
                   metadata: value?.metadata || null,
                   status,
                 },
@@ -284,6 +248,7 @@ export async function POST(request: NextRequest) {
             errores += 1;
             console.error("Error procesando status de WhatsApp:", error);
           }
+        }
       }
     }
 
