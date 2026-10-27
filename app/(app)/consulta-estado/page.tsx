@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   BarChart3,
@@ -24,8 +24,8 @@ import DataTable from "@/components/vam/enterprise/DataTable";
 import EmptyState from "@/components/vam/enterprise/EmptyState";
 
 const MODULO_NOMBRE = "Estado de Cuenta de Cargos";
-const MODULO_VERSION = "v1.2.4";
-const MODULO_FECHA = "16/09/2026";
+const MODULO_VERSION = "v1.2.8";
+const MODULO_FECHA = "24/10/2026";
 
 type Unidad = {
   id: number;
@@ -55,6 +55,7 @@ type Cargo = {
   balance: number | null;
   estado: string | null;
   fecha_pago: string | null;
+  tipo_cargo?: string | null;
   fecha_fuente?: "APLICACION" | "IDENTIFICADO" | "PERIODO" | "NO_VINCULADA";
   fechas_multiples?: number;
 };
@@ -70,6 +71,54 @@ type PagoReal = {
   pago_identificado_id: number | null;
   periodo_identificado?: string | null;
 };
+
+type SaldoInicial = {
+  id: number;
+  monto_original: number | null;
+  monto_pagado: number | null;
+  balance: number;
+  estado: string | null;
+  fecha_corte: string | null;
+};
+
+type AplicacionInicial = {
+  id: number;
+  saldo_inicial_id: number;
+  pago_id: number;
+  monto_aplicado: number;
+  fecha_aplicacion: string | null;
+  observacion: string | null;
+};
+
+type AplicacionHistorica = {
+  id: number;
+  pago_id: number;
+  monto_aplicado: number;
+  origen: "CARGO" | "SALDO_INICIAL";
+  concepto: string;
+  periodo: string | null;
+  fecha_aplicacion: string | null;
+};
+
+type AplicacionDetallePago = {
+  id: number;
+  pago_id: number;
+  cargo_periodico_id: number | null;
+  monto_aplicado: number;
+  cargo: {
+    periodo: string | null;
+    concepto: string | null;
+    tipo_cargo: string | null;
+  } | null;
+};
+
+function nombreConceptoPago(cargo: AplicacionDetallePago["cargo"]): string {
+  const tipo = normalizar(cargo?.tipo_cargo);
+  if (tipo === "GAS") return "Consumo de gas";
+  if (tipo === "ORDINARIO" || tipo === "MANTENIMIENTO") return "Mantenimiento";
+  if (tipo === "SALDO_INICIAL") return "Saldo inicial";
+  return cargo?.concepto || "Cargo aplicado";
+}
 
 function dinero(valor: number | null | undefined) {
   return Number(valor || 0).toLocaleString("es-DO", {
@@ -121,6 +170,16 @@ function periodoBonito(periodo: string | null | undefined) {
   return `${meses[indice]} ${anio}`;
 }
 
+// La deuda inicial se identifica únicamente cuando existe un cargo explícito.
+// No se reconstruye a partir de pagos anteriores ni se duplica en los totales.
+function esCargoDeudaInicial(cargo: Pick<Cargo, "concepto">) {
+  const concepto = String(cargo.concepto || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+  return /\b(SALDO\s+INICIAL|DEUDA\s+INICIAL|BALANCE\s+INICIAL|ARRASTRE\s+DE\s+DEUDA)\b/.test(concepto);
+}
+
 function claseEstado(estado: string | null | undefined) {
   const valor = normalizar(estado);
 
@@ -145,6 +204,9 @@ export default function ConsultaEstadoPage() {
     [],
   );
   const [cargos, setCargos] = useState<Cargo[]>([]);
+  const [saldosIniciales, setSaldosIniciales] = useState<SaldoInicial[]>([]);
+  const [modalidadGas, setModalidadGas] = useState(false);
+  const [consultaRealizada, setConsultaRealizada] = useState(false);
 
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
@@ -163,6 +225,9 @@ export default function ConsultaEstadoPage() {
   const [cargandoBase, setCargandoBase] = useState(false);
   const [saldoFavorDisponible, setSaldoFavorDisponible] = useState(0);
   const [pagosReales, setPagosReales] = useState<PagoReal[]>([]);
+  const [aplicacionesDetallePagos, setAplicacionesDetallePagos] = useState<AplicacionDetallePago[]>([]);
+  const [aplicacionesIniciales, setAplicacionesIniciales] = useState<AplicacionInicial[]>([]);
+  const [alertaDetallePagos, setAlertaDetallePagos] = useState("");
   const [alertaFechas, setAlertaFechas] = useState("");
 
   useEffect(() => {
@@ -211,8 +276,13 @@ export default function ConsultaEstadoPage() {
     setCargandoBase(true);
     setUnidadId("");
     setCargos([]);
+    setSaldosIniciales([]);
+    setConsultaRealizada(false);
     setSaldoFavorDisponible(0);
     setPagosReales([]);
+    setAplicacionesDetallePagos([]);
+    setAplicacionesIniciales([]);
+    setAlertaDetallePagos("");
     setAlertaFechas("");
     setMensaje("");
 
@@ -266,26 +336,26 @@ export default function ConsultaEstadoPage() {
     setLoading(true);
     setMensaje("");
     setCargos([]);
+    setSaldosIniciales([]);
+    setConsultaRealizada(false);
     setPagosReales([]);
+    setAplicacionesDetallePagos([]);
+    setAplicacionesIniciales([]);
+    setAlertaDetallePagos("");
     setSaldoFavorDisponible(0);
     setAlertaFechas("");
 
     try {
       const { data, error } = await supabase
         .from("cargos_periodicos")
-        .select("id, periodo, concepto, monto, monto_pagado, balance, estado")
+        .select("id, periodo, concepto, monto, monto_pagado, balance, estado, tipo_cargo")
         .eq("condominio_id", Number(condominioId))
         .eq("unidad_id", Number(unidadConsulta))
         .order("periodo", { ascending: true });
 
       if (error) throw new Error("Error consultando cargos: " + error.message);
       const cargosBase = (data || []) as Omit<Cargo, "fecha_pago">[];
-      if (!cargosBase.length) {
-        setMensaje("No hay cargos registrados para esta unidad.");
-        return;
-      }
-
-      const [pagosResult, aplicacionesResult, creditosResult] = await Promise.all([
+      const [pagosResult, aplicacionesResult, creditosResult, inicialesResult, inicialesAplicacionesResult, gasResult] = await Promise.all([
         supabase
           .from("pagos")
           .select("id, fecha_pago, monto, periodo, referencia, descripcion, origen, pago_identificado_id")
@@ -296,7 +366,7 @@ export default function ConsultaEstadoPage() {
         supabase
           .from("pagos_aplicaciones")
           .select("cargo_periodico_id, pago_id, monto_aplicado, observacion")
-          .in("cargo_periodico_id", cargosBase.map((cargo) => Number(cargo.id))),
+          .in("cargo_periodico_id", cargosBase.length ? cargosBase.map((cargo) => Number(cargo.id)) : [-1]),
         supabase
           .from("creditos_propietarios")
           .select("monto_disponible")
@@ -304,13 +374,83 @@ export default function ConsultaEstadoPage() {
           .eq("unidad_id", Number(unidadConsulta))
           .eq("estado", "DISPONIBLE")
           .gt("monto_disponible", 0),
+        supabase.from("saldos_iniciales_propietarios")
+          .select("id, monto_original, monto_pagado, balance, estado, fecha_corte")
+          .eq("condominio_id", Number(condominioId))
+          .eq("unidad_id", Number(unidadConsulta))
+          .gt("balance", 0),
+        supabase.from("saldos_iniciales_aplicaciones")
+          .select("id, saldo_inicial_id, pago_id, monto_aplicado, fecha_aplicacion, observacion")
+          .eq("condominio_id", Number(condominioId))
+          .eq("unidad_id", Number(unidadConsulta))
+          .order("fecha_aplicacion", { ascending: true })
+          .order("id", { ascending: true }),
+        supabase.from("gas_configuracion").select("modalidad")
+          .eq("condominio_id", Number(condominioId)).maybeSingle(),
       ]);
 
       if (pagosResult.error) throw new Error("Error consultando pagos reales: " + pagosResult.error.message);
       if (aplicacionesResult.error) throw new Error("Error consultando aplicaciones: " + aplicacionesResult.error.message);
       if (creditosResult.error) throw new Error("Error consultando créditos: " + creditosResult.error.message);
+      if (inicialesResult.error) throw new Error("Error consultando saldos iniciales: " + inicialesResult.error.message);
+      if (inicialesAplicacionesResult.error) throw new Error("Error consultando aplicaciones a saldos iniciales: " + inicialesAplicacionesResult.error.message);
+      setAplicacionesIniciales(((inicialesAplicacionesResult.data || []) as any[]).map(fila => ({
+        id: Number(fila.id),
+        saldo_inicial_id: Number(fila.saldo_inicial_id),
+        pago_id: Number(fila.pago_id),
+        monto_aplicado: Number(fila.monto_aplicado || 0),
+        fecha_aplicacion: fila.fecha_aplicacion || null,
+        observacion: fila.observacion || null,
+      })));
+      if (gasResult.error) throw new Error("Error consultando modalidad de gas: " + gasResult.error.message);
+      setSaldosIniciales(((inicialesResult.data || []) as typeof saldosIniciales).filter(item =>
+        ["PENDIENTE", "PARCIAL"].includes(normalizar(item.estado || "PENDIENTE"))
+      ));
+      setModalidadGas(normalizar(gasResult.data?.modalidad) === "CON_MEDIDORES");
+      setConsultaRealizada(true);
 
       const pagosUnidad = (pagosResult.data || []) as PagoReal[];
+
+      // Detalle histórico: se consulta por ID de pago (no solo por cargos vigentes),
+      // para registrar una única vez cada depósito aunque cubra mantenimiento y gas.
+      // No se generan ni modifican aplicaciones; este reporte es 100% lectura.
+      if (pagosUnidad.length > 0) {
+        const idsPagos = pagosUnidad.map((p) => Number(p.id));
+        const { data: detalleData, error: detalleError } = await supabase
+          .from("pagos_aplicaciones")
+          .select(`
+            id, pago_id, cargo_periodico_id, monto_aplicado,
+            cargos_periodicos (periodo, concepto, tipo_cargo)
+          `)
+          .in("pago_id", idsPagos)
+          .order("id", { ascending: true });
+
+        if (detalleError) {
+          setAlertaDetallePagos(
+            "No se pudo consultar el desglose de aplicaciones: " + detalleError.message +
+            ". Los importes recibidos se muestran, pero su distribución no está verificada."
+          );
+        } else {
+          const registros: AplicacionDetallePago[] = ((detalleData || []) as any[]).map((fila) => {
+            const vinculo = Array.isArray(fila.cargos_periodicos)
+              ? fila.cargos_periodicos[0] || null
+              : fila.cargos_periodicos || null;
+            return {
+              id: Number(fila.id),
+              pago_id: Number(fila.pago_id),
+              cargo_periodico_id: fila.cargo_periodico_id == null ? null : Number(fila.cargo_periodico_id),
+              monto_aplicado: Number(fila.monto_aplicado || 0),
+              cargo: vinculo ? {
+                periodo: vinculo.periodo || null,
+                concepto: vinculo.concepto || null,
+                tipo_cargo: vinculo.tipo_cargo || null,
+              } : null,
+            };
+          });
+          setAplicacionesDetallePagos(registros);
+        }
+      }
+
       const mapaPagos = new Map(pagosUnidad.map((pago) => [Number(pago.id), pago]));
       const identificadosIds = Array.from(new Set(pagosUnidad
         .map((pago) => Number(pago.pago_identificado_id || 0))
@@ -337,6 +477,11 @@ export default function ConsultaEstadoPage() {
 
       const fechasPorCargo = new Map<number, Array<{ fecha: string; origen: Cargo["fecha_fuente"] }>>();
       const pagosConAplicacion = new Set<number>();
+      const pagosAplicadosAlSaldoInicial = new Set<number>(
+        ((inicialesAplicacionesResult.data || []) as any[])
+          .map(fila => Number(fila.pago_id || 0))
+          .filter(id => id > 0)
+      );
       for (const aplicacion of (aplicacionesResult.data || []) as any[]) {
         const cargoId = Number(aplicacion.cargo_periodico_id || 0);
         const pagoId = Number(aplicacion.pago_id || 0);
@@ -360,7 +505,10 @@ export default function ConsultaEstadoPage() {
         cargoPorPeriodo.set(clave, [...(cargoPorPeriodo.get(clave) || []), cargo.id]);
       }
       for (const pagoReal of pagosUnidad) {
-        if (pagosConAplicacion.has(Number(pagoReal.id))) continue;
+        // Nunca atribuir a septiembre u otro cargo un depósito que se vinculó
+        // formalmente a la deuda inicial, aunque la descripción diga "mantenimiento".
+        if (pagosConAplicacion.has(Number(pagoReal.id)) ||
+            pagosAplicadosAlSaldoInicial.has(Number(pagoReal.id))) continue;
         const identificacion = identificados.get(Number(pagoReal.pago_identificado_id || 0));
         const periodo = String(pagoReal.periodo || identificacion?.periodo || "").trim();
         const periodos = periodo.split(",").map((item) => item.trim()).filter(Boolean);
@@ -389,7 +537,8 @@ export default function ConsultaEstadoPage() {
           : vinculadas[0]?.origen || "NO_VINCULADA";
         return {
           ...cargo,
-          fecha_pago: fechas.at(-1) || null,
+          // Una fecha de depósito no representa pago de un cargo sin importe aplicado.
+          fecha_pago: Number(cargo.monto_pagado || 0) > 0 ? fechas.at(-1) || null : null,
           fecha_fuente: fechaFuente,
           fechas_multiples: fechas.length,
         };
@@ -420,8 +569,13 @@ export default function ConsultaEstadoPage() {
   function limpiarConsulta() {
     setUnidadId("");
     setCargos([]);
+    setSaldosIniciales([]);
+    setConsultaRealizada(false);
     setSaldoFavorDisponible(0);
     setPagosReales([]);
+    setAplicacionesDetallePagos([]);
+    setAplicacionesIniciales([]);
+    setAlertaDetallePagos("");
     setAlertaFechas("");
     setMensaje("");
     setBusqueda("");
@@ -494,10 +648,81 @@ export default function ConsultaEstadoPage() {
     (sum, pago) => sum + Number(pago.monto || 0), 0,
   );
 
-  const balancePendiente = cargos.reduce(
-    (sum, c) => sum + Number(c.balance || 0),
-    0,
+  // Cada pago se cuenta una sola vez como recibido, aunque se aplique a
+  // mantenimiento, gas y/o deuda inicial. Las aplicaciones se presentan aparte.
+  const pagosConDetalle = useMemo(() => {
+    const indice = new Map<number, AplicacionHistorica[]>();
+    for (const aplicacion of aplicacionesDetallePagos) {
+      const lista = indice.get(aplicacion.pago_id) || [];
+      lista.push({
+        id: aplicacion.id,
+        pago_id: aplicacion.pago_id,
+        monto_aplicado: Number(aplicacion.monto_aplicado || 0),
+        origen: "CARGO",
+        concepto: nombreConceptoPago(aplicacion.cargo),
+        periodo: aplicacion.cargo?.periodo || null,
+        fecha_aplicacion: null,
+      });
+      indice.set(aplicacion.pago_id, lista);
+    }
+    for (const aplicacion of aplicacionesIniciales) {
+      const lista = indice.get(aplicacion.pago_id) || [];
+      const saldo = saldosIniciales.find(s => s.id === aplicacion.saldo_inicial_id);
+      lista.push({
+        id: aplicacion.id,
+        pago_id: aplicacion.pago_id,
+        monto_aplicado: Number(aplicacion.monto_aplicado || 0),
+        origen: "SALDO_INICIAL",
+        concepto: `Deuda inicial (registro #${aplicacion.saldo_inicial_id})`,
+        periodo: saldo?.fecha_corte || null,
+        fecha_aplicacion: aplicacion.fecha_aplicacion,
+      });
+      indice.set(aplicacion.pago_id, lista);
+    }
+    return [...pagosReales]
+      .sort((a, b) =>
+        String(a.fecha_pago || "").localeCompare(String(b.fecha_pago || "")) || a.id - b.id
+      )
+      .map(pago => {
+        const aplicaciones = indice.get(Number(pago.id)) || [];
+        const aplicado = aplicaciones.reduce((sum, app) => sum + app.monto_aplicado, 0);
+        const recibido = Number(pago.monto || 0);
+        return { ...pago, aplicaciones, aplicado, recibido, diferencia: recibido - aplicado };
+      });
+  }, [pagosReales, aplicacionesDetallePagos, aplicacionesIniciales, saldosIniciales]);
+
+  const totalRecibidoHistorico = pagosConDetalle.reduce((suma, pago) => suma + pago.recibido, 0);
+  const totalAplicadoHistorico = pagosConDetalle.reduce((suma, pago) => suma + pago.aplicado, 0);
+  const totalAplicadoInicialDocumentado = aplicacionesIniciales.reduce(
+    (suma, aplicacion) => suma + Number(aplicacion.monto_aplicado || 0), 0
   );
+  const ultimoPagoSaldoInicial = (id: number) => {
+    const lista = aplicacionesIniciales
+      .filter(app => app.saldo_inicial_id === id && app.fecha_aplicacion)
+      .map(app => String(app.fecha_aplicacion).slice(0, 10))
+      .sort();
+    return lista.at(-1) || null;
+  };
+
+  // La fuente oficial del saldo inicial es saldos_iniciales_propietarios,
+  // exactamente igual que en Pagos de Mantenimiento. No convertirlo en depósito.
+  const deudaInicialPendiente = saldosIniciales.reduce((total, saldo) =>
+    total + Math.max(Number(saldo.balance || 0), 0), 0);
+  // Un cargo explícitamente etiquetado como saldo inicial es una posible
+  // representación del mismo saldo: se excluye del consolidado cuando existe
+  // la fuente oficial para evitar contar la misma obligación dos veces.
+  const cargosDeudaInicial = cargos.filter(esCargoDeudaInicial);
+  const cargosSinDuplicar = deudaInicialPendiente > 0
+    ? cargos.filter(cargo => !esCargoDeudaInicial(cargo)) : cargos;
+  const esGas = (cargo: Cargo) => normalizar(cargo.tipo_cargo) === "GAS";
+  const cuotasPendientes = cargosSinDuplicar.filter(cargo =>
+    ["ORDINARIO", "MANTENIMIENTO"].includes(normalizar(cargo.tipo_cargo)) &&
+    normalizar(cargo.estado) !== "PAGADO").reduce((sum,c) => sum + Math.max(Number(c.balance || 0),0),0);
+  const gasPendiente = modalidadGas ? cargosSinDuplicar.filter(cargo => esGas(cargo) && normalizar(cargo.estado) !== "PAGADO")
+    .reduce((sum,c) => sum + Math.max(Number(c.balance || 0),0),0) : 0;
+  const deudaCorrientePendiente = cuotasPendientes + gasPendiente;
+  const otrosCargosPendientes = cargosSinDuplicar.reduce((sum,c) => sum + Math.max(Number(c.balance || 0),0),0) - deudaCorrientePendiente;
+  const balancePendiente = deudaInicialPendiente + deudaCorrientePendiente; // Misma fórmula que Pagos de Mantenimiento
 
   const cantidadCargosPendientes = cargos.filter((cargo) => Number(cargo.balance || 0) > 0).length;
   const periodosConsultados = cargos.length
@@ -556,7 +781,7 @@ export default function ConsultaEstadoPage() {
               <button
                 type="button"
                 onClick={imprimirEstado}
-                disabled={cargos.length === 0}
+                disabled={!consultaRealizada}
                 className="inline-flex items-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 <Printer className="h-4 w-4" />
@@ -633,8 +858,13 @@ export default function ConsultaEstadoPage() {
                 const valor = e.target.value;
                 setUnidadId(valor);
                 setCargos([]);
+                setSaldosIniciales([]);
+                setConsultaRealizada(false);
                 setSaldoFavorDisponible(0);
                 setPagosReales([]);
+                setAplicacionesDetallePagos([]);
+                setAplicacionesIniciales([]);
+                setAlertaDetallePagos("");
                 setAlertaFechas("");
                 setMensaje("");
 
@@ -718,11 +948,11 @@ export default function ConsultaEstadoPage() {
         </SectionCard>
       )}
 
-      {cargos.length > 0 && (
+      {consultaRealizada && (
         <>
           <SectionCard
             title={`Estado de cuenta de cargos del año ${anioConsulta}`}
-            subtitle="Resumen basado en cargos generados, pagos aplicados y saldo a favor disponible."
+            subtitle="Incluye la deuda inicial identificada en los cargos, sin duplicarla en el total pendiente."
           >
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <ResumenBox
@@ -744,6 +974,22 @@ export default function ConsultaEstadoPage() {
               />
             </div>
 
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <h3 className="text-sm font-black uppercase text-amber-900">Deuda inicial del apartamento</h3>
+              <p className="mt-1 text-xs text-amber-900">Fuente: saldos_iniciales_propietarios · {saldosIniciales.length} saldo(s) pendiente(s) o parcial(es).</p>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <InfoLine label="Saldo inicial pendiente" value={`RD$ ${dinero(deudaInicialPendiente)}`} highlight />
+                <InfoLine label="Pagos a deuda inicial (documentados)" value={`RD$ ${dinero(totalAplicadoInicialDocumentado)}`} />
+                <InfoLine label="Mantenimiento pendiente" value={`RD$ ${dinero(cuotasPendientes)}`} />
+                <InfoLine label="Gas pendiente" value={`RD$ ${dinero(gasPendiente)}`} />
+              </div>
+              {cargosDeudaInicial.length > 0 && deudaInicialPendiente > 0 && <p className="mt-2 text-xs text-amber-900">Aviso: existe también un cargo marcado como deuda inicial. Se excluyó del consolidado para evitar duplicación. Verifique su correspondencia contable.</p>}
+              {otrosCargosPendientes > 0 && <p className="mt-2 text-xs font-bold text-slate-700">Otros cargos no incluidos en el total de Pago Mantenimiento: RD$ {dinero(otrosCargosPendientes)}</p>}
+              <div className="mt-3 text-sm font-bold text-slate-800">
+                Saldo inicial: RD$ {dinero(deudaInicialPendiente)} + Cuotas: RD$ {dinero(cuotasPendientes)} + Gas: RD$ {dinero(gasPendiente)} = Total pendiente: RD$ {dinero(balancePendiente)}
+              </div>
+            </div>
+
             <div className="mt-5 overflow-hidden rounded-2xl border border-slate-300">
               <DataTable>
                 <thead className="bg-slate-100 text-slate-700">
@@ -758,11 +1004,24 @@ export default function ConsultaEstadoPage() {
                 </thead>
 
                 <tbody className="divide-y divide-slate-200 bg-white">
+                  {saldosIniciales.map((saldo) => (
+                    <tr key={`saldo-${saldo.id}`} className="bg-amber-50">
+                      <td className="px-4 py-3 font-bold">SALDO INICIAL <div className="text-xs font-normal">Corte: {formatoFecha(saldo.fecha_corte)}</div></td>
+                      <td className="px-4 py-3 text-right">RD$ {dinero(saldo.monto_original)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-emerald-700">RD$ {dinero(saldo.monto_pagado)}</td>
+                      <td className="px-4 py-3 text-center">{ultimoPagoSaldoInicial(saldo.id) ? formatoFecha(ultimoPagoSaldoInicial(saldo.id)) : "Sin vincular"}</td>
+                      <td className="px-4 py-3 text-right font-black text-red-700">RD$ {dinero(saldo.balance)}</td>
+                      <td className="px-4 py-3 text-center">{saldo.estado || "PENDIENTE"}</td>
+                    </tr>
+                  ))}
                   {cargos.map((c) => (
                     <tr key={c.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 align-top">
                         <div className="font-black text-slate-900">
                           {periodoBonito(c.periodo)}
+                          {esCargoDeudaInicial(c) && (
+                            <span className="ml-2 rounded bg-amber-100 px-2 py-1 text-[10px] text-amber-900">DEUDA INICIAL</span>
+                          )}
                         </div>
                         <div className="text-sm text-slate-600">
                           {c.concepto || `Mantenimiento ${c.periodo || ""}`}
@@ -778,11 +1037,12 @@ export default function ConsultaEstadoPage() {
                       </td>
 
                       <td className="px-4 py-3 text-center font-semibold text-slate-700 whitespace-nowrap">
-                        {c.fecha_pago ? formatoFecha(c.fecha_pago) : (
-                          <span className="text-xs font-medium text-amber-700" title="No existe relación verificable entre depósito y cargo; revise el detalle de depósitos.">
-                            Sin vincular
-                          </span>
-                        )}
+                        {Number(c.monto_pagado || 0) > 0 && c.fecha_pago ? formatoFecha(c.fecha_pago) :
+                          Number(c.monto_pagado || 0) > 0 ? (
+                            <span className="text-xs font-medium text-amber-700" title="No existe relación verificable entre depósito y cargo; revise el detalle de depósitos.">
+                              Sin vincular
+                            </span>
+                          ) : "—"}
                         {Number(c.fechas_multiples || 0) > 1 && (
                           <div className="text-[10px] font-normal text-slate-500">Último de {c.fechas_multiples} abonos</div>
                         )}
@@ -814,7 +1074,7 @@ export default function ConsultaEstadoPage() {
                     </td>
                     <td className="px-4 py-3 text-center">-</td>
                     <td className="px-4 py-3 text-right text-red-700">
-                      RD$ {dinero(balancePendiente)}
+                      RD$ {dinero(deudaCorrientePendiente)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {balancePendiente <= 0 ? "Al día" : "Con balance pendiente"}
@@ -856,6 +1116,89 @@ export default function ConsultaEstadoPage() {
               </div>
             </div>
 
+
+            {/* SECCIÓN FINAL: detalle real de cada depósito y sus aplicaciones. */}
+            <div className="mt-5 rounded-xl border border-slate-300 bg-white p-4">
+              <h3 className="mb-1 text-sm font-black uppercase text-slate-900">
+                Detalle de los pagos realizados
+              </h3>
+              <p className="mb-3 text-xs text-slate-600">
+                Historial de pagos registrados para esta unidad. Cada depósito se cuenta una sola vez;
+                se identifican por separado las aplicaciones a deuda inicial, mantenimiento, gas u otros cargos.
+              </p>
+              {alertaDetallePagos && (
+                <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+                  {alertaDetallePagos}
+                </p>
+              )}
+              {pagosConDetalle.length === 0 && (
+                <p className="rounded-lg border bg-slate-50 px-3 py-4 text-sm text-slate-600">
+                  No hay pagos registrados para este apartamento.
+                </p>
+              )}
+              <div className="space-y-3">
+                {pagosConDetalle.map((registro) => (
+                  <div key={`historial-pago-${registro.id}`} className="overflow-hidden rounded-lg border border-slate-200">
+                    <div className="flex flex-wrap items-start justify-between gap-2 bg-slate-100 px-3 py-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="font-black text-slate-900">Pago #{registro.id} · {formatoFecha(registro.fecha_pago)}</div>
+                        <div className="mt-1 break-all text-slate-600">
+                          Referencia: {registro.referencia || "-"} · Origen: {registro.origen || "-"}
+                        </div>
+                        {registro.descripcion && <div className="mt-1 text-slate-600">Descripción original: {registro.descripcion}</div>}
+                        {registro.aplicaciones.some(a => a.origen === "SALDO_INICIAL") && (
+                          <div className="mt-1 font-bold text-blue-800">Destino confirmado: deuda inicial, según aplicación registrada.</div>
+                        )}
+                      </div>
+                      <div className="font-black text-emerald-800">Recibido: RD$ {dinero(registro.recibido)}</div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[500px] text-xs">
+                        <thead className="bg-white text-slate-600">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Concepto aplicado</th>
+                            <th className="px-3 py-2 text-left">Período</th>
+                            <th className="px-3 py-2 text-right">Monto aplicado</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {registro.aplicaciones.map((aplicacion) => (
+                            <tr key={aplicacion.id}>
+                              <td className="px-3 py-2">{aplicacion.concepto}</td>
+                              <td className="px-3 py-2">{aplicacion.origen === "SALDO_INICIAL"
+                                ? `Corte: ${formatoFecha(aplicacion.periodo)}${aplicacion.fecha_aplicacion ? ` · Aplicación: ${formatoFecha(aplicacion.fecha_aplicacion)}` : ""}`
+                                : periodoBonito(aplicacion.periodo)}</td>
+                              <td className="px-3 py-2 text-right font-semibold">RD$ {dinero(aplicacion.monto_aplicado)}</td>
+                            </tr>
+                          ))}
+                          {!registro.aplicaciones.length && (
+                            <tr><td colSpan={3} className="px-3 py-3 italic text-slate-600">
+                              {alertaDetallePagos ? "Desglose no verificado." : "Sin aplicaciones documentadas en cargos ni deuda inicial."}
+                            </td></tr>
+                          )}
+                        </tbody>
+                        <tfoot className="bg-slate-50 font-black text-slate-800">
+                          <tr><td colSpan={2} className="px-3 py-2">TOTAL APLICADO</td><td className="px-3 py-2 text-right">RD$ {dinero(registro.aplicado)}</td></tr>
+                          {Math.abs(registro.diferencia) > 0.009 && !alertaDetallePagos && (
+                            <tr><td colSpan={2} className="px-3 py-2">Diferencia por verificar (recibido − aplicado)</td><td className="px-3 py-2 text-right">RD$ {dinero(registro.diferencia)}</td></tr>
+                          )}
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap justify-between gap-3 rounded-lg bg-slate-100 p-3 text-xs font-black">
+                <span>Total histórico recibido: RD$ {dinero(totalRecibidoHistorico)}</span>
+                <span>Aplicado a deuda inicial: RD$ {dinero(totalAplicadoInicialDocumentado)}</span>
+                <span>Total de aplicaciones vinculadas: RD$ {dinero(totalAplicadoHistorico)}</span>
+              </div>
+              <p className="mt-2 text-[11px] text-slate-500">
+                La diferencia entre dinero recibido y aplicaciones vinculadas no equivale necesariamente
+                a saldo a favor. Ese crédito se presenta aparte según creditos_propietarios.
+              </p>
+            </div>
+
             <div className="mt-4 flex justify-end">
               <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">
                 {MODULO_NOMBRE} · {MODULO_VERSION} · {MODULO_FECHA}
@@ -880,7 +1223,7 @@ export default function ConsultaEstadoPage() {
       </div>
 
       {/* Se monta fuera del diseño administrativo para imprimir sin encabezados superpuestos. */}
-      {impresionMontada && cargos.length > 0 && unidadSeleccionada && createPortal(
+      {impresionMontada && consultaRealizada && unidadSeleccionada && createPortal(
         <article className="vam-print-sheet" aria-label="Estado de cuenta financiero imprimible del propietario">
           <div className="vam-print-heading">
             <p className="vam-print-condo">{condominioNombre || (condominioId ? `Condominio ID ${condominioId}` : "Condominio no seleccionado")}</p>
@@ -904,11 +1247,22 @@ export default function ConsultaEstadoPage() {
             <span>Saldo pendiente: <strong>RD$ {dinero(balancePendiente)}</strong></span>
           </div>
 
+          <h2>DESGLOSE DE SALDOS PENDIENTES</h2>
+          <div className="vam-print-metrics">
+            <div><small>Saldo inicial pendiente</small><strong>RD$ {dinero(deudaInicialPendiente)}</strong></div>
+            <div><small>Pagos aplicados a deuda inicial</small><strong>RD$ {dinero(totalAplicadoInicialDocumentado)}</strong></div>
+            <div><small>Cuotas de mantenimiento pendientes</small><strong>RD$ {dinero(cuotasPendientes)}</strong></div>
+            <div><small>Gas pendiente</small><strong>RD$ {dinero(gasPendiente)}</strong></div>
+            
+            <div><small>TOTAL ADEUDADO</small><strong>RD$ {dinero(balancePendiente)}</strong></div>
+          </div>
+          <p className="vam-print-range">Saldo inicial consultado en saldos_iniciales_propietarios, separado de cargos periódicos.</p>
+
           <h2>RESUMEN FINANCIERO</h2>
           <div className="vam-print-metrics">
             <div><small>Total facturado (cargos consultados)</small><strong>RD$ {dinero(totalFacturado)}</strong></div>
             <div><small>Aplicado a esos cargos</small><strong>RD$ {dinero(totalAplicado)}</strong></div>
-            <div><small>Balance pendiente de cargos</small><strong>RD$ {dinero(balancePendiente)}</strong></div>
+            <div><small>Balance pendiente de cargos periódicos</small><strong>RD$ {dinero(deudaCorrientePendiente)}</strong></div>
             <div><small>Depósitos recibidos en {anioConsulta}</small><strong>RD$ {dinero(totalRecibido)}</strong></div>
             <div><small>Saldo a favor disponible</small><strong>RD$ {dinero(saldoFavorDisponible)}</strong></div>
             <div><small>Cargos con balance pendiente</small><strong>{cantidadCargosPendientes}</strong></div>
@@ -920,14 +1274,25 @@ export default function ConsultaEstadoPage() {
               <th>Período</th><th>Concepto</th><th>Facturado RD$</th><th>Aplicado RD$</th><th>Fecha pago*</th><th>Balance RD$</th><th>Estado</th>
             </tr></thead>
             <tbody>
+              {saldosIniciales.map((saldo) => (
+                <tr key={`saldo-${saldo.id}`}>
+                  <td>{saldo.fecha_corte ? formatoFecha(saldo.fecha_corte) : "Inicial"}</td>
+                  <td>Saldo inicial pendiente (registro #{saldo.id})</td>
+                  <td className="vam-num">{dinero(saldo.monto_original)}</td>
+                  <td className="vam-num">{dinero(saldo.monto_pagado)}</td>
+                  <td className="vam-center">{ultimoPagoSaldoInicial(saldo.id) ? formatoFecha(ultimoPagoSaldoInicial(saldo.id)) : "—"}</td>
+                  <td className="vam-num">{dinero(saldo.balance)}</td>
+                  <td className="vam-center">{saldo.estado || "PENDIENTE"}</td>
+                </tr>
+              ))}
               {cargos.map((cargo) => (
                 <tr key={cargo.id}>
                   <td>{periodoBonito(cargo.periodo)}</td>
-                  <td>{cargo.concepto || "Mantenimiento"}</td>
+                  <td>{esCargoDeudaInicial(cargo) ? "[DEUDA INICIAL] " : ""}{cargo.concepto || "Mantenimiento"}</td>
                   <td className="vam-num">{dinero(cargo.monto)}</td>
                   <td className="vam-num">{dinero(cargo.monto_pagado)}</td>
                   <td className="vam-center">
-                    {cargo.fecha_pago ? formatoFecha(cargo.fecha_pago) : Number(cargo.monto_pagado || 0) > 0 ? "Sin vincular" : "—"}
+                    {Number(cargo.monto_pagado || 0) > 0 && cargo.fecha_pago ? formatoFecha(cargo.fecha_pago) : Number(cargo.monto_pagado || 0) > 0 ? "Sin vincular" : "—"}
                     {Number(cargo.fechas_multiples || 0) > 1 ? ` (último de ${cargo.fechas_multiples})` : ""}
                   </td>
                   <td className="vam-num">{dinero(cargo.balance)}</td>
@@ -938,17 +1303,81 @@ export default function ConsultaEstadoPage() {
             <tfoot><tr>
               <td colSpan={2}>TOTALES DE CARGOS</td><td className="vam-num">{dinero(totalFacturado)}</td>
               <td className="vam-num">{dinero(totalAplicado)}</td><td>—</td>
-              <td className="vam-num">{dinero(balancePendiente)}</td>
+              <td className="vam-num">{dinero(deudaCorrientePendiente)}</td>
               <td className="vam-center">{balancePendiente <= 0 ? "Al día" : "Con deuda"}</td>
             </tr></tfoot>
           </table>
 
           <div className="vam-print-note">
-            <strong>Notas de lectura:</strong> El total facturado, lo aplicado y el balance se obtienen de los cargos consultados; los depósitos recibidos se suman una sola vez por pago y corresponden al año bancario indicado. Por diferencia de períodos, anticipos o registros históricos, el total recibido no necesariamente coincide con el total aplicado.
+            <strong>Notas de lectura:</strong> El total facturado y lo aplicado corresponden a cargos periódicos; el total adeudado incorpora además los saldos iniciales pendientes de su tabla oficial; los depósitos recibidos se suman una sola vez por pago y corresponden al año bancario indicado. Por diferencia de períodos, anticipos o registros históricos, el total recibido no necesariamente coincide con el total aplicado.
             {fechasSinVinculo > 0 ? ` ${fechasSinVinculo} cargo(s) pagado(s) no tienen fecha de depósito vinculada de forma inequívoca: la fecha se indica como «Sin vincular» para evitar atribuir fechas supuestas.` : ""}
             {alertaFechas ? ` Advertencia de consulta: ${alertaFechas}` : ""}
             El saldo a favor se muestra por separado y no equivale a pagar cargos futuros hasta su aplicación.
           </div>
+
+          <h2>DETALLE DE LOS PAGOS REALIZADOS</h2>
+          <p className="vam-print-range">
+            Historial de depósitos y aplicaciones documentadas. Un depósito con varios conceptos
+            se cuenta una sola vez como dinero recibido.
+          </p>
+          {alertaDetallePagos && (
+            <p className="vam-print-alert">{alertaDetallePagos}</p>
+          )}
+          <table className="vam-print-table vam-print-payments">
+            <thead><tr>
+              <th>Fecha</th><th>Pago / referencia</th><th>Concepto / período aplicado</th>
+              <th>Recibido RD$</th><th>Aplicado RD$</th>
+            </tr></thead>
+            <tbody>
+              {pagosConDetalle.map((registro) => (
+                <Fragment key={`pago-print-${registro.id}`}>
+                  <tr className="vam-print-payment-header">
+                    <td>{formatoFecha(registro.fecha_pago)}</td>
+                    <td>#{registro.id}<div className="vam-print-ref">{registro.referencia || "-"}</div></td>
+                    <td>DEPÓSITO RECIBIDO · {registro.origen || "Sin origen"}</td>
+                    <td className="vam-num">{dinero(registro.recibido)}</td>
+                    <td className="vam-num">—</td>
+                  </tr>
+                  {registro.aplicaciones.map((aplicacion) => (
+                    <tr key={`app-${registro.id}-${aplicacion.id}`}>
+                      <td>—</td><td>Aplicación #{aplicacion.id}</td>
+                      <td>{aplicacion.concepto} · {aplicacion.origen === "SALDO_INICIAL" ? `Corte ${formatoFecha(aplicacion.periodo)}` : periodoBonito(aplicacion.periodo)}</td>
+                      <td className="vam-num">—</td>
+                      <td className="vam-num">{dinero(aplicacion.monto_aplicado)}</td>
+                    </tr>
+                  ))}
+                  {!registro.aplicaciones.length && (
+                    <tr key={`sin-app-${registro.id}`}>
+                      <td>—</td><td>—</td><td colSpan={3}>
+                        {alertaDetallePagos ? "Desglose no verificado" : "No hay aplicaciones documentadas a cargos ni deuda inicial"}
+                      </td>
+                    </tr>
+                  )}
+                  {Math.abs(registro.diferencia) > 0.009 && !alertaDetallePagos && (
+                    <tr key={`diferencia-${registro.id}`}>
+                      <td>—</td><td>—</td>
+                      <td>Diferencia por verificar (recibido − aplicado): RD$ {dinero(registro.diferencia)}</td>
+                      <td>—</td><td>—</td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+              {!pagosConDetalle.length && (
+                <tr><td colSpan={5} className="vam-center">No hay pagos registrados.</td></tr>
+              )}
+            </tbody>
+            <tfoot><tr>
+              <td colSpan={3}>TOTALES DE PAGOS REGISTRADOS</td>
+              <td className="vam-num">{dinero(totalRecibidoHistorico)}</td>
+              <td className="vam-num">{dinero(totalAplicadoHistorico)}</td>
+            </tr></tfoot>
+          </table>
+          <p className="vam-print-range">
+            El total aplicado incluye aplicaciones a cargos periódicos y a deuda inicial; el depósito se cuenta una sola vez.
+            La diferencia entre recibido y aplicado no se presume como saldo a favor;
+            el crédito disponible se obtiene de creditos_propietarios.
+          </p>
+
           <div className="vam-print-footer">
             <span>VAM Administradora de Condominios · 829-792-9292</span>
             <span>{MODULO_NOMBRE} · {MODULO_VERSION} · {MODULO_FECHA}</span>
@@ -999,6 +1428,10 @@ export default function ConsultaEstadoPage() {
           .vam-num { text-align: right; white-space: nowrap; }
           .vam-center { text-align: center; white-space: nowrap; }
           .vam-print-note { margin: 9px 0 0; font-size: 7px; color: #475569; }
+          .vam-print-payments { margin-top: 5px; }
+          .vam-print-payment-header { background: #f1f5f9 !important; font-weight: 800; }
+          .vam-print-ref { overflow-wrap: anywhere; font-size: 7px; font-weight: 400; }
+          .vam-print-alert { padding: 5px; background: #fffbeb; color: #92400e; font-size: 8px; }
           .vam-print-footer { margin-top: 12px; padding-top: 6px; border-top: 1px solid #cbd5e1; display: flex; justify-content: space-between; gap: 10px; font-size: 7px; color: #475569; }
         }
       `}</style>

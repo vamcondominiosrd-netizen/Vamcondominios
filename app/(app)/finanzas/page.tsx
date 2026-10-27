@@ -140,6 +140,15 @@ export default function FinanzasPage() {
           color: "text-green-700",
           bg: "bg-green-50",
         },
+        {
+          titulo: "Saldos Iniciales",
+          descripcion:
+            "Registrar, importar, exportar y consultar los saldos de apertura por apartamento.",
+          href: "/finanzas/cuentas-por-cobrar/saldos-iniciales",
+          icono: BarChart3,
+          color: "text-green-700",
+          bg: "bg-green-50",
+        },
       ],
     },
     {
@@ -263,6 +272,11 @@ export default function FinanzasPage() {
             href: "/finanzas/caja-chica",
             label: "Caja chica",
             icon: Coins,
+          },
+          {
+            href: "/finanzas/cuentas-por-cobrar/saldos-iniciales",
+            label: "Saldos iniciales",
+            icon: FileSpreadsheet,
           },
           {
             href: "/reportes",

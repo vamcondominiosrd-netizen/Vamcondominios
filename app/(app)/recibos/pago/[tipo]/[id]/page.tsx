@@ -117,6 +117,24 @@ type CreditoPropietario = {
   created_at: string | null;
 };
 
+type SaldoInicial = {
+  id: number;
+  fecha_corte: string | null;
+  monto_original: number | null;
+  monto_pagado: number | null;
+  balance: number | null;
+  estado: string | null;
+};
+
+type AplicacionSaldoInicial = {
+  id: number;
+  saldo_inicial_id: number;
+  pago_id: number;
+  monto_aplicado: number | null;
+  fecha_aplicacion: string | null;
+  observacion: string | null;
+};
+
 type PagoAnualReal = {
   pago_id: number;
   periodo: string;
@@ -129,8 +147,12 @@ type PagoAnualReal = {
 /*
  * VAM ADMINISTRACIÓN DE CONDOMINIOS
  * Módulo: Recibo de Pago de Mantenimiento
- * Versión: v1.1.7
- * Fecha: 17/09/2026
+ * Versión: v1.1.9 (corrección Don Juan I solamente)
+ * Fecha: 24/10/2026
+ *
+ * Versión v1.1.9: sólo para condominio_id=24 muestra y suma saldo
+ * inicial real, pagos aplicados a apertura, y fecha verificada del pago.
+ * Otros condominios conservan sus cálculos y presentación anteriores.
  *
  * Cambios v1.1.5:
  * - Corrige "Fecha real pago" para que represente la fecha de liquidación
@@ -210,6 +232,10 @@ export default function ReciboPagoPage() {
   const [totalRecibidoAnio, setTotalRecibidoAnio] = useState<number>(0);
   const [cuotaOrdinaria, setCuotaOrdinaria] = useState<number>(0);
   const [fechasPagoPorCargo, setFechasPagoPorCargo] = useState<Record<number, string>>({});
+  // Estas estructuras sólo se consultan para Don Juan I (condominio 24).
+  const [saldosInicialesDJ, setSaldosInicialesDJ] = useState<SaldoInicial[]>([]);
+  const [aplicacionesInicialDJ, setAplicacionesInicialDJ] = useState<AplicacionSaldoInicial[]>([]);
+  const [pagoEsRegistroPrincipal, setPagoEsRegistroPrincipal] = useState(false);
 
   const anioActual = useMemo(() => {
     const fechaPago = pago?.fecha_pago || "";
@@ -312,6 +338,9 @@ export default function ReciboPagoPage() {
     setPagosAnualesReales([]);
     setCuotaOrdinaria(0);
     setFechasPagoPorCargo({});
+    setSaldosInicialesDJ([]);
+    setAplicacionesInicialDJ([]);
+    setPagoEsRegistroPrincipal(false);
 
     if (tipo === "pagos") {
       await cargarReciboDesdeTablaPagos();
@@ -367,6 +396,49 @@ export default function ReciboPagoPage() {
     if (error || !data?.id) return null;
 
     return Number(data.id);
+  }
+
+  async function cargarDeudaInicialDonJuan(
+    idCondominio: number | null,
+    idUnidad: number | null,
+  ) {
+    if (Number(idCondominio) !== 24) return;
+    if (!idUnidad) {
+      setMensaje("No se pudo identificar la unidad del Don Juan I; no se puede validar su saldo inicial.");
+      return;
+    }
+
+    // No se reconstruye el saldo inicial a partir de la descripción del pago.
+    // Se usa la fuente oficial y sus aplicaciones verificables.
+    const [saldos, aplicaciones] = await Promise.all([
+      supabase
+        .from("saldos_iniciales_propietarios")
+        .select("id, fecha_corte, monto_original, monto_pagado, balance, estado")
+        .eq("condominio_id", 24)
+        .eq("unidad_id", Number(idUnidad)),
+      supabase
+        .from("saldos_iniciales_aplicaciones")
+        .select("id, saldo_inicial_id, pago_id, monto_aplicado, fecha_aplicacion, observacion")
+        .eq("condominio_id", 24)
+        .eq("unidad_id", Number(idUnidad))
+        .order("fecha_aplicacion", { ascending: true })
+        .order("id", { ascending: true }),
+    ]);
+
+    if (saldos.error || aplicaciones.error) {
+      // Nunca presentar deuda en cero cuando la lectura de apertura falló.
+      setMensaje("No fue posible validar la deuda inicial del Don Juan I: " +
+        (saldos.error?.message || aplicaciones.error?.message || "Error desconocido") +
+        ". Revise permisos de lectura de Supabase antes de emitir este recibo.");
+      return;
+    }
+    const registros = ((saldos.data || []) as SaldoInicial[]).filter(
+      (item) => String(item.estado || "").trim().toUpperCase() !== "ANULADO"
+    );
+    setSaldosInicialesDJ(registros);
+    const ids = new Set(registros.map((registro) => Number(registro.id)));
+    setAplicacionesInicialDJ(((aplicaciones.data || []) as AplicacionSaldoInicial[])
+      .filter((item) => ids.has(Number(item.saldo_inicial_id))));
   }
 
   async function cargarAplicacionesPago(idPago: number) {
@@ -510,6 +582,7 @@ export default function ReciboPagoPage() {
     };
 
     setPago(pagoNormalizado);
+    setPagoEsRegistroPrincipal(true);
 
     await Promise.all([
       cargarPropietario(
@@ -532,6 +605,7 @@ export default function ReciboPagoPage() {
         pagoTabla.unidad_id,
         String(pagoTabla.fecha_pago || new Date().getFullYear()).slice(0, 4)
       ),
+      cargarDeudaInicialDonJuan(pagoTabla.condominio_id, pagoTabla.unidad_id),
     ]);
 
     setLoading(false);
@@ -601,6 +675,7 @@ export default function ReciboPagoPage() {
         unidadId,
         String(data.fecha_pago || new Date().getFullYear()).slice(0, 4)
       ),
+      cargarDeudaInicialDonJuan(condominioId, unidadId),
     ]);
 
     setLoading(false);
@@ -669,6 +744,7 @@ export default function ReciboPagoPage() {
         unidadId,
         String(data.fecha_pago || new Date().getFullYear()).slice(0, 4)
       ),
+      cargarDeudaInicialDonJuan(condominioId, unidadId),
     ]);
 
     setLoading(false);
@@ -1392,8 +1468,25 @@ export default function ReciboPagoPage() {
    *   - SALDO_INICIAL 2026-01
    *   - MANTENIMIENTO 2026-01
    */
+  const esDonJuanI = Number(pago?.condominio_id) === 24;
+  const deudaInicialOriginal = esDonJuanI
+    ? saldosInicialesDJ.reduce((total, s) => total + Number(s.monto_original || 0), 0) : 0;
+  const deudaInicialPagada = esDonJuanI
+    ? saldosInicialesDJ.reduce((total, s) => total + Number(s.monto_pagado || 0), 0) : 0;
+  const deudaInicialPendiente = esDonJuanI
+    ? saldosInicialesDJ.reduce((total, s) => total + Math.max(Number(s.balance || 0), 0), 0) : 0;
+  const aplicacionesInicialRecibo = esDonJuanI && pagoEsRegistroPrincipal
+    ? aplicacionesInicialDJ.filter((app) => Number(app.pago_id) === Number(pago?.id)) : [];
+  const aplicadoInicialRecibo = aplicacionesInicialRecibo.reduce(
+    (total, app) => total + Number(app.monto_aplicado || 0), 0);
+
   const detalleMensual = useMemo(() => {
     return [...cargos]
+      // La apertura está en otra tabla; no duplicar su representación por cargo.
+      .filter((cargo) => !(esDonJuanI && saldosInicialesDJ.length > 0 && (
+        String(cargo.tipo_cargo || "").toUpperCase() === "SALDO_INICIAL" ||
+        /^(SALDO INICIAL|DEUDA INICIAL|BALANCE INICIAL)/i.test(String(cargo.concepto || "").trim())
+      )))
       .sort((a, b) => {
         const mesA = Number(a.mes || 0);
         const mesB = Number(b.mes || 0);
@@ -1454,14 +1547,16 @@ export default function ReciboPagoPage() {
           totalCargo,
           montoAplicadoCargo,
           pagoAplicado: montoAplicadoCargo,
-          fechaRealPago:
-            fechasPagoPorCargo[Number(cargo.id)] ||
-            (!esSaldoInicial ? fechasPagoPorPeriodo.get(periodoCargo) || null : null),
+          fechaRealPago: esDonJuanI
+            // Para Don Juan I nunca atribuir un depósito inicial a cuotas sin abono.
+            ? (montoAplicadoCargo > 0 ? fechasPagoPorCargo[Number(cargo.id)] || null : null)
+            : (fechasPagoPorCargo[Number(cargo.id)] ||
+              (!esSaldoInicial ? fechasPagoPorPeriodo.get(periodoCargo) || null : null)),
           balance,
           estadoMes,
         };
       });
-  }, [cargos, fechasPagoPorCargo, fechasPagoPorPeriodo]);
+  }, [cargos, fechasPagoPorCargo, fechasPagoPorPeriodo, esDonJuanI, saldosInicialesDJ]);
 
   const totalCargos = detalleMensual.reduce(
     (sum, item) => sum + item.totalCargo,
@@ -1478,22 +1573,26 @@ export default function ReciboPagoPage() {
     0
   );
 
-  const balancePendiente = detalleMensual.reduce(
+  const balancePendienteCargos = detalleMensual.reduce(
     (sum, item) => sum + item.balance,
     0
   );
+  const balancePendiente = balancePendienteCargos + deudaInicialPendiente;
 
-  const estadoGeneral =
-    balancePendiente <= 0 && totalCargos > 0
+  const estadoGeneral = esDonJuanI
+    ? (balancePendiente <= 0 ? "Al día" :
+       (totalAplicadoCargos + deudaInicialPagada > 0 ? "Con balance pendiente" : "Pendiente"))
+    : (balancePendiente <= 0 && totalCargos > 0
       ? "Al día"
       : totalAplicadoCargos > 0
       ? "Con balance pendiente"
-      : "Pendiente";
+      : "Pendiente");
 
-  const totalAplicadoPago = aplicacionesPago.reduce(
+  const totalAplicadoCargosRecibo = aplicacionesPago.reduce(
     (sum, item) => sum + Number(item.monto_aplicado || 0),
     0
   );
+  const totalAplicadoPago = totalAplicadoCargosRecibo + aplicadoInicialRecibo;
 
   const balanceNoAplicadoRecibo = Math.max(
     Number(pago?.monto_pagado || 0) - totalAplicadoPago,
@@ -1583,6 +1682,55 @@ export default function ReciboPagoPage() {
     .map((item) => `${item.mesNombre} ${item.anio}`)
     .join(", ");
 
+  // Modificaciones de presentación aisladas a Don Juan I.
+  // Para todos los demás condominios permanece la salida original del recibo.
+  // No cambia importes, registros de pagos, conciliación ni asignaciones.
+  const tipoDeCargo = (valor?: string | null) =>
+    String(valor || "").trim().toUpperCase();
+  const esCargoGas = (valor?: string | null) => tipoDeCargo(valor) === "GAS";
+  const esCargoMantenimiento = (valor?: string | null) =>
+    ["ORDINARIO", "MANTENIMIENTO"].includes(tipoDeCargo(valor));
+  const incluyeSaldoInicial = esDonJuanI && aplicacionesInicialRecibo.length > 0;
+  const incluyeGas = esDonJuanI && aplicacionesPago.some((app) =>
+    esCargoGas(app.cargos_periodicos?.tipo_cargo)
+  );
+  const incluyeMantenimiento = esDonJuanI && aplicacionesPago.some((app) =>
+    esCargoMantenimiento(app.cargos_periodicos?.tipo_cargo)
+  );
+  const tituloRecibo = !esDonJuanI
+    ? "Recibo de Pago de Mantenimiento"
+    : incluyeSaldoInicial && !incluyeGas && !incluyeMantenimiento
+    ? "Recibo de Pago - Deuda Inicial"
+    : incluyeSaldoInicial
+    ? "Recibo de Pago - Deuda Inicial y Cargos"
+    : incluyeGas && incluyeMantenimiento
+    ? "Recibo de Pago - Mantenimiento y Gas"
+    : incluyeGas
+    ? "Recibo de Pago - Gas"
+    : "Recibo de Pago de Mantenimiento";
+  const descripcionReciboDonJuan =
+    incluyeSaldoInicial && !incluyeGas && !incluyeMantenimiento
+      ? "Abono a deuda inicial"
+      : incluyeSaldoInicial
+      ? "Pago de deuda inicial y cargos"
+      : incluyeGas && incluyeMantenimiento
+      ? "Pago de mantenimiento y gas"
+      : incluyeGas
+      ? "Pago de gas"
+      : "Pago de mantenimiento";
+  const mesPagadoVisible = esDonJuanI && incluyeSaldoInicial &&
+    aplicacionesPago.length === 0
+    ? `Deuda inicial (corte: ${saldosInicialesDJ
+        .find((saldo) => saldo.id === aplicacionesInicialRecibo[0]?.saldo_inicial_id)
+        ?.fecha_corte || "sin fecha"})`
+    : (pago?.mes_pagado || "-");
+
+  const etiquetaConceptoDonJuan = (valor?: string | null) => {
+    if (esCargoGas(valor)) return "Gas";
+    if (esCargoMantenimiento(valor)) return "Mantenimiento";
+    return "";
+  };
+
   const noRecibo = `${
     tipo === "pagos" ? "PG" : tipo === "mantenimiento" ? "RM" : "RP"
   }-${String(pago?.id || "").padStart(5, "0")}`;
@@ -1603,13 +1751,13 @@ export default function ReciboPagoPage() {
 
     return `Estimado/a ${nombrePropietario},
 
-Hemos recibido su pago de mantenimiento.
+Hemos recibido ${esDonJuanI ? `su ${incluyeSaldoInicial && !incluyeGas && !incluyeMantenimiento ? "abono a la deuda inicial" : descripcionReciboDonJuan.toLowerCase()}` : "su pago de mantenimiento"}.
 
 Condominio: ${pago.condominio}
 Apartamento: ${pago.no_apartamento}
 Recibo No.: ${noRecibo}
 Fecha de pago: ${formatoFecha(pago.fecha_pago)}
-Mes pagado: ${pago.mes_pagado || "-"}
+${esDonJuanI ? "Concepto" : "Mes pagado"}: ${mesPagadoVisible}
 Monto recibido: RD$ ${dinero(pago.monto_pagado)}
 Monto aplicado: RD$ ${dinero(totalAplicadoPago)}
 Método/Banco: ${pago.metodo_pago || "-"}
@@ -1929,7 +2077,7 @@ Tel. 829-792-9292`;
             </h1>
 
             <h2 className="text-base font-black uppercase mt-1">
-              Recibo de Pago de Mantenimiento
+              {tituloRecibo}
             </h2>
 
             <p className="text-xs mt-1">
@@ -1979,8 +2127,8 @@ Tel. 829-792-9292`;
               <p className="font-bold">Fecha de pago:</p>
               <p>{formatoFecha(pago.fecha_pago)}</p>
 
-              <p className="font-bold">Mes pagado:</p>
-              <p>{pago.mes_pagado || "-"}</p>
+              <p className="font-bold">{esDonJuanI ? "Concepto / mes pagado:" : "Mes pagado:"}</p>
+              <p>{mesPagadoVisible}</p>
 
               <p className="font-bold">Método / Banco:</p>
               <p>{pago.metodo_pago || "-"}</p>
@@ -2049,6 +2197,25 @@ Tel. 829-792-9292`;
               </thead>
 
               <tbody>
+                {esDonJuanI && aplicacionesInicialRecibo.map((app) => {
+                  const saldo = saldosInicialesDJ.find((s) => Number(s.id) === Number(app.saldo_inicial_id));
+                  return (
+                    <tr key={`inicial-${app.id}`} className="bg-amber-50">
+                      <td className="p-2 border font-bold">
+                        Deuda inicial (corte {formatoFecha(saldo?.fecha_corte)})
+                      </td>
+                      <td className="p-2 border text-center font-bold">
+                        {formatoFecha(app.fecha_aplicacion || pago.fecha_pago)}
+                      </td>
+                      <td className="p-2 border text-right text-green-700 font-black">
+                        RD$ {dinero(app.monto_aplicado)}
+                      </td>
+                      <td className="p-2 border text-center font-bold">
+                        {saldo?.estado || "APLICADO"}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {aplicacionesPago.map((item) => {
                   const cargo = item.cargos_periodicos;
                   const periodo = cargo?.periodo || "-";
@@ -2059,7 +2226,9 @@ Tel. 829-792-9292`;
                   return (
                     <tr key={item.id}>
                       <td className="p-2 border font-bold">
-                        {formatearPeriodo(periodo)}
+                        {esDonJuanI && etiquetaConceptoDonJuan(cargo?.tipo_cargo)
+                          ? `${etiquetaConceptoDonJuan(cargo?.tipo_cargo)} - ${formatearPeriodo(periodo)}`
+                          : formatearPeriodo(periodo)}
                       </td>
                       <td className="p-2 border text-center font-bold text-slate-700 whitespace-nowrap">
                         {fechaDetalle ? formatoFecha(fechaDetalle) : "-"}
@@ -2074,7 +2243,7 @@ Tel. 829-792-9292`;
                   );
                 })}
 
-                {aplicacionesPago.length === 0 && (
+                {aplicacionesPago.length === 0 && aplicacionesInicialRecibo.length === 0 && (
                   <tr>
                     <td className="p-3 border text-center" colSpan={4}>
                       Este pago no tiene aplicaciones registradas en pagos_aplicaciones.
@@ -2083,7 +2252,7 @@ Tel. 829-792-9292`;
                 )}
               </tbody>
 
-              {aplicacionesPago.length > 0 && (
+              {(aplicacionesPago.length > 0 || aplicacionesInicialRecibo.length > 0) && (
                 <tfoot className="bg-slate-100 font-black">
                   <tr>
                     <td className="p-2 border text-right" colSpan={2}>
@@ -2108,7 +2277,16 @@ Tel. 829-792-9292`;
               Observación del pago
             </h3>
 
-            <p className="text-sm whitespace-pre-wrap">{pago.descripcion}</p>
+            {esDonJuanI && (incluyeGas || incluyeSaldoInicial) ? (
+              <>
+                <p className="text-sm font-semibold">{descripcionReciboDonJuan}.</p>
+                <p className="mt-1 text-xs text-slate-500 whitespace-pre-wrap">
+                  Descripción original del registro: {pago.descripcion}
+                </p>
+              </>
+            ) : (
+              <p className="text-sm whitespace-pre-wrap">{pago.descripcion}</p>
+            )}
           </div>
         )}
 
@@ -2161,6 +2339,12 @@ Tel. 829-792-9292`;
                 RD$ {dinero(saldoFavorDisponible)}
               </p>
             </div>
+            {esDonJuanI && saldosInicialesDJ.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <p className="text-[10px] font-black uppercase text-amber-800">Aplicado a deuda inicial (acumulado)</p>
+                <p className="mt-1 text-base font-black text-amber-900">RD$ {dinero(deudaInicialPagada)}</p>
+              </div>
+            )}
           </div>
 
           {saldoFavorDisponible > 0 && (
@@ -2181,6 +2365,18 @@ Tel. 829-792-9292`;
                 y VAM lo aplicará automáticamente cuando se genere el próximo cargo de
                 mantenimiento.
               </p>
+            </div>
+          )}
+
+          {esDonJuanI && saldosInicialesDJ.length > 0 && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 page-break-inside-avoid">
+              <p className="font-black uppercase">Deuda inicial verificada (corte de apertura)</p>
+              <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1">
+                <span>Original: <strong>RD$ {dinero(deudaInicialOriginal)}</strong></span>
+                <span>Aplicado a deuda inicial: <strong>RD$ {dinero(deudaInicialPagada)}</strong></span>
+                <span>Pendiente: <strong>RD$ {dinero(deudaInicialPendiente)}</strong></span>
+              </div>
+              <p className="mt-1">La deuda inicial proviene de saldos_iniciales_propietarios y no se duplica en cargos mensuales.</p>
             </div>
           )}
 
@@ -2206,10 +2402,31 @@ Tel. 829-792-9292`;
               </thead>
 
               <tbody>
+                {esDonJuanI && saldosInicialesDJ.map((saldo) => (
+                  <tr key={`deuda-inicial-${saldo.id}`} className="bg-amber-50">
+                    <td className="p-2 border font-bold">
+                      <div>Deuda inicial (corte {formatoFecha(saldo.fecha_corte)})</div>
+                      <div className="text-[9px] font-normal text-slate-600">Saldo histórico oficial, separado de cuotas</div>
+                    </td>
+                    <td className="p-2 border text-right">RD$ {dinero(saldo.monto_original)}</td>
+                    <td className="p-2 border text-right font-bold text-green-700">RD$ {dinero(saldo.monto_pagado)}</td>
+                    <td className="p-2 border text-center">{
+                      aplicacionesInicialDJ.filter((app) => Number(app.saldo_inicial_id) === Number(saldo.id))
+                        .map((app) => formatoFecha(app.fecha_aplicacion))
+                        .filter(Boolean).join(", ") || "-"
+                    }</td>
+                    <td className="p-2 border text-right font-black text-red-700">RD$ {dinero(saldo.balance)}</td>
+                    <td className="p-2 border text-center font-bold">{saldo.estado || "-"}</td>
+                  </tr>
+                ))}
                 {detalleMensual.map((item) => (
                   <tr key={item.id}>
                     <td className="p-2 border font-bold">
-                      <div>{item.etiquetaPeriodo}</div>
+                      <div>
+                        {esDonJuanI && !item.esSaldoInicial && etiquetaConceptoDonJuan(item.tipo_cargo)
+                          ? `${etiquetaConceptoDonJuan(item.tipo_cargo)} - ${item.etiquetaPeriodo}`
+                          : item.etiquetaPeriodo}
+                      </div>
                       {item.esSaldoInicial && (
                         <div className="mt-0.5 text-[9px] font-normal text-blue-700">
                           Apertura histórica
@@ -2238,7 +2455,7 @@ Tel. 829-792-9292`;
                   </tr>
                 ))}
 
-                {detalleMensual.length === 0 && (
+                {detalleMensual.length === 0 && saldosInicialesDJ.length === 0 && (
                   <tr>
                     <td className="p-3 border text-center" colSpan={6}>
                       No hay cargos generados para este apartamento en el año
@@ -2248,15 +2465,15 @@ Tel. 829-792-9292`;
                 )}
               </tbody>
 
-              {detalleMensual.length > 0 && (
+              {(detalleMensual.length > 0 || (esDonJuanI && saldosInicialesDJ.length > 0)) && (
                 <tfoot className="bg-slate-100 font-black">
                   <tr>
-                    <td className="p-2 border text-right">TOTALES</td>
+                    <td className="p-2 border text-right">{esDonJuanI ? "TOTALES DE CARGOS Y APERTURA" : "TOTALES"}</td>
                     <td className="p-2 border text-right">
-                      RD$ {dinero(totalCargos)}
+                      RD$ {dinero(totalCargos + deudaInicialOriginal)}
                     </td>
                     <td className="p-2 border text-right">
-                      RD$ {dinero(totalPagosAplicadosAnio)}
+                      RD$ {dinero(totalPagosAplicadosAnio + deudaInicialPagada)}
                     </td>
                     <td className="p-2 border text-center">-</td>
                     <td className="p-2 border text-right">
@@ -2343,7 +2560,7 @@ Tel. 829-792-9292`;
           <div className="text-right">
             <div>VAM Administradora de Condominios - 829-792-9292</div>
             <div className="font-bold text-slate-600">
-              {MODULO_NOMBRE} · {MODULO_VERSION} · {MODULO_FECHA_VERSION}
+              {MODULO_NOMBRE} · {esDonJuanI ? "v1.1.9" : MODULO_VERSION} · {MODULO_FECHA_VERSION}
             </div>
           </div>
         </div>

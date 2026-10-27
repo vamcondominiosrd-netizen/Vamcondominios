@@ -1,0 +1,18 @@
+VAM CONDOMINIOS — Comprobantes Fiscales Don Juan I — versión 1.0.1
+
+MODIFICACIONES DE ESTA VERSIÓN
+- La factura mensual destinada al propietario muestra mantenimiento, gas y total, sin líneas de ITBIS, base imponible o partidas exentas.
+- Mantenimiento: mes seleccionado. Gas: mes anterior.
+- Mantiene NCF único solo cuando el servidor confirma emisión, sello del residencial y PDF.
+- Si un documento emitido contiene un importe de impuesto positivo en la base de datos, se BLOQUEA su impresión para no ocultar un desglose fiscal que puede ser obligatorio.
+
+INSTALACIÓN
+Reemplazar app/comprobantes-fiscales/page.tsx (o src/app/comprobantes-fiscales/page.tsx) con el TSX adjunto y publicar la actualización en Vercel.
+El sello sigue siendo public/sello-don-juan.png.
+
+IMPORTANTE SOBRE EMISIÓN
+- No se ha cambiado el SQL ni se han editado cargos, impuestos o numeración fiscal en Supabase.
+- La tabla vam_cf_secuencias mantiene itbis_mantenimiento e itbis_gas PENDIENTE, y emisión deshabilitada. Ocultar el renglón de la factura NO confirma que los conceptos estén exentos de impuesto.
+- El contador debe validar el tratamiento tributario aplicable antes de cambiar esas dos columnas, autorizar fiscalmente la secuencia y habilitar emisión. No fijar EXENTO por defecto sin esa validación.
+- El rango informado para Don Juan I es 518–650, el último utilizado fue 517; ninguno de esos datos basta por sí solo para verificar autorización DGII.
+- No se ha validado el frontend conectado a la base de datos ni se han emitido comprobantes de prueba.

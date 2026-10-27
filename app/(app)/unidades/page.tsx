@@ -10,6 +10,9 @@ import {
   Search,
   XCircle,
   CircleDollarSign,
+  Pencil,
+  Save,
+  X,
 } from "lucide-react";
 import { supabase } from "@/app/lib/supabaseClient";
 
@@ -37,6 +40,9 @@ export default function UnidadesPage() {
   const [mensaje, setMensaje] = useState("");
   const [loading, setLoading] = useState(false);
   const [buscar, setBuscar] = useState("");
+  const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [cuotaEditada, setCuotaEditada] = useState("");
+  const [guardando, setGuardando] = useState(false);
 
   useEffect(() => {
     const id = localStorage.getItem("condominio_id") || "";
@@ -84,6 +90,43 @@ export default function UnidadesPage() {
     setMensaje(`Unidades cargadas: ${data?.length || 0}`);
   }
 
+  function iniciarEdicion(unidad: Unidad) {
+    setEditandoId(unidad.id);
+    setCuotaEditada(String(unidad.cuota_mensual_actual ?? ""));
+    setMensaje("");
+  }
+
+  async function guardarCuota(unidad: Unidad) {
+    const monto = Number(cuotaEditada.trim());
+    if (!cuotaEditada.trim() || !Number.isFinite(monto) || monto <= 0 || !/^\d+(?:\.\d{1,2})?$/.test(cuotaEditada.trim())) {
+      setMensaje("Ingrese una cuota válida mayor que cero, con máximo dos decimales.");
+      return;
+    }
+    const idActivo = Number(localStorage.getItem("condominio_id"));
+    if (!idActivo || idActivo !== Number(condominioId) || unidad.condominio_id !== idActivo) {
+      setMensaje("El condominio activo cambió. Actualice la pantalla antes de guardar.");
+      return;
+    }
+    setGuardando(true);
+    const { data, error } = await supabase
+      .from("unidades")
+      .update({ cuota_mensual_actual: monto })
+      .eq("id", unidad.id)
+      .eq("condominio_id", idActivo)
+      .select("id, cuota_mensual_actual")
+      .maybeSingle();
+    setGuardando(false);
+    if (error || !data) {
+      setMensaje(error ? `No se pudo guardar: ${error.message}` : "No se confirmó la actualización. Verifique sus permisos.");
+      return;
+    }
+    setUnidades((actuales) => actuales.map((u) =>
+      u.id === unidad.id ? { ...u, cuota_mensual_actual: Number(data.cuota_mensual_actual) } : u
+    ));
+    setEditandoId(null);
+    setMensaje(`Cuota de ${unidad.codigo} actualizada correctamente.`);
+  }
+
   function dinero(valor: number | null | undefined) {
     return Number(valor || 0).toLocaleString("es-DO", {
       minimumFractionDigits: 2,
@@ -118,7 +161,7 @@ export default function UnidadesPage() {
     <PageContainer>
       <PageHeader
         title="Unidades"
-        subtitle="Consulta y control de apartamentos o unidades del condominio activo."
+        subtitle="Consulta y actualización de cuotas mensuales por apartamento."
         badge="Centro Residencial"
         icon={Home}
         action={
@@ -167,6 +210,10 @@ export default function UnidadesPage() {
         />
       </div>
 
+      <p className="text-xs text-slate-500">
+        VAM Unidades · Versión 1.1 · La modificación de la cuota actual no modifica automáticamente cargos ya generados.
+      </p>
+
       <SectionCard
         title="Listado de unidades"
         subtitle={`Condominio activo: ${
@@ -197,6 +244,7 @@ export default function UnidadesPage() {
                   <th className="px-4 py-3 text-left">Propietario</th>
                   <th className="px-4 py-3 text-right">Cuota mensual</th>
                   <th className="px-4 py-3 text-center">Estado</th>
+                  <th className="px-4 py-3 text-center">Acciones</th>
                 </tr>
               </thead>
 
@@ -225,7 +273,23 @@ export default function UnidadesPage() {
                     </td>
 
                     <td className="px-4 py-3 text-right font-bold text-green-700">
-                      RD$ {dinero(u.cuota_mensual_actual)}
+                      {editandoId === u.id ? (
+                        <label className="flex items-center justify-end gap-2">
+                          <span>RD$</span>
+                          <input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={cuotaEditada}
+                            onChange={(e) => setCuotaEditada(e.target.value)}
+                            className="w-32 rounded-lg border border-blue-300 px-2 py-2 text-right text-slate-900"
+                            aria-label={`Nueva cuota de ${u.codigo}`}
+                            disabled={guardando}
+                          />
+                        </label>
+                      ) : (
+                        <>RD$ {dinero(u.cuota_mensual_actual)}</>
+                      )}
                     </td>
 
                     <td className="px-4 py-3 text-center">
@@ -239,13 +303,32 @@ export default function UnidadesPage() {
                         </span>
                       )}
                     </td>
+                    <td className="px-4 py-3 text-center">
+                      {editandoId === u.id ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <button type="button" onClick={() => guardarCuota(u)} disabled={guardando}
+                            className="inline-flex items-center gap-1 rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">
+                            <Save className="h-4 w-4" /> Guardar
+                          </button>
+                          <button type="button" onClick={() => setEditandoId(null)} disabled={guardando}
+                            className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-bold text-slate-700 disabled:opacity-50">
+                            <X className="h-4 w-4" /> Cancelar
+                          </button>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={() => iniciarEdicion(u)} disabled={editandoId !== null || loading}
+                          className="inline-flex items-center gap-1 rounded-lg border border-blue-200 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                          <Pencil className="h-4 w-4" /> Editar cuota
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
 
                 {unidadesFiltradas.length === 0 && (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={5}
                       className="px-4 py-8 text-center text-slate-500"
                     >
                       No hay unidades para mostrar en este condominio activo.

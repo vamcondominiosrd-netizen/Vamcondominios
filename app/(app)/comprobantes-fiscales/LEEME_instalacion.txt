@@ -1,0 +1,33 @@
+VAM CONDOMINIOS · MÓDULO FACTURACIÓN MENSUAL v0.3.4
+======================================================
+
+ARCHIVOS
+- comprobantes_fiscales_don_juan_v0.3.4_ncf_debajo_apartamento.tsx
+- sello-don-juan.png
+
+INSTALACIÓN
+1. Haga copia de seguridad de app/comprobantes-fiscales/page.tsx.
+2. Sustituya ese page.tsx con el código del TSX adjunto.
+3. Ponga sello-don-juan.png en public/sello-don-juan.png.
+4. Publique en Vercel y compruebe la factura del apartamento A1.
+Si usa src/app, ponga el page.tsx en src/app/comprobantes-fiscales/page.tsx.
+
+CAMBIOS
+- Se quitaron los recuadros grandes de advertencia y numeración de la factura.
+- El NCF previsto se muestra justo debajo de Apartamento, tanto en vista previa como en impresión.
+- Se corrigió el ejemplo de formato: B0200000518 (11 caracteres, NO B02000000518).
+- Se conservan mantenimiento del mes seleccionado + gas del mes anterior (Don Juan I).
+- Se conserva detalle de lecturas, total mensual y sello institucional.
+- No se agregan saldos iniciales ni deudas anteriores.
+
+IMPORTANTE SOBRE NUMERACIÓN FISCAL
+B0200000517 es el último NCF informado. B0200000518 es solo el SIGUIENTE
+MATEMÁTICO. Este módulo NO reserva ni asigna comprobantes; para evitar
+que distintos apartamentos impriman el mismo número como NCF válido,
+lo rotula como previsto/no emitido. Nunca debe entregarse este borrador
+como comprobante fiscal. Para emitir NCF válidos hay que confirmar el
+rango autorizado e implementar numeración individual en Supabase.
+
+PRUEBAS PENDIENTES
+La sintaxis puede validarse localmente. No se ha probado aún contra
+la instancia productiva de Supabase/Vercel.

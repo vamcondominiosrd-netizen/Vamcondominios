@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  Download,
+  FileSpreadsheet,
+  Upload,
   ClipboardCheck,
   History,
   Pencil,
@@ -22,6 +25,32 @@ import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
 import ModuleActions from "@/components/vam/enterprise/ModuleActions";
 import SectionCard from "@/components/vam/enterprise/SectionCard";
 import EmptyState from "@/components/vam/enterprise/EmptyState";
+
+type FilaImportacion = {
+  fila: number;
+  codigo: string;
+  unidad_id: number | null;
+  fecha_corte: string;
+  deuda: number;
+  credito: number;
+  observacion: string;
+  error: string;
+  validado: boolean;
+};
+
+type LoteApertura = {
+  lote_id: number;
+  fecha_corte: string;
+  estado: "PENDIENTE" | "APROBADO" | "RECHAZADO";
+  creado_por: string | null;
+  created_at: string;
+  aprobado_por: string | null;
+  aprobado_en: string | null;
+  motivo_rechazo: string | null;
+  filas: number;
+  total_deuda: number;
+  total_credito: number;
+};
 
 type UnidadRow = {
   id: number;
@@ -108,6 +137,16 @@ export default function SaldosInicialesPropietariosPage() {
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState("");
   const [busqueda, setBusqueda] = useState("");
+
+  const archivoRef = useRef<HTMLInputElement>(null);
+  const [importacion, setImportacion] = useState<FilaImportacion[]>([]);
+  const [importando, setImportando] = useState(false);
+  const [fechaImportacion, setFechaImportacion] = useState("2026-08-31");
+  const [confirmarImportacion, setConfirmarImportacion] = useState(false);
+  const [lotes, setLotes] = useState<LoteApertura[]>([]);
+  const [cargandoLotes, setCargandoLotes] = useState(false);
+  const [procesandoLote, setProcesandoLote] = useState<number | null>(null);
+
 
   const [saldoEditando, setSaldoEditando] =
     useState<SaldoInicialRow | null>(null);
@@ -279,6 +318,212 @@ export default function SaldosInicialesPropietariosPage() {
   const totalPendiente = saldos
     .filter((saldo) => saldo.estado !== "ANULADO")
     .reduce((sum, saldo) => sum + Number(saldo.balance || 0), 0);
+
+  // XLSX se carga bajo demanda; instalar dependencia: npm install xlsx
+  async function libreriaExcel() {
+    return await import("xlsx");
+  }
+
+  function descargarLibro(nombre: string, filas: Record<string, unknown>[], hoja: string) {
+    return libreriaExcel().then((XLSX) => {
+      const libro = XLSX.utils.book_new();
+      const pagina = XLSX.utils.json_to_sheet(filas);
+      pagina["!cols"] = Object.keys(filas[0] || {}).map((col) => ({ wch: Math.max(18, col.length + 4) }));
+      XLSX.utils.book_append_sheet(libro, pagina, hoja);
+      XLSX.writeFile(libro, nombre);
+    });
+  }
+
+  async function descargarPlantilla() {
+    if (!unidades.length) { setMensaje("No hay apartamentos activos para generar la plantilla."); return; }
+    const filas = unidades.map((u) => ({
+      apartamento: u.codigo,
+      fecha_corte: fechaImportacion,
+      deuda_inicial: "",
+      saldo_a_favor: "",
+      observacion: "",
+      validado_si_no: "NO",
+    }));
+    try {
+      await descargarLibro(`VAM_Plantilla_Saldos_Condominio_${condominioId}.xlsx`, filas, "Saldos iniciales");
+    } catch (e: any) { setMensaje(`No se pudo descargar la plantilla: ${e.message}`); }
+  }
+
+  async function exportarSaldos() {
+    try {
+      await descargarLibro(`VAM_Saldos_Iniciales_${condominioId}.xlsx`, saldos.map((s) => ({
+        apartamento: s.unidad_codigo,
+        propietario: s.propietario_nombre,
+        fecha_corte: s.fecha_corte,
+        deuda_original: s.monto_original,
+        monto_pagado: s.monto_pagado,
+        balance: s.balance,
+        estado: s.estado,
+        observacion: s.observacion || "",
+      })), "Saldos registrados");
+    } catch (e: any) { setMensaje(`No se pudo exportar: ${e.message}`); }
+  }
+
+  function convertirNumero(valor: unknown): number {
+    if (valor === null || valor === undefined || String(valor).trim() === "") return 0;
+    if (typeof valor === "number") return valor;
+    let texto = String(valor).trim().replace(/RD\$|\s/g, "");
+    if (texto.includes(",") && texto.includes(".")) {
+      texto = texto.lastIndexOf(",") > texto.lastIndexOf(".")
+        ? texto.replace(/\./g, "").replace(",", ".") : texto.replace(/,/g, "");
+    } else if (texto.includes(",")) texto = texto.replace(",", ".");
+    return Number(texto);
+  }
+
+  async function leerExcel(archivo?: File) {
+    if (!archivo) return;
+    setMensaje(""); setImportacion([]); setConfirmarImportacion(false);
+    try {
+      const XLSX = await libreriaExcel();
+      const libro = XLSX.read(await archivo.arrayBuffer(), { type: "array", cellDates: true });
+      // Aceptar tanto la plantilla VAM como el formato de revisión Don Juan I.
+      // Buscar encabezados reales aunque existan títulos e instrucciones arriba.
+      const hoja = libro.Sheets[libro.SheetNames[0]];
+      const matriz = XLSX.utils.sheet_to_json<any[]>(hoja, { header: 1, defval: "", raw: false });
+      const clave = (v: unknown) => String(v ?? "").trim().toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+      const alias: Record<string, string[]> = {
+        apartamento: ["apartamento", "unidad", "codigo", "codigo_unidad"],
+        fecha_corte: ["fecha_corte", "fecha_de_corte", "corte"],
+        deuda_inicial: ["deuda_inicial", "deuda_inicial_rd", "deuda", "saldo_inicial", "monto_original"],
+        saldo_a_favor: ["saldo_a_favor", "saldo_a_favor_rd", "credito", "credito_rd"],
+        observacion: ["observacion", "observaciones"],
+        validado: ["validado_si_no", "validado"],
+        condominio: ["condominio_id", "id_condominio"],
+      };
+      const encabezado = matriz.findIndex((fila) => Array.isArray(fila) &&
+        fila.some((v) => alias.apartamento.includes(clave(v))) &&
+        fila.some((v) => alias.fecha_corte.includes(clave(v))));
+      if (encabezado < 0) throw new Error("No se encontraron columnas Apartamento y Fecha de corte. Utilice la plantilla de VAM.");
+      const cabeceras = (matriz[encabezado] || []).map(clave);
+      const columna = (campo: string) => cabeceras.findIndex((v) => alias[campo].includes(v));
+      if (columna("deuda_inicial") < 0) throw new Error("No se encontró la columna de deuda inicial.");
+      const valor = (fila: any[], campo: string) => {
+        const indice = columna(campo);
+        return indice >= 0 ? fila[indice] : "";
+      };
+      const filas = matriz.slice(encabezado + 1)
+        .map((fila, indice) => ({ fila, numero: encabezado + indice + 2 }))
+        .filter(({ fila }) => Array.isArray(fila) && fila.some((v) => String(v ?? "").trim() !== ""));
+      if (!filas.length) throw new Error("El archivo no contiene apartamentos.");
+      const encontrados = new Set<string>();
+      const codigos = new Map(unidades.map((u) => [normalizar(u.codigo), u]));
+      const previos = new Set(saldos.filter((s) => s.estado !== "ANULADO").map((s) => s.unidad_id));
+      const resultado: FilaImportacion[] = filas.map(({ fila, numero }) => {
+        const codigo = normalizar(String(valor(fila, "apartamento")));
+        const unidad = codigos.get(codigo);
+        const fechaOriginal = valor(fila, "fecha_corte");
+        let fecha = String(fechaOriginal ?? "").trim().slice(0, 10);
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(fecha)) {
+          const [mes, dia, anio] = fecha.split("/");
+          fecha = `${anio}-${mes}-${dia}`;
+        }
+        const deuda = convertirNumero(valor(fila, "deuda_inicial"));
+        const credito = convertirNumero(valor(fila, "saldo_a_favor"));
+        const errores: string[] = [];
+        if (!codigo || !unidad) errores.push("Apartamento inexistente o inactivo");
+        if (encontrados.has(codigo)) errores.push("Apartamento repetido en el archivo");
+        encontrados.add(codigo);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || Number.isNaN(Date.parse(fecha))) errores.push("Fecha inválida (AAAA-MM-DD)");
+        if (!Number.isFinite(deuda) || deuda < 0 || !Number.isFinite(credito) || credito < 0) errores.push("Monto inválido");
+        if (deuda > 0 && credito > 0) errores.push("Deuda y crédito simultáneos: revisar");
+
+        if (unidad && previos.has(unidad.id)) errores.push("Ya tiene saldo inicial activo");
+        const idArchivo = String(valor(fila, "condominio") ?? "").trim();
+        if (idArchivo && Number(idArchivo) !== Number(condominioId)) errores.push("El condominio del archivo no coincide con el seleccionado");
+        const validado = String(valor(fila, "validado") ?? "").trim().toUpperCase();
+        const esValidado = ["SI", "SÍ", "YES", "TRUE"].includes(validado);
+        if ((deuda > 0 || credito > 0) && !esValidado) {
+          errores.push("Saldo sin validar: confirmar monto y marcar SI en Excel");
+        }
+        return { fila: numero, codigo, unidad_id: unidad?.id || null, fecha_corte: fecha,
+          deuda, credito, validado: esValidado, observacion: String(valor(fila, "observacion") ?? "").trim(), error: errores.join("; ") };
+      });
+      setImportacion(resultado);
+    } catch (e: any) { setMensaje(`Error leyendo Excel: ${e.message}`); }
+    finally { if (archivoRef.current) archivoRef.current.value = ""; }
+  }
+
+  useEffect(() => {
+    if (condominioId) void cargarLotes(condominioId);
+  }, [condominioId]);
+
+  async function cargarLotes(id: string) {
+    if (!id || !Number.isFinite(Number(id))) return;
+    setCargandoLotes(true);
+    try {
+      const { data, error } = await supabase.rpc("vam_listar_lotes_saldos_apertura_v140", {
+        p_condominio_id: Number(id),
+      });
+      if (error) throw error;
+      setLotes((data || []) as LoteApertura[]);
+    } catch (e: any) {
+      setMensaje(`No se pudieron consultar los lotes: ${e.message || String(e)}`);
+    } finally { setCargandoLotes(false); }
+  }
+
+  async function procesarLote(lote: LoteApertura, accion: "aprobar" | "rechazar") {
+    if (lote.estado !== "PENDIENTE" || procesandoLote !== null) return;
+    const texto = accion === "aprobar"
+      ? `¿Aprobar lote #${lote.lote_id}? Se activarán RD$ ${dinero(lote.total_deuda)} de deudas y RD$ ${dinero(lote.total_credito)} de créditos. Esta acción afecta los saldos financieros.`
+      : `¿Rechazar lote #${lote.lote_id}? No se activarán saldos.`;
+    if (!window.confirm(texto)) return;
+    const motivo = accion === "rechazar" ? window.prompt("Motivo obligatorio del rechazo:") : null;
+    if (accion === "rechazar" && !motivo?.trim()) return;
+    setProcesandoLote(lote.lote_id); setMensaje("");
+    try {
+      const rpc = accion === "aprobar"
+        ? "vam_aprobar_lote_saldos_apertura_v140"
+        : "vam_rechazar_lote_saldos_apertura_v140";
+      const params = accion === "aprobar"
+        ? { p_lote_id: lote.lote_id }
+        : { p_lote_id: lote.lote_id, p_motivo: motivo!.trim() };
+      const { data, error } = await supabase.rpc(rpc, params);
+      if (error) throw error;
+      if (!data?.ok) throw new Error("El servidor no confirmó la operación.");
+      setMensaje(`Lote #${lote.lote_id} ${accion === "aprobar" ? "aprobado" : "rechazado"} correctamente.`);
+      await cargarLotes(condominioId);
+      if (accion === "aprobar") await cargarSaldos(condominioId);
+    } catch (e: any) {
+      setMensaje(`No se pudo ${accion} el lote: ${e.message || String(e)}. Verifique el estado antes de reintentar.`);
+    } finally { setProcesandoLote(null); }
+  }
+
+  async function importarSaldosIniciales() {
+    const pendientes = importacion.filter((f) => f.deuda > 0 || f.credito > 0);
+    if (!confirmarImportacion || !pendientes.length || importacion.some((f) => f.error)) return;
+    if (new Set(importacion.map((f) => f.fecha_corte)).size !== 1) {
+      setMensaje("Todas las filas deben usar la misma fecha de corte."); return;
+    }
+    setImportando(true); setMensaje("");
+    try {
+      const { data, error } = await supabase.rpc("vam_crear_lote_saldos_apertura_v140", {
+        p_condominio_id: Number(condominioId),
+        p_fecha_corte: importacion[0].fecha_corte,
+        p_filas: importacion.map((f) => ({
+          unidad_id: f.unidad_id,
+          fecha_corte: f.fecha_corte,
+          deuda: f.deuda,
+          credito: f.credito,
+          validado: f.deuda > 0 || f.credito > 0 ? (f.validado ? "SI" : "NO") : "SI",
+          observacion: f.observacion,
+        })),
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error("El servidor no confirmó la importación.");
+      setMensaje(`Lote #${data.lote_id} registrado como PENDIENTE. Ninguna deuda o crédito se activará hasta su aprobación.`);
+      setImportacion([]); setConfirmarImportacion(false);
+      await cargarLotes(condominioId);
+    } catch (e: any) {
+      setMensaje(`No se importó el archivo: ${e.message || String(e)}. Revise permisos/RLS o los datos; no reintente sin comprobar el resultado.`);
+    } finally { setImportando(false); }
+  }
 
   function limpiarFormulario() {
     setSaldoEditando(null);
@@ -545,6 +790,45 @@ export default function SaldosInicialesPropietariosPage() {
           tone="amber"
         />
       </div>
+
+      <SectionCard title="Importar y exportar saldos iniciales" subtitle="Plantilla dinámica por condominio. Deudas y créditos se registran como lote pendiente; solo se activan después de aprobación administrativa.">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-sm font-semibold">Fecha de corte de plantilla
+            <input type="date" value={fechaImportacion} onChange={(e) => setFechaImportacion(e.target.value)} className="mt-1 block rounded-xl border px-3 py-2" />
+          </label>
+          <button type="button" onClick={descargarPlantilla} className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold"><Download className="h-4 w-4" /> Descargar plantilla</button>
+          <button type="button" onClick={exportarSaldos} className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold"><FileSpreadsheet className="h-4 w-4" /> Exportar Excel</button>
+          <input ref={archivoRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => leerExcel(e.target.files?.[0])} />
+          <button type="button" onClick={() => archivoRef.current?.click()} className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white"><Upload className="h-4 w-4" /> Importar Excel</button>
+        </div>
+        {importacion.length > 0 && <div className="mt-5 space-y-3">
+          <p className="text-sm font-semibold">Vista previa: {importacion.length} filas; {importacion.filter((f) => f.error).length} con observaciones; {importacion.filter((f) => f.deuda > 0).length} con deuda; {importacion.filter((f) => f.credito > 0).length} con saldo a favor.</p>
+          <div className="max-h-80 overflow-auto rounded-xl border"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr>{["Fila", "Apartamento", "Corte", "Deuda RD$", "Crédito RD$", "Validación"].map((h) => <th key={h} className="p-2">{h}</th>)}</tr></thead><tbody>{importacion.map((f) => <tr key={f.fila} className={f.error ? "bg-amber-50" : "border-t"}><td className="p-2">{f.fila}</td><td className="p-2">{f.codigo}</td><td className="p-2">{f.fecha_corte}</td><td className="p-2">{dinero(f.deuda)}</td><td className="p-2">{dinero(f.credito)}</td><td className="p-2">{f.error || "Correcto"}</td></tr>)}</tbody></table></div>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={confirmarImportacion} onChange={(e) => setConfirmarImportacion(e.target.checked)} /> Confirmo que revisé los importes y la fecha de corte.</label>
+          <button type="button" onClick={importarSaldosIniciales} disabled={importando || !confirmarImportacion || importacion.some((f) => f.error) || !importacion.some((f) => f.deuda > 0 || f.credito > 0)} className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{importando ? "Importando..." : "Registrar lote pendiente de aprobación"}</button>
+        </div>}
+      </SectionCard>
+
+      <SectionCard title="Lotes de apertura — aprobación administrativa" subtitle="Historial de importaciones. Los lotes PENDIENTES no modifican saldos hasta ser aprobados.">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-slate-600">La aprobación y el rechazo quedan registrados en Supabase.</p>
+          <button type="button" onClick={() => cargarLotes(condominioId)} disabled={cargandoLotes || !condominioId} className="rounded-xl border px-3 py-2 text-sm font-semibold disabled:opacity-40">{cargandoLotes ? "Consultando..." : "Actualizar lotes"}</button>
+        </div>
+        {lotes.length === 0 ? <p className="text-sm text-slate-500">No hay lotes cargados. Pulse «Actualizar lotes» para consultar.</p> :
+          <div className="overflow-x-auto rounded-xl border"><table className="w-full min-w-[850px] text-left text-sm">
+            <thead className="bg-slate-100"><tr>{["Lote", "Fecha de corte", "Estado", "Unidades", "Deuda RD$", "Crédito RD$", "Creado", "Acciones"].map(h => <th key={h} className="p-3">{h}</th>)}</tr></thead>
+            <tbody>{lotes.map(l => <tr key={l.lote_id} className="border-t">
+              <td className="p-3 font-semibold">#{l.lote_id}</td><td className="p-3">{fechaCorta(l.fecha_corte)}</td>
+              <td className="p-3">{l.estado}{l.motivo_rechazo ? ` — ${l.motivo_rechazo}` : ""}</td>
+              <td className="p-3">{l.filas}</td><td className="p-3">{dinero(l.total_deuda)}</td><td className="p-3">{dinero(l.total_credito)}</td>
+              <td className="p-3">{l.created_at ? new Date(l.created_at).toLocaleDateString("es-DO") : "-"}</td>
+              <td className="p-3">{l.estado === "PENDIENTE" ? <div className="flex gap-2">
+                <button type="button" disabled={procesandoLote !== null} onClick={() => procesarLote(l, "aprobar")} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">Aprobar</button>
+                <button type="button" disabled={procesandoLote !== null} onClick={() => procesarLote(l, "rechazar")} className="rounded-lg border border-red-300 px-3 py-2 text-xs font-bold text-red-700 disabled:opacity-40">Rechazar</button>
+              </div> : l.aprobado_en ? `Aprobado ${new Date(l.aprobado_en).toLocaleDateString("es-DO")}` : "—"}</td>
+            </tr>)}</tbody>
+          </table></div>}
+      </SectionCard>
 
       <SectionCard
         title={saldoEditando ? "Ajustar saldo inicial" : "Registrar saldo inicial"}

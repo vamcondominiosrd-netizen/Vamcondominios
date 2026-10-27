@@ -3,8 +3,13 @@
 /*
  * VAM Administración de Condominios
  * Módulo: Pagos de Mantenimiento
- * Versión: v1.0.5
- * Fecha de versión: 03/10/2026
+ * Versión: v1.0.7
+ * Fecha de versión: 16/10/2026
+ *
+ * CAMBIOS v1.0.6
+ * - Consulta saldos iniciales por condominio y unidad.
+ * - Desglosa deuda inicial y cuotas; actualiza total y monto sugerido.
+ * - Conserva comprobantes, pagos históricos y flujo bancario.
  *
  * CAMBIOS v1.0.5
  * - Muestra dentro de Pago Mantenimiento el comprobante enviado por el propietario.
@@ -112,9 +117,9 @@ type PagoMovilPreparado = {
   recibido_at?: string | null;
 };
 
-const MODULO_NOMBRE = "Pagos de Mantenimiento";
-const MODULO_VERSION = "v1.0.5";
-const MODULO_FECHA_VERSION = "03/10/2026";
+const MODULO_NOMBRE = "Pagos de Propietarios – Mantenimiento y Gas";
+const MODULO_VERSION = "v1.0.7";
+const MODULO_FECHA_VERSION = "16/10/2026";
 
 function normalizarTexto(valor: string) {
   return valor
@@ -264,6 +269,10 @@ export default function PagosMantenimientoPage() {
   const [abriendoComprobanteMovil, setAbriendoComprobanteMovil] = useState(false);
 
   const [balancePendienteUnidad, setBalancePendienteUnidad] = useState(0);
+  const [saldoInicialPendienteUnidad, setSaldoInicialPendienteUnidad] = useState(0);
+  const [cuotasPendientesUnidad, setCuotasPendientesUnidad] = useState(0);
+  const [gasPendienteUnidad, setGasPendienteUnidad] = useState(0);
+  const [gasConMedidores, setGasConMedidores] = useState(false);
   const [saldoFavorDisponible, setSaldoFavorDisponible] = useState(0);
   const [cargandoSituacionPago, setCargandoSituacionPago] = useState(false);
 
@@ -332,6 +341,7 @@ export default function PagosMantenimientoPage() {
     setFechaPago(hoy);
 
     cargarConfiguracionCargos(id);
+    void cargarConfiguracionGas(id);
     cargarUnidades(id);
     cargarCuentas(id);
     cargarPagos(id);
@@ -523,6 +533,21 @@ export default function PagosMantenimientoPage() {
     } finally {
       setAbriendoComprobanteMovil(false);
     }
+  }
+
+  async function cargarConfiguracionGas(id: string) {
+    const { data, error } = await supabase
+      .from("gas_configuracion")
+      .select("modalidad")
+      .eq("condominio_id", Number(id))
+      .maybeSingle();
+
+    if (error) {
+      console.warn("No se pudo verificar la modalidad de gas:", error.message);
+      setGasConMedidores(false);
+      return;
+    }
+    setGasConMedidores(normalizarTexto(String(data?.modalidad || "")) === "CON_MEDIDORES");
   }
 
   async function cargarConfiguracionCargos(id: string) {
@@ -763,7 +788,7 @@ export default function PagosMantenimientoPage() {
     idCondominio: string,
     idUnidad: string | number,
   ) {
-    const [cargosRespuesta, creditosRespuesta] = await Promise.all([
+    const [cargosRespuesta, creditosRespuesta, inicialesRespuesta, gasConfiguracionRespuesta] = await Promise.all([
       supabase
         .from("cargos_periodicos")
         .select("id, balance, estado, tipo_cargo")
@@ -777,6 +802,19 @@ export default function PagosMantenimientoPage() {
         .eq("condominio_id", Number(idCondominio))
         .eq("unidad_id", Number(idUnidad))
         .gt("monto_disponible", 0),
+
+      supabase
+        .from("saldos_iniciales_propietarios")
+        .select("id, balance, estado, fecha_corte")
+        .eq("condominio_id", Number(idCondominio))
+        .eq("unidad_id", Number(idUnidad))
+        .gt("balance", 0),
+
+      supabase
+        .from("gas_configuracion")
+        .select("modalidad")
+        .eq("condominio_id", Number(idCondominio))
+        .maybeSingle(),
     ]);
 
     if (cargosRespuesta.error) {
@@ -793,7 +831,42 @@ export default function PagosMantenimientoPage() {
       );
     }
 
-    const balancePendiente = (cargosRespuesta.data || [])
+    if (inicialesRespuesta.error) {
+      throw new Error(
+        "Error consultando saldos iniciales: " +
+          inicialesRespuesta.error.message,
+      );
+    }
+
+    const saldoInicialPendiente = (inicialesRespuesta.data || [])
+      .filter((saldo: any) =>
+        ["PENDIENTE", "PARCIAL"].includes(
+          normalizarTexto(String(saldo?.estado || "PENDIENTE")),
+        ),
+      )
+      .reduce(
+        (total: number, saldo: any) =>
+          total + Math.max(Number(saldo?.balance || 0), 0),
+        0,
+      );
+
+    // Solo integrar gas cuando la modalidad esté confirmada.
+    // Si falla la consulta, no presentar una deuda incompleta como total.
+    if (gasConfiguracionRespuesta.error) {
+      throw new Error("Error consultando modalidad de gas: " + gasConfiguracionRespuesta.error.message);
+    }
+    const conMedidores = normalizarTexto(String(gasConfiguracionRespuesta.data?.modalidad || "")) === "CON_MEDIDORES";
+
+    const gasPendiente = conMedidores
+      ? (cargosRespuesta.data || [])
+          .filter((cargo: any) =>
+            normalizarTexto(String(cargo?.tipo_cargo || "")) === "GAS" &&
+            normalizarTexto(String(cargo?.estado || "")) !== "PAGADO"
+          )
+          .reduce((total: number, cargo: any) => total + Math.max(Number(cargo?.balance || 0), 0), 0)
+      : 0;
+
+    const balanceCuotas = (cargosRespuesta.data || [])
       .filter((cargo: any) => {
         const estado = normalizarTexto(String(cargo?.estado || "PENDIENTE"));
         const tipoCargo = normalizarTexto(String(cargo?.tipo_cargo || ""));
@@ -820,8 +893,14 @@ export default function PagosMantenimientoPage() {
         0,
       );
 
+    const balancePendiente = balanceCuotas + gasPendiente + saldoInicialPendiente;
+
     return {
       balancePendiente,
+      balanceCuotas,
+      gasPendiente,
+      conMedidores,
+      saldoInicialPendiente,
       saldoFavor,
       montoSugerido: Math.max(balancePendiente - saldoFavor, 0),
     };
@@ -833,6 +912,9 @@ export default function PagosMantenimientoPage() {
   ) {
     if (!idCondominio || !idUnidad) {
       setBalancePendienteUnidad(0);
+      setSaldoInicialPendienteUnidad(0);
+      setCuotasPendientesUnidad(0);
+      setGasPendienteUnidad(0);
       setSaldoFavorDisponible(0);
       return;
     }
@@ -846,6 +928,10 @@ export default function PagosMantenimientoPage() {
       );
 
       setBalancePendienteUnidad(situacion.balancePendiente);
+      setSaldoInicialPendienteUnidad(situacion.saldoInicialPendiente);
+      setCuotasPendientesUnidad(situacion.balanceCuotas);
+      setGasPendienteUnidad(situacion.gasPendiente);
+      setGasConMedidores(situacion.conMedidores);
       setSaldoFavorDisponible(situacion.saldoFavor);
     } catch (error: any) {
       console.error(
@@ -853,6 +939,9 @@ export default function PagosMantenimientoPage() {
         error?.message || error,
       );
       setBalancePendienteUnidad(0);
+      setSaldoInicialPendienteUnidad(0);
+      setCuotasPendientesUnidad(0);
+      setGasPendienteUnidad(0);
       setSaldoFavorDisponible(0);
     }
 
@@ -1046,6 +1135,7 @@ export default function PagosMantenimientoPage() {
     setTransaccionesHistoricas([]);
     setPeriodosHistoricos([{ periodo: "", monto: "" }]);
     setBalancePendienteUnidad(0);
+    setGasPendienteUnidad(0);
     setSaldoFavorDisponible(0);
 
     const unidad = unidades.find((u) => String(u.id) === idUnidad);
@@ -1298,7 +1388,7 @@ export default function PagosMantenimientoPage() {
   ) {
     const { data, error } = await supabase
       .from("cargos_periodicos")
-      .select("id, periodo, balance, estado")
+      .select("id, periodo, balance, estado, tipo_cargo")
       .eq("condominio_id", Number(idCondominio))
       .eq("unidad_id", idUnidad)
       .gt("balance", 0)
@@ -1314,6 +1404,13 @@ export default function PagosMantenimientoPage() {
       );
     }
 
+    const { data: configGas } = await supabase
+      .from("gas_configuracion")
+      .select("modalidad")
+      .eq("condominio_id", Number(idCondominio))
+      .maybeSingle();
+    const conMedidores = normalizarTexto(String(configGas?.modalidad || "")) === "CON_MEDIDORES";
+
     let restante = Number(montoPago || 0);
     const periodos: string[] = [];
 
@@ -1323,7 +1420,9 @@ export default function PagosMantenimientoPage() {
       const balance = Number((cargo as any).balance || 0);
       const periodo = String((cargo as any).periodo || "");
 
-      if (balance <= 0 || !periodo) continue;
+      const tipo = normalizarTexto(String((cargo as any).tipo_cargo || ""));
+      if (balance <= 0 || !periodo ||
+          !(["ORDINARIO", "MANTENIMIENTO"].includes(tipo) || (conMedidores && tipo === "GAS"))) continue;
 
       periodos.push(periodo);
       restante -= Math.min(restante, balance);
@@ -1552,6 +1651,10 @@ export default function PagosMantenimientoPage() {
       );
 
       setBalancePendienteUnidad(situacionActual.balancePendiente);
+      setSaldoInicialPendienteUnidad(situacionActual.saldoInicialPendiente);
+      setCuotasPendientesUnidad(situacionActual.balanceCuotas);
+      setGasPendienteUnidad(situacionActual.gasPendiente);
+      setGasConMedidores(situacionActual.conMedidores);
       setSaldoFavorDisponible(situacionActual.saldoFavor);
 
       const montoSugeridoActual = situacionActual.montoSugerido;
@@ -1559,7 +1662,7 @@ export default function PagosMantenimientoPage() {
       if (situacionActual.balancePendiente <= 0) {
         const continuarSinCargo = confirm(
           "UNIDAD SIN CARGOS PENDIENTES\n\n" +
-            `La unidad ${unidad.codigo} no tiene cargos ordinarios pendientes.\n\n` +
+            `La unidad ${unidad.codigo} no tiene saldos iniciales ni cuotas pendientes.\n\n` +
             `Monto recibido: ${formatearMontoReferencia(montoNumerico)}\n` +
             `Saldo a favor actual: ${formatearMontoReferencia(
               situacionActual.saldoFavor,
@@ -1584,7 +1687,10 @@ export default function PagosMantenimientoPage() {
         const continuarMonto = confirm(
           "VALIDACIÓN DEL MONTO RECIBIDO\n\n" +
             `Unidad: ${unidad.codigo}\n` +
-            `Balance pendiente: ${formatearMontoReferencia(
+            `Saldo inicial pendiente: ${formatearMontoReferencia(situacionActual.saldoInicialPendiente)}\n` +
+            `Cuotas pendientes: ${formatearMontoReferencia(situacionActual.balanceCuotas)}\n` +
+            (situacionActual.conMedidores ? `Gas pendiente: ${formatearMontoReferencia(situacionActual.gasPendiente)}\n` : "") +
+            `Balance pendiente total: ${formatearMontoReferencia(
               situacionActual.balancePendiente,
             )}\n` +
             `Saldo a favor disponible: ${formatearMontoReferencia(
@@ -1816,9 +1922,10 @@ export default function PagosMantenimientoPage() {
           ? periodosPago.periodos.join(",")
           : fechaPago.slice(0, 7);
 
-      const descripcionPago = periodosPago.mesesTexto
-        ? `Pago mantenimiento ${periodosPago.mesesTexto} - Unidad ${unidad.codigo}`
-        : `Pago mantenimiento ${nombreMesPeriodo(fechaPago.slice(0, 7))} - Unidad ${unidad.codigo}`;
+      const conceptoUnificado = situacionActual.conMedidores ? "mantenimiento y gas" : "mantenimiento";
+    const descripcionPago = periodosPago.mesesTexto
+        ? `Pago ${conceptoUnificado} ${periodosPago.mesesTexto} - Unidad ${unidad.codigo}`
+        : `Pago ${conceptoUnificado} ${nombreMesPeriodo(fechaPago.slice(0, 7))} - Unidad ${unidad.codigo}`;
 
       agregarBitacora(
         `Paso 4 OK: Período detectado: ${periodoPago}. Descripción: ${descripcionPago}`,
@@ -2007,7 +2114,7 @@ export default function PagosMantenimientoPage() {
         periodosPago.mesesTexto ||
         nombreMesPeriodo(fechaPago.slice(0, 7));
 
-      const descripcionPagoConfirmada = `Pago mantenimiento ${mesesAplicadosTexto} - Unidad ${unidad.codigo}`;
+      const descripcionPagoConfirmada = `Pago ${conceptoUnificado} ${mesesAplicadosTexto} - Unidad ${unidad.codigo}`;
 
       agregarBitacora(
         `Paso 5.1 OK: Fecha bancaria ${fechaPago}. Períodos aplicados: ${
@@ -2401,7 +2508,7 @@ export default function PagosMantenimientoPage() {
 
                 <div className="rounded-xl bg-amber-50 p-3">
                   <p className="text-xs font-bold uppercase text-amber-700">
-                    Balance pendiente
+                    Deuda total pendiente
                   </p>
                   <p className="mt-1 text-lg font-black text-amber-950">
                     {formatearMontoReferencia(balancePendienteUnidad)}
@@ -2427,6 +2534,29 @@ export default function PagosMantenimientoPage() {
                 </div>
               </div>
 
+              <div className={`mt-3 grid gap-3 ${gasConMedidores ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+                <div className="rounded-xl border border-amber-200 bg-white p-3">
+                  <p className="text-xs font-bold uppercase text-amber-700">Saldo inicial pendiente</p>
+                  <p className="mt-1 text-lg font-black text-slate-900">
+                    {formatearMontoReferencia(saldoInicialPendienteUnidad)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-bold uppercase text-slate-600">Cuotas de mantenimiento pendientes</p>
+                  <p className="mt-1 text-lg font-black text-slate-900">
+                    {formatearMontoReferencia(cuotasPendientesUnidad)}
+                  </p>
+                </div>
+                {gasConMedidores && (
+                  <div className="rounded-xl border border-cyan-200 bg-white p-3">
+                    <p className="text-xs font-bold uppercase text-cyan-700">Gas pendiente</p>
+                    <p className="mt-1 text-lg font-black text-slate-900">
+                      {formatearMontoReferencia(gasPendienteUnidad)}
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {saldoFavorDisponible > 0 && balancePendienteUnidad > 0 && (
                 <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
                   <span className="font-black">Saldo a favor disponible:</span>{" "}
@@ -2444,7 +2574,7 @@ export default function PagosMantenimientoPage() {
 
               {balancePendienteUnidad <= 0 && !cargandoSituacionPago && (
                 <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                  <span className="font-black">Sin cargos pendientes.</span>{" "}
+                  <span className="font-black">Sin deudas pendientes.</span>{" "}
                   Si registra un nuevo pago, el importe podría quedar como
                   saldo a favor para períodos futuros.
                 </div>

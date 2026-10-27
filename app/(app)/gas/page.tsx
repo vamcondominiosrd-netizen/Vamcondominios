@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -14,17 +15,16 @@ type ModuloGas = {
   color: string;
 };
 
-type ModuloMedidores = {
-  titulo: string;
-  descripcion: string;
-  href?: string;
-  icono: string;
-  disponible: boolean;
-};
-
-const VERSION = "1.1.2";
-
+// Menú original: se conserva para todos los condominios.
 const modulosActuales: ModuloGas[] = [
+  {
+    titulo: "Configuración de Gas",
+    descripcion:
+      "Definir la modalidad de gas del condominio y preparar sus parámetros generales.",
+    href: "/gas/configuracion",
+    icono: "⚙️",
+    color: "from-indigo-700 to-blue-500",
+  },
   {
     titulo: "Recepción de Gas",
     descripcion:
@@ -58,48 +58,63 @@ const modulosActuales: ModuloGas[] = [
   },
 ];
 
-const modulosConMedidores: ModuloMedidores[] = [
+// Módulos disponibles para condominios con medidores, en orden operativo.
+const modulosConMedidores = [
   {
     titulo: "Medidores",
-    descripcion:
-      "Asignar y consultar los medidores individuales por apartamento y tanque.",
-    href: "/gas/medidores",
+    descripcion: "Asignar y consultar los medidores individuales por apartamento y tanque.",
     icono: "🔢",
-    disponible: true,
+    href: "/gas/medidores",
+    activo: true,
   },
   {
     titulo: "Lecturas mensuales",
-    descripcion:
-      "Registrar lecturas, fotografías y consumo mensual por apartamento.",
-    href: "/gas/lecturas",
+    descripcion: "Registrar lecturas y fotografías desde el celular del técnico.",
     icono: "📸",
-    disponible: true,
+    href: "/gas/lecturas",
+    activo: true,
+  },
+  {
+    titulo: "Importación de Excel",
+    descripcion: "Importar lecturas históricas y validar consumos antes de facturar.",
+    icono: "📥",
+    href: "/gas/importaciones",
+    activo: true,
   },
   {
     titulo: "Consumo por apartamento",
-    descripcion:
-      "Revisar consumos, tarifas, períodos y cargos antes de facturar.",
+    descripcion: "Revisar consumos, períodos y valores por apartamento.",
     icono: "🔥",
-    disponible: false,
+    href: "/gas/consumos",
+    activo: true,
+  },
+  {
+    titulo: "Facturación de Gas",
+    descripcion: "Preparar, revisar, aprobar individualmente o en lote las facturas y generar cargos por cobrar.",
+    icono: "🧮",
+    href: "/gas/facturacion",
+    activo: true,
   },
   {
     titulo: "Recibos de consumo",
-    descripcion:
-      "Consultar el detalle de las lecturas y el importe por apartamento.",
+    descripcion: "Consultar lecturas, fotografías, importes y estado del cargo.",
     icono: "🧾",
-    disponible: false,
+    href: "/gas/recibos",
+    activo: true,
   },
   {
-    titulo: "Morosidad y conciliación",
-    descripcion:
-      "Revisar facturas pendientes y comparar recepciones con consumos.",
+    titulo: "Reporte de consumo por tanque",
+    descripcion: "Consultar, imprimir y exportar consumos, compras y diferencias de gas de Don Juan I.",
     icono: "📊",
-    disponible: false,
+    href: "/gas/reporte-consumo",
+    activo: true,
+    soloDonJuan: true,
   },
 ];
 
 export default function GasPage() {
   const [condominioNombre, setCondominioNombre] = useState("");
+  const [condominioActual, setCondominioActual] = useState<number | null>(null);
   const [modalidad, setModalidad] = useState<ModalidadGas | null>(null);
   const [cargando, setCargando] = useState(true);
   const [aviso, setAviso] = useState("");
@@ -111,17 +126,15 @@ export default function GasPage() {
       const idTexto = localStorage.getItem("condominio_id") || "";
       const nombre = localStorage.getItem("condominio_nombre") || "";
       const id = Number(idTexto);
-
       setCondominioNombre(nombre);
+      setCondominioActual(Number.isSafeInteger(id) && id > 0 ? id : null);
       setModalidad(null);
       setAviso("");
       setCargando(true);
 
       if (!idTexto || !Number.isSafeInteger(id) || id <= 0) {
         if (vigente) {
-          setAviso(
-            "No hay un condominio válido seleccionado. Inicie sesión o seleccione uno."
-          );
+          setAviso("No hay un condominio válido seleccionado. Inicie sesión o seleccione uno.");
           setCargando(false);
         }
         return;
@@ -149,16 +162,13 @@ export default function GasPage() {
       ) {
         setModalidad(data.modalidad);
       } else {
-        setAviso(
-          "Modalidad de gas no reconocida. Las funciones con medidores permanecerán deshabilitadas."
-        );
+        setAviso("Modalidad de gas no reconocida. Las funciones con medidores permanecerán deshabilitadas.");
       }
 
       setCargando(false);
     }
 
     void cargarModalidad();
-
     return () => {
       vigente = false;
     };
@@ -175,25 +185,18 @@ export default function GasPage() {
               <p className="text-sm font-bold text-blue-700 uppercase tracking-wide">
                 Operaciones del condominio
               </p>
-
               <h1 className="text-3xl font-black text-slate-900 mt-1">
                 Módulo de Gas
               </h1>
-
-              <p className="text-xs text-slate-400 mt-1">
-                Menú de Gas · v{VERSION}
-              </p>
-
+              <p className="text-xs text-slate-400 mt-1">Menú de Gas · Versión 1.5.3</p>
               <p className="text-slate-500 mt-2 max-w-3xl">
-                Control de recepción de gas, tanques, precios, medidores y
-                consumo individual según la modalidad del condominio.
+                Control de recepción de gas por conduce, ubicación de tanques,
+                precios activos, unidades de medida y solicitudes de pago.
               </p>
-
               <p className="text-sm text-slate-600 mt-3">
                 <strong>Condominio activo:</strong>{" "}
                 {condominioNombre || "No seleccionado"}
               </p>
-
               <p className="text-sm text-slate-600 mt-1" aria-live="polite">
                 <strong>Modalidad:</strong>{" "}
                 {cargando
@@ -205,7 +208,6 @@ export default function GasPage() {
                   : "Sin verificar"}
               </p>
             </div>
-
             <Link
               href="/finanzas/pagos"
               className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl font-bold text-center"
@@ -216,10 +218,7 @@ export default function GasPage() {
         </section>
 
         {aviso && (
-          <div
-            className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-4 text-sm"
-            role="alert"
-          >
+          <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-4 text-sm" role="alert">
             {aviso}
           </div>
         )}
@@ -232,25 +231,15 @@ export default function GasPage() {
               className="group bg-white rounded-3xl border shadow-sm hover:shadow-lg transition overflow-hidden"
             >
               <div className={`h-2 bg-gradient-to-r ${modulo.color}`} />
-
               <div className="p-5">
                 <div
                   className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${modulo.color} flex items-center justify-center text-3xl shadow-sm group-hover:scale-105 transition`}
                 >
                   {modulo.icono}
                 </div>
-
-                <h2 className="text-xl font-black text-slate-900 mt-4">
-                  {modulo.titulo}
-                </h2>
-
-                <p className="text-sm text-slate-500 mt-2 leading-relaxed">
-                  {modulo.descripcion}
-                </p>
-
-                <div className="mt-4 text-sm font-black text-blue-700">
-                  Abrir módulo →
-                </div>
+                <h2 className="text-xl font-black text-slate-900 mt-4">{modulo.titulo}</h2>
+                <p className="text-sm text-slate-500 mt-2 leading-relaxed">{modulo.descripcion}</p>
+                <div className="mt-4 text-sm font-black text-blue-700">Abrir módulo →</div>
               </div>
             </Link>
           ))}
@@ -259,58 +248,35 @@ export default function GasPage() {
         {conMedidores && (
           <section className="bg-white rounded-3xl border shadow-sm p-6 space-y-4">
             <div>
-              <h2 className="text-xl font-black text-slate-900">
-                Consumo individual por medidores
-              </h2>
-
+              <h2 className="text-xl font-black text-slate-900">Consumo individual por medidores</h2>
               <p className="text-sm text-slate-500 mt-1">
-                Funciones disponibles únicamente para condominios configurados
-                con medidores.
+                Seleccione una función para gestionar el ciclo de lecturas, consumos y facturación de gas.
               </p>
             </div>
-
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {modulosConMedidores.map((modulo) =>
-                modulo.disponible && modulo.href ? (
+              {modulosConMedidores.filter((modulo) => !("soloDonJuan" in modulo) || condominioActual === 24).map((modulo) =>
+                modulo.activo && modulo.href && (!("soloDonJuan" in modulo) || condominioActual === 24) ? (
                   <Link
                     key={modulo.titulo}
                     href={modulo.href}
-                    className="group rounded-2xl border bg-slate-50 p-5 hover:bg-white hover:shadow-md transition"
+                    className="group rounded-2xl border bg-white p-5 hover:shadow-md transition"
                   >
-                    <span aria-hidden="true" className="text-3xl">
-                      {modulo.icono}
-                    </span>
-
-                    <h3 className="text-lg font-black mt-3 text-slate-900">
-                      {modulo.titulo}
-                    </h3>
-
-                    <p className="text-sm text-slate-500 mt-2">
-                      {modulo.descripcion}
-                    </p>
-
-                    <span className="inline-block mt-4 text-xs font-black text-blue-700">
+                    <span aria-hidden="true" className="text-3xl">{modulo.icono}</span>
+                    <h3 className="text-lg font-black mt-3 text-slate-900">{modulo.titulo}</h3>
+                    <p className="text-sm text-slate-500 mt-2">{modulo.descripcion}</p>
+                    <span className="inline-block mt-4 text-xs font-bold text-emerald-800 bg-emerald-100 rounded-full px-3 py-1">
                       Abrir módulo →
                     </span>
                   </Link>
                 ) : (
                   <div
                     key={modulo.titulo}
-                    className="rounded-2xl border bg-slate-50 p-5 opacity-80"
+                    className="rounded-2xl border bg-slate-50 p-5"
                     aria-disabled="true"
                   >
-                    <span aria-hidden="true" className="text-3xl">
-                      {modulo.icono}
-                    </span>
-
-                    <h3 className="text-lg font-black mt-3 text-slate-900">
-                      {modulo.titulo}
-                    </h3>
-
-                    <p className="text-sm text-slate-500 mt-2">
-                      {modulo.descripcion}
-                    </p>
-
+                    <span aria-hidden="true" className="text-3xl">{modulo.icono}</span>
+                    <h3 className="text-lg font-black mt-3 text-slate-900">{modulo.titulo}</h3>
+                    <p className="text-sm text-slate-500 mt-2">{modulo.descripcion}</p>
                     <span className="inline-block mt-4 text-xs font-bold text-amber-800 bg-amber-100 rounded-full px-3 py-1">
                       En desarrollo
                     </span>
@@ -322,55 +288,32 @@ export default function GasPage() {
         )}
 
         <section className="bg-white rounded-3xl border shadow-sm p-6">
-          <h2 className="text-xl font-black text-slate-900">
-            Flujo recomendado
-          </h2>
-
+          <h2 className="text-xl font-black text-slate-900">Flujo recomendado</h2>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mt-4 text-sm">
             <div className="border rounded-2xl p-4 bg-slate-50">
               <p className="font-black">1. Configurar unidades</p>
-              <p className="text-slate-500 mt-1">
-                Definir las unidades de medida.
-              </p>
+              <p className="text-slate-500 mt-1">Galones por defecto.</p>
             </div>
-
             <div className="border rounded-2xl p-4 bg-slate-50">
               <p className="font-black">2. Crear tanques</p>
-              <p className="text-slate-500 mt-1">
-                Ubicación o área abastecida.
-              </p>
+              <p className="text-slate-500 mt-1">Ubicación o área abastecida.</p>
             </div>
-
             <div className="border rounded-2xl p-4 bg-slate-50">
               <p className="font-black">3. Registrar precios</p>
-              <p className="text-slate-500 mt-1">
-                Precio activo por proveedor.
-              </p>
+              <p className="text-slate-500 mt-1">Precio activo por proveedor.</p>
             </div>
-
             <div className="border rounded-2xl p-4 bg-slate-50">
               <p className="font-black">4. Recibir gas</p>
-              <p className="text-slate-500 mt-1">
-                Conduce, cantidad y evidencias.
-              </p>
+              <p className="text-slate-500 mt-1">Conduce, cantidad y fotos.</p>
             </div>
-
             <div className="border rounded-2xl p-4 bg-slate-50">
-              <p className="font-black">
-                {conMedidores ? "5. Leer medidores" : "5. Solicitud de pago"}
-              </p>
-              <p className="text-slate-500 mt-1">
-                {conMedidores
-                  ? "Registrar consumo individual del período."
-                  : "Continuar con el flujo de aprobación."}
-              </p>
+              <p className="font-black">5. Solicitud de pago</p>
+              <p className="text-slate-500 mt-1">Luego se conecta con aprobación.</p>
             </div>
           </div>
         </section>
 
-        <p className="text-right text-xs text-slate-400">
-          Gas · Menú v{VERSION}
-        </p>
+        <p className="text-right text-xs text-slate-400">Gas · Menú v1.5.3</p>
       </div>
     </main>
   );

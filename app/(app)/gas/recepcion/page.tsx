@@ -70,11 +70,49 @@ type GasRecepcion = {
   } | null;
 };
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.1";
+
+// Las fechas de negocio se manejan como fechas de calendario de Santo Domingo,
+// sin interpretar YYYY-MM-DD como medianoche UTC.
+const ZONA_HORARIA = "America/Santo_Domingo";
+
+function hoySantoDomingo(): string {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: ZONA_HORARIA,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const valor = (tipo: string) => partes.find((p) => p.type === tipo)?.value || "";
+  return `${valor("year")}-${valor("month")}-${valor("day")}`;
+}
+
+function fechaCalendario(fecha: string | null | undefined): string {
+  if (!fecha) return "-";
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/.exec(fecha);
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  return fecha;
+}
 
 export default function GasRecepcionPage() {
   const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
+
+  const [editarFechas, setEditarFechas] = useState<GasRecepcion | null>(null);
+  const [edicion, setEdicion] = useState({
+    proveedor_id: "", tanque_id: "", unidad_medida_id: "", no_conduce: "",
+    cantidad: "", precio_unitario: "", responsable: "", observacion: "",
+    no_factura: "", ncf: "", monto_factura: "", itbis_factura: "",
+  });
+  const [edicionConduceArchivo, setEdicionConduceArchivo] = useState<File | null>(null);
+  const [edicionFacturaArchivo, setEdicionFacturaArchivo] = useState<File | null>(null);
+  const [edicionFotoInicio, setEdicionFotoInicio] = useState<File | null>(null);
+  const [edicionFotoFinal, setEdicionFotoFinal] = useState<File | null>(null);
+  const [edicionFotoTanque, setEdicionFotoTanque] = useState<File | null>(null);
+
+  const [edicionRecepcion, setEdicionRecepcion] = useState("");
+  const [edicionConduce, setEdicionConduce] = useState("");
+  const [edicionFactura, setEdicionFactura] = useState("");
 
   const [recepciones, setRecepciones] = useState<GasRecepcion[]>([]);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
@@ -85,14 +123,14 @@ export default function GasRecepcionPage() {
   const [mensaje, setMensaje] = useState("");
 
   const [fechaRecepcion, setFechaRecepcion] = useState(
-    new Date().toISOString().slice(0, 10)
+    hoySantoDomingo()
   );
   const [proveedorId, setProveedorId] = useState("");
   const [tanqueId, setTanqueId] = useState("");
   const [unidadMedidaId, setUnidadMedidaId] = useState("");
   const [noConduce, setNoConduce] = useState("");
   const [fechaConduce, setFechaConduce] = useState(
-    new Date().toISOString().slice(0, 10)
+    hoySantoDomingo()
   );
   const [cantidad, setCantidad] = useState("");
   const [precioUnitario, setPrecioUnitario] = useState("");
@@ -111,7 +149,7 @@ export default function GasRecepcionPage() {
   const [noFactura, setNoFactura] = useState("");
   const [ncf, setNcf] = useState("");
   const [fechaFactura, setFechaFactura] = useState(
-    new Date().toISOString().slice(0, 10)
+    hoySantoDomingo()
   );
   const [montoFactura, setMontoFactura] = useState("");
   const [itbisFactura, setItbisFactura] = useState("0");
@@ -315,7 +353,7 @@ export default function GasRecepcionPage() {
   }
 
   function limpiarFormulario() {
-    setFechaRecepcion(new Date().toISOString().slice(0, 10));
+    setFechaRecepcion(hoySantoDomingo());
     setProveedorId("");
     setTanqueId("");
 
@@ -332,7 +370,7 @@ export default function GasRecepcionPage() {
     }
 
     setNoConduce("");
-    setFechaConduce(new Date().toISOString().slice(0, 10));
+    setFechaConduce(hoySantoDomingo());
     setCantidad("");
     setPrecioUnitario("");
     setObservacion("");
@@ -346,7 +384,7 @@ export default function GasRecepcionPage() {
     setRecepcionFactura(null);
     setNoFactura("");
     setNcf("");
-    setFechaFactura(new Date().toISOString().slice(0, 10));
+    setFechaFactura(hoySantoDomingo());
     setMontoFactura("");
     setItbisFactura("0");
     setArchivoFactura(null);
@@ -356,7 +394,7 @@ export default function GasRecepcionPage() {
     setRecepcionFactura(r);
     setNoFactura(r.no_factura || "");
     setNcf(r.ncf || "");
-    setFechaFactura(r.fecha_factura || new Date().toISOString().slice(0, 10));
+    setFechaFactura(r.fecha_factura || hoySantoDomingo());
     setMontoFactura(String(r.monto_factura || r.total || ""));
     setItbisFactura(String(r.itbis_factura || 0));
     setArchivoFactura(null);
@@ -371,17 +409,7 @@ export default function GasRecepcionPage() {
   }
 
   function fechaDominicana(fecha: string | null | undefined) {
-    if (!fecha) return "-";
-
-    const d = new Date(fecha);
-
-    if (Number.isNaN(d.getTime())) return fecha;
-
-    return d.toLocaleDateString("es-DO", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
+    return fechaCalendario(fecha);
   }
 
   async function subirArchivo(
@@ -528,6 +556,139 @@ export default function GasRecepcionPage() {
     }
 
     setLoading(false);
+  }
+
+  function abrirEdicionFechas(r: GasRecepcion) {
+    if (r.estado === "Anulado" || r.solicitud_pago_id || r.gasto_id || r.estado === "Solicitud generada") {
+      alert("Esta recepción está anulada o vinculada a una solicitud/gasto. No puede editarse desde este formulario.");
+      return;
+    }
+    setEditarFechas(r);
+    setEdicionRecepcion(r.fecha_recepcion?.slice(0, 10) || "");
+    setEdicionConduce(r.fecha_conduce?.slice(0, 10) || "");
+    setEdicionFactura(r.fecha_factura?.slice(0, 10) || "");
+    setEdicion({
+      proveedor_id: String(r.proveedor_id ?? ""),
+      tanque_id: String(r.tanque_id ?? ""),
+      unidad_medida_id: String(r.unidad_medida_id ?? ""),
+      no_conduce: r.no_conduce || "",
+      cantidad: String(r.cantidad ?? ""),
+      precio_unitario: String(r.precio_unitario ?? ""),
+      responsable: r.responsable || "",
+      observacion: r.observacion || "",
+      no_factura: r.no_factura || "",
+      ncf: r.ncf || "",
+      monto_factura: String(r.monto_factura ?? ""),
+      itbis_factura: String(r.itbis_factura ?? "0"),
+    });
+    setEdicionConduceArchivo(null);
+    setEdicionFacturaArchivo(null);
+    setEdicionFotoInicio(null);
+    setEdicionFotoFinal(null);
+    setEdicionFotoTanque(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function guardarEdicionFechas(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editarFechas || loading) return;
+    // Las columnas DATE son fechas de calendario: nunca convertirlas a UTC.
+    const fechaValida = (valor: string) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false;
+      const [anio, mes, dia] = valor.split("-").map(Number);
+      const prueba = new Date(Date.UTC(anio, mes - 1, dia));
+      return prueba.getUTCFullYear() === anio && prueba.getUTCMonth() + 1 === mes && prueba.getUTCDate() === dia;
+    };
+    if (!fechaValida(edicionRecepcion) || (edicionConduce && !fechaValida(edicionConduce)) ||
+        (editarFechas.no_factura && !fechaValida(edicionFactura))) {
+      alert("Revise las fechas. Use el calendario para seleccionar día, mes y año.");
+      return;
+    }
+    const original = editarFechas;
+    const cambios: Record<string, string | number | null> = {};
+    const cambio = (campo: string, nuevo: string | number | null, anterior: string | number | null | undefined) => {
+      if (String(nuevo ?? "") !== String(anterior ?? "")) cambios[campo] = nuevo;
+    };
+    cambio("fecha_recepcion", edicionRecepcion, original.fecha_recepcion?.slice(0, 10));
+    cambio("fecha_conduce", edicionConduce || null, original.fecha_conduce?.slice(0, 10));
+    if (original.no_factura) cambio("fecha_factura", edicionFactura, original.fecha_factura?.slice(0, 10));
+
+    const proveedor = Number(edicion.proveedor_id);
+    const tanque = Number(edicion.tanque_id);
+    const unidad = Number(edicion.unidad_medida_id);
+    const cant = Number(edicion.cantidad);
+    const precio = Number(edicion.precio_unitario);
+    if (String(proveedor) !== String(original.proveedor_id) && !proveedores.some(p => p.id === proveedor)) {
+      alert("Seleccione un proveedor válido del condominio."); return;
+    }
+    if (String(tanque) !== String(original.tanque_id) && !tanques.some(t => t.id === tanque)) {
+      alert("Seleccione un tanque válido del condominio."); return;
+    }
+    if (String(unidad) !== String(original.unidad_medida_id) && !unidades.some(u => u.id === unidad)) {
+      alert("Seleccione una unidad de medida válida del condominio."); return;
+    }
+    if (!edicion.no_conduce.trim() || !Number.isFinite(cant) || cant <= 0 || !Number.isFinite(precio) || precio <= 0) {
+      alert("Revise el conduce, cantidad y precio unitario."); return;
+    }
+    cambio("proveedor_id", proveedor, original.proveedor_id);
+    cambio("tanque_id", tanque, original.tanque_id);
+    cambio("unidad_medida_id", unidad, original.unidad_medida_id);
+    cambio("no_conduce", edicion.no_conduce.trim(), original.no_conduce);
+    cambio("cantidad", cant, original.cantidad);
+    cambio("precio_unitario", precio, original.precio_unitario);
+    cambio("responsable", edicion.responsable.trim() || null, original.responsable);
+    cambio("observacion", edicion.observacion.trim() || null, original.observacion);
+    if ("cantidad" in cambios || "precio_unitario" in cambios) {
+      cambios.total = Math.round((cant * precio + Number.EPSILON) * 100) / 100;
+    }
+    if (original.no_factura) {
+      const monto = Number(edicion.monto_factura);
+      const itbis = Number(edicion.itbis_factura || 0);
+      if (!edicion.no_factura.trim() || !Number.isFinite(monto) || monto <= 0 || !Number.isFinite(itbis) || itbis < 0) {
+        alert("Revise los datos de la factura."); return;
+      }
+      cambio("no_factura", edicion.no_factura.trim(), original.no_factura);
+      cambio("ncf", edicion.ncf.trim() || null, original.ncf);
+      cambio("monto_factura", monto, original.monto_factura);
+      cambio("itbis_factura", itbis, original.itbis_factura);
+      if ("monto_factura" in cambios || "itbis_factura" in cambios) {
+        cambios.total_factura = Math.round((monto + itbis + Number.EPSILON) * 100) / 100;
+      }
+    }
+    const hayArchivos = Boolean(edicionConduceArchivo || edicionFacturaArchivo || edicionFotoInicio || edicionFotoFinal || edicionFotoTanque);
+    if (!Object.keys(cambios).length && !hayArchivos) {
+      alert("No se detectaron cambios."); return;
+    }
+    if (!confirm(`¿Guardar ${Object.keys(cambios).length} cambio(s) en la recepción #${original.id} de la base de datos REAL?`)) return;
+    setLoading(true);
+    try {
+      if (edicionConduceArchivo) cambios.conduce_url = await subirArchivo("conduces-gas", edicionConduceArchivo, "conduces");
+      if (edicionFacturaArchivo && original.no_factura) cambios.factura_url = await subirArchivo("facturas-gas", edicionFacturaArchivo, "facturas");
+      if (edicionFotoInicio) cambios.foto_medidor_camion_inicio_url = await subirArchivo("fotos-gas", edicionFotoInicio, "medidor-camion-inicio");
+      if (edicionFotoFinal) cambios.foto_medidor_camion_final_url = await subirArchivo("fotos-gas", edicionFotoFinal, "medidor-camion-final");
+      if (edicionFotoTanque) cambios.foto_tanque_url = await subirArchivo("fotos-gas", edicionFotoTanque, "tanque-condominio");
+      const { data, error } = await supabase.from("gas_recepciones")
+        .update(cambios)
+        .eq("id", original.id)
+        .eq("condominio_id", Number(condominioId))
+        .eq("estado", original.estado)
+        .is("solicitud_pago_id", null)
+        .is("gasto_id", null)
+        .select("id, fecha_recepcion, fecha_conduce, fecha_factura")
+        .maybeSingle();
+      if (error) throw new Error(`Supabase: ${error.message} (código ${error.code || "sin código"})`);
+      if (!data) throw new Error("Supabase no devolvió ningún registro actualizado. Revise permisos RLS o si el registro tiene una solicitud/gasto vinculado.");
+      if ("fecha_recepcion" in cambios && data.fecha_recepcion?.slice(0, 10) !== edicionRecepcion) {
+        throw new Error(`La fecha guardada (${data.fecha_recepcion}) no coincide con la solicitada (${edicionRecepcion}).`);
+      }
+      setEditarFechas(null);
+      await cargarRecepciones(condominioId);
+      alert("Recepción actualizada y fecha verificada en Supabase.");
+    } catch (err: unknown) {
+      alert("No se pudo actualizar la recepción: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function validarRecepcion(r: GasRecepcion) {
@@ -1279,6 +1440,96 @@ const detalle = `Recepción de gas según conduce No. ${
           </section>
         )}
 
+        {editarFechas && (
+          <section className="bg-white rounded-3xl border-2 border-blue-300 shadow-sm p-6">
+            <h2 className="text-xl font-black text-slate-900 mb-2">Editar recepción #{editarFechas.id} · Datos generales y factura</h2>
+            <p className="text-sm text-amber-700 mb-4">Base de datos real: verifica los valores. No se modifican ID, estado, solicitudes de pago ni gastos.</p>
+            <form onSubmit={guardarEdicionFechas} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <label className="text-sm font-semibold">Fecha recepción
+                <input type="date" required value={edicionRecepcion} onChange={e => setEdicionRecepcion(e.target.value)} className="mt-1 border rounded-xl px-3 py-2 w-full" />
+              </label>
+              <label className="text-sm font-semibold">Fecha conduce
+                <input type="date" value={edicionConduce} onChange={e => setEdicionConduce(e.target.value)} className="mt-1 border rounded-xl px-3 py-2 w-full" />
+              </label>
+              <label className="text-sm font-semibold">Proveedor
+                <select required value={edicion.proveedor_id} onChange={e => setEdicion(v => ({...v, proveedor_id:e.target.value}))} className="mt-1 border rounded-xl px-3 py-2 w-full">
+                  <option value="">Seleccione</option>
+                  {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre_proveedor}</option>)}
+                </select>
+              </label>
+              <label className="text-sm font-semibold">Tanque
+                <select required value={edicion.tanque_id} onChange={e => setEdicion(v => ({...v, tanque_id:e.target.value}))} className="mt-1 border rounded-xl px-3 py-2 w-full">
+                  <option value="">Seleccione</option>
+                  {tanques.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+                </select>
+              </label>
+              <label className="text-sm font-semibold">Unidad de medida
+                <select required value={edicion.unidad_medida_id} onChange={e => setEdicion(v => ({...v, unidad_medida_id:e.target.value}))} className="mt-1 border rounded-xl px-3 py-2 w-full">
+                  <option value="">Seleccione</option>
+                  {unidades.map(u => <option key={u.id} value={u.id}>{u.nombre} ({u.abreviatura})</option>)}
+                </select>
+              </label>
+              {([
+                ["no_conduce","No. conduce","text"],["cantidad","Cantidad recibida","number"],
+                ["precio_unitario","Precio unitario","number"],["responsable","Responsable","text"],
+              ] as const).map(([campo,titulo,tipo]) =>
+                <label key={campo} className="text-sm font-semibold">{titulo}
+                  <input type={tipo} required={campo==="no_conduce" || campo==="cantidad" || campo==="precio_unitario"}
+                    min={tipo==="number"?"0":undefined} step={tipo==="number"?"any":undefined}
+                    value={edicion[campo]} onChange={e=>setEdicion(v=>({...v,[campo]:e.target.value}))}
+                    className="mt-1 border rounded-xl px-3 py-2 w-full" />
+                </label>
+              )}
+              <label className="text-sm font-semibold md:col-span-2">Observación
+                <textarea value={edicion.observacion} onChange={e=>setEdicion(v=>({...v,observacion:e.target.value}))}
+                  className="mt-1 border rounded-xl px-3 py-2 w-full" rows={2}/>
+              </label>
+              <div className="md:col-span-2 rounded-xl bg-slate-100 px-4 py-3 font-semibold">
+                Total recepción: RD$ {dinero(Number(edicion.cantidad||0)*Number(edicion.precio_unitario||0))}
+              </div>
+              {Boolean(editarFechas.no_factura) && (
+                <>
+                  <div className="md:col-span-4 font-black text-slate-800 border-b pb-2">Factura registrada</div>
+                  <label className="text-sm font-semibold">Fecha factura
+                    <input type="date" required value={edicionFactura} onChange={e=>setEdicionFactura(e.target.value)}
+                      className="mt-1 border rounded-xl px-3 py-2 w-full"/>
+                  </label>
+                  {([
+                    ["no_factura","No. factura","text"],["ncf","NCF","text"],
+                    ["monto_factura","Monto factura","number"],["itbis_factura","ITBIS","number"],
+                  ] as const).map(([campo,titulo,tipo]) =>
+                    <label key={campo} className="text-sm font-semibold">{titulo}
+                      <input type={tipo} min={tipo==="number"?"0":undefined} step={tipo==="number"?"0.01":undefined}
+                        value={edicion[campo]} onChange={e=>setEdicion(v=>({...v,[campo]:e.target.value}))}
+                        className="mt-1 border rounded-xl px-3 py-2 w-full"/>
+                    </label>
+                  )}
+                  <div className="rounded-xl bg-green-50 px-4 py-3 font-bold">
+                    Total factura: RD$ {dinero(Number(edicion.monto_factura||0)+Number(edicion.itbis_factura||0))}
+                  </div>
+                </>
+              )}
+              <div className="md:col-span-4 font-black text-slate-800 border-b pb-2">Reemplazar soportes (opcional)</div>
+              {([
+                ["Conduce",setEdicionConduceArchivo,".jpg,.jpeg,.png,.webp,.pdf"],
+                ["Factura",setEdicionFacturaArchivo,".jpg,.jpeg,.png,.webp,.pdf"],
+                ["Medidor camión inicial",setEdicionFotoInicio,".jpg,.jpeg,.png,.webp"],
+                ["Medidor camión final",setEdicionFotoFinal,".jpg,.jpeg,.png,.webp"],
+                ["Tanque",setEdicionFotoTanque,".jpg,.jpeg,.png,.webp"],
+              ] as const).filter(([titulo])=>titulo!=="Factura" || Boolean(editarFechas.no_factura)).map(([titulo,setArchivo,accept]) =>
+                <label key={titulo} className="text-sm font-semibold">{titulo}
+                  <input type="file" accept={accept} onChange={e=>setArchivo(e.target.files?.[0]||null)}
+                    className="mt-1 border rounded-xl px-3 py-2 w-full"/>
+                </label>
+              )}
+              <div className="md:col-span-4 flex gap-2">
+                <button type="submit" disabled={loading} className="bg-blue-700 text-white px-4 py-2 rounded-xl font-bold disabled:opacity-50">Guardar cambios</button>
+                <button type="button" onClick={()=>setEditarFechas(null)} className="border px-4 py-2 rounded-xl font-bold">Cancelar</button>
+              </div>
+            </form>
+          </section>
+        )}
+
         <section className="bg-white rounded-3xl border shadow-sm p-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
             <div>
@@ -1462,6 +1713,12 @@ const detalle = `Recepción de gas según conduce No. ${
 
                     <td className="p-3 border text-center">
                       <div className="flex flex-wrap justify-center gap-2">
+                        {r.estado !== "Anulado" && !r.solicitud_pago_id && !r.gasto_id && (
+                          <button type="button" onClick={() => abrirEdicionFechas(r)}
+                            className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1 rounded-lg text-xs font-bold">
+                            Editar recepción
+                          </button>
+                        )}
                         {r.estado === "Registrado" && (
                           <button
                             type="button"

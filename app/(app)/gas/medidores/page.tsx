@@ -1,16 +1,52 @@
 "use client";
 
+/*
+ * VAM Administración de Condominios
+ * Módulo: Gas / Medidores
+ * Versión: v1.2.1
+ * Fecha: 15/10/2026
+ *
+ * Funciones:
+ * - Solo opera para condominios CON_MEDIDORES.
+ * - Carga unidades, tanques y medidores del condominio activo.
+ * - Registra y edita medidores individuales por apartamento.
+ * - Evita crear dos medidores activos para la misma unidad.
+ * - Permite lectura inicial, fecha de instalación, serie, tanque y unidad de medida.
+ * - Permite foto opcional del medidor.
+ */
+
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/app/lib/supabaseClient";
 
-/**
- * VAM · Gas / Medidores · v1.0.1
- * Administración: alta y edición controlada, SIN eliminación.
- * Requiere gas_configuracion = CON_MEDIDORES y políticas RLS de gas_medidores.
- * No implementa todavía carga de fotografías ni sustitución auditada de equipos.
- */
-type Medidor = {
+const VERSION = "1.2.1";
+
+type ModalidadGas = "SIN_MEDIDORES" | "CON_MEDIDORES";
+
+type Unidad = {
+  id: number;
+  condominio_id: number;
+  codigo: string;
+  propietario_nombre: string | null;
+  activa: boolean | null;
+};
+
+type GasTanque = {
+  id: number;
+  nombre: string;
+  descripcion: string | null;
+  capacidad_estimada: number | null;
+  estado: string;
+};
+
+type UnidadMedida = {
+  id: number;
+  nombre: string;
+  abreviatura: string | null;
+  estado?: string | null;
+};
+
+type GasMedidor = {
   id: number;
   condominio_id: number;
   unidad_id: number;
@@ -21,408 +57,1091 @@ type Medidor = {
   fecha_lectura_inicial: string;
   fecha_instalacion: string | null;
   fecha_retiro: string | null;
-  estado: "Activo" | "Inactivo" | "Sustituido";
+  estado: string;
   foto_medidor_url: string | null;
   observacion: string | null;
-};
-type Unidad = { id: number; codigo: string; activa: boolean };
-type Tanque = { id: number; nombre: string; estado: string | null };
-type Medida = {
-  id: number;
-  nombre: string;
-  abreviatura: string | null;
-  estado: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+
+  unidades?: {
+    codigo: string | null;
+    propietario_nombre: string | null;
+  } | null;
+
+  gas_tanques?: {
+    nombre: string | null;
+  } | null;
+
+  gas_unidades_medida?: {
+    nombre: string | null;
+    abreviatura: string | null;
+  } | null;
 };
 
-const COLUMNAS_MEDIDORES =
-  "id,condominio_id,unidad_id,tanque_id,unidad_medida_id,numero_serie,lectura_inicial,fecha_lectura_inicial,fecha_instalacion,fecha_retiro,estado,foto_medidor_url,observacion";
-
-function hoyLocal(): string {
-  const fecha = new Date();
-  return new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 10);
+function esMetroCubico(u: UnidadMedida) {
+  const texto = `${u.nombre || ""} ${u.abreviatura || ""}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /(?:m³|m3|metros? cubicos?|cubic meters?)/i.test(texto);
 }
 
-function mensajeError(error: unknown): string {
-  return error instanceof Error ? error.message : "Error desconocido.";
+function fechaLocalISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function numero(valor: number | string | null | undefined) {
+  return Number(valor || 0).toLocaleString("es-DO", {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  });
 }
 
 export default function GasMedidoresPage() {
-  const [condominioId, setCondominioId] = useState<number | null>(null);
+  const [condominioId, setCondominioId] = useState("");
   const [condominioNombre, setCondominioNombre] = useState("");
-  const [autorizado, setAutorizado] = useState(false);
-  const [cargando, setCargando] = useState(true);
+
+  const [modalidad, setModalidad] = useState<ModalidadGas | null>(null);
+  const [unidades, setUnidades] = useState<Unidad[]>([]);
+  const [tanques, setTanques] = useState<GasTanque[]>([]);
+  const [unidadesMedida, setUnidadesMedida] = useState<UnidadMedida[]>([]);
+  const [medidores, setMedidores] = useState<GasMedidor[]>([]);
+
+  const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState("");
-  const [exito, setExito] = useState("");
-  const [medidores, setMedidores] = useState<Medidor[]>([]);
-  const [unidades, setUnidades] = useState<Unidad[]>([]);
-  const [tanques, setTanques] = useState<Tanque[]>([]);
-  const [medidas, setMedidas] = useState<Medida[]>([]);
   const [buscar, setBuscar] = useState("");
-  const [filtroEstado, setFiltroEstado] = useState("TODOS");
-  const [mostrarFormulario, setMostrarFormulario] = useState(false);
-  const [editando, setEditando] = useState<Medidor | null>(null);
 
+  const [editandoId, setEditandoId] = useState<number | null>(null);
   const [unidadId, setUnidadId] = useState("");
   const [tanqueId, setTanqueId] = useState("");
-  const [medidaId, setMedidaId] = useState("");
+  const [unidadMedidaId, setUnidadMedidaId] = useState("");
   const [numeroSerie, setNumeroSerie] = useState("");
   const [lecturaInicial, setLecturaInicial] = useState("");
-  const [fechaInicial, setFechaInicial] = useState(hoyLocal);
-  const [fechaInstalacion, setFechaInstalacion] = useState("");
-  const [fechaRetiro, setFechaRetiro] = useState("");
-  const [estado, setEstado] = useState<"Activo" | "Inactivo">("Activo");
+  const [fechaLecturaInicial, setFechaLecturaInicial] = useState(fechaLocalISO());
+  const [fechaInstalacion, setFechaInstalacion] = useState(fechaLocalISO());
+  const [estado, setEstado] = useState("Activo");
   const [observacion, setObservacion] = useState("");
-
-  async function cargarDatos(id: number) {
-    const [m, u, t, d] = await Promise.all([
-      supabase.from("gas_medidores").select(COLUMNAS_MEDIDORES)
-        .eq("condominio_id", id).order("id", { ascending: false }),
-      supabase.from("unidades").select("id,codigo,activa")
-        .eq("condominio_id", id).order("codigo"),
-      supabase.from("gas_tanques").select("id,nombre,estado")
-        .eq("condominio_id", id).order("nombre"),
-      supabase.from("gas_unidades_medida").select("id,nombre,abreviatura,estado")
-        .eq("condominio_id", id).order("nombre"),
-    ]);
-    const error = m.error || u.error || t.error || d.error;
-    if (error) throw new Error(error.message);
-    setMedidores((m.data || []) as Medidor[]);
-    setUnidades((u.data || []) as Unidad[]);
-    setTanques((t.data || []) as Tanque[]);
-    setMedidas((d.data || []) as Medida[]);
-  }
+  const [fotoMedidor, setFotoMedidor] = useState<File | null>(null);
+  const [fotoActualUrl, setFotoActualUrl] = useState("");
+  const [tieneLecturas, setTieneLecturas] = useState(false);
+  const [consultandoLecturas, setConsultandoLecturas] = useState(false);
+  const [historialVerificado, setHistorialVerificado] = useState(false);
 
   useEffect(() => {
-    let vigente = true;
-    async function iniciar() {
-      setCargando(true);
-      setAutorizado(false);
-      setMensaje("");
-      const texto = localStorage.getItem("condominio_id") || "";
-      const id = Number(texto);
-      setCondominioNombre(localStorage.getItem("condominio_nombre") || "");
-      if (!texto || !Number.isSafeInteger(id) || id <= 0) {
-        setMensaje("Seleccione un condominio válido para abrir Medidores.");
-        setCargando(false);
-        return;
-      }
-      try {
-        const config = await supabase.from("gas_configuracion")
-          .select("modalidad").eq("condominio_id", id).maybeSingle();
-        if (config.error) throw new Error(config.error.message);
-        if (config.data?.modalidad !== "CON_MEDIDORES") {
-          if (vigente) setMensaje(
-            "Este condominio opera sin medidores o no tiene modalidad configurada. El módulo actual de Gas permanece disponible."
-          );
-          return;
-        }
-        const permiso = await supabase.rpc("vam_puede_administrar_medidores", {
-          p_condominio_id: id,
-        });
-        if (permiso.error) throw new Error(permiso.error.message);
-        if (permiso.data !== true) {
-          if (vigente) setMensaje("Su cuenta no tiene permiso administrativo para gestionar los medidores de este condominio.");
-          return;
-        }
-        if (!vigente) return;
-        await cargarDatos(id);
-        if (vigente) {
-          setCondominioId(id);
-          setAutorizado(true);
-        }
-      } catch (error) {
-        if (vigente) setMensaje("No fue posible acceder a Medidores: " + mensajeError(error));
-      } finally {
-        if (vigente) setCargando(false);
-      }
+    const id = localStorage.getItem("condominio_id") || "";
+    const nombre = localStorage.getItem("condominio_nombre") || "";
+
+    setCondominioId(id);
+    setCondominioNombre(nombre);
+
+    if (!id || !Number.isSafeInteger(Number(id)) || Number(id) <= 0) {
+      setMensaje("No hay un condominio activo válido. Inicie sesión nuevamente.");
+      return;
     }
-    void iniciar();
-    return () => { vigente = false; };
+
+    void cargarTodo(id);
   }, []);
 
+  async function cargarTodo(id: string) {
+    setLoading(true);
+    setMensaje("");
+
+    const modalidadOk = await cargarModalidad(id);
+
+    if (!modalidadOk) {
+      setLoading(false);
+      return;
+    }
+
+    await Promise.all([
+      cargarUnidades(id),
+      cargarTanques(id),
+      cargarUnidadesMedida(),
+      cargarMedidores(id),
+    ]);
+
+    setLoading(false);
+  }
+
+  async function cargarModalidad(id: string) {
+    const { data, error } = await supabase
+      .from("gas_configuracion")
+      .select("modalidad")
+      .eq("condominio_id", Number(id))
+      .maybeSingle();
+
+    if (error) {
+      setModalidad(null);
+      setMensaje("Error consultando configuración de gas: " + error.message);
+      return false;
+    }
+
+    if (!data || data.modalidad !== "CON_MEDIDORES") {
+      setModalidad(
+        data?.modalidad === "SIN_MEDIDORES" ? "SIN_MEDIDORES" : null
+      );
+      setMensaje(
+        "Este condominio no está configurado con medidores. Revise Configuración de Gas."
+      );
+      return false;
+    }
+
+    setModalidad("CON_MEDIDORES");
+    return true;
+  }
+
+  async function cargarUnidades(id: string) {
+    const { data, error } = await supabase
+      .from("unidades")
+      .select("id, condominio_id, codigo, propietario_nombre, activa")
+      .eq("condominio_id", Number(id))
+      .eq("activa", true)
+      .order("codigo", { ascending: true });
+
+    if (error) {
+      setUnidades([]);
+      setMensaje("Error cargando apartamentos: " + error.message);
+      return;
+    }
+
+    setUnidades((data as Unidad[]) || []);
+  }
+
+  async function cargarTanques(id: string) {
+    const { data, error } = await supabase
+      .from("gas_tanques")
+      .select("id, nombre, descripcion, capacidad_estimada, estado")
+      .eq("condominio_id", Number(id))
+      .eq("estado", "Activo")
+      .order("nombre", { ascending: true });
+
+    if (error) {
+      setTanques([]);
+      setMensaje("Error cargando tanques: " + error.message);
+      return;
+    }
+
+    setTanques((data as GasTanque[]) || []);
+
+    if (!tanqueId && data && data.length === 1) {
+      setTanqueId(String(data[0].id));
+    }
+  }
+
+  async function cargarUnidadesMedida() {
+    const { data, error } = await supabase
+      .from("gas_unidades_medida")
+      .select("id, nombre, abreviatura, estado")
+      .eq("estado", "Activo")
+      .order("nombre", { ascending: true });
+
+    if (error) {
+      setUnidadesMedida([]);
+      setMensaje("Error cargando unidades de medida: " + error.message);
+      return;
+    }
+
+    const lista = (data as UnidadMedida[]) || [];
+    setUnidadesMedida(lista);
+
+    // El medidor registra m³; la conversión a galones ocurre al facturar.
+    if (!unidadMedidaId) {
+      const metrosCubicos = lista.find((u) => esMetroCubico(u));
+      if (metrosCubicos) setUnidadMedidaId(String(metrosCubicos.id));
+      else setMensaje("Debe configurar una unidad de medida m³ activa antes de registrar medidores.");
+    }
+  }
+
+  async function cargarMedidores(id: string) {
+    const { data, error } = await supabase
+      .from("gas_medidores")
+      .select(`
+        id,
+        condominio_id,
+        unidad_id,
+        tanque_id,
+        unidad_medida_id,
+        numero_serie,
+        lectura_inicial,
+        fecha_lectura_inicial,
+        fecha_instalacion,
+        fecha_retiro,
+        estado,
+        foto_medidor_url,
+        observacion,
+        created_at,
+        updated_at,
+        unidades(codigo, propietario_nombre),
+        gas_tanques(nombre),
+        gas_unidades_medida(nombre, abreviatura)
+      `)
+      .eq("condominio_id", Number(id))
+      .order("estado", { ascending: true })
+      .order("id", { ascending: true });
+
+    if (error) {
+      setMedidores([]);
+      setMensaje("Error cargando medidores: " + error.message);
+      return;
+    }
+
+    setMedidores((data as GasMedidor[]) || []);
+  }
+
   function limpiarFormulario() {
-    setEditando(null);
+    setEditandoId(null);
     setUnidadId("");
-    setTanqueId("");
-    setMedidaId("");
     setNumeroSerie("");
     setLecturaInicial("");
-    setFechaInicial(hoyLocal());
-    setFechaInstalacion("");
-    setFechaRetiro("");
+    setFechaLecturaInicial(fechaLocalISO());
+    setFechaInstalacion(fechaLocalISO());
     setEstado("Activo");
     setObservacion("");
+    setFotoMedidor(null);
+    setFotoActualUrl("");
+
+    if (tanques.length === 1) {
+      setTanqueId(String(tanques[0].id));
+    } else {
+      setTanqueId("");
+    }
+
+    const metrosCubicos = unidadesMedida.find((u) => esMetroCubico(u));
+    setUnidadMedidaId(metrosCubicos ? String(metrosCubicos.id) : "");
+    setTieneLecturas(false);
+    setConsultandoLecturas(false);
+    setHistorialVerificado(false);
   }
 
-  function nuevoMedidor() {
-    limpiarFormulario();
-    setMensaje("");
-    setExito("");
-    setMostrarFormulario(true);
-  }
+  async function editarMedidor(medidor: GasMedidor) {
+    setConsultandoLecturas(true);
+    setTieneLecturas(true); // Bloqueo preventivo hasta comprobar el historial.
+    setHistorialVerificado(false);
+    const { count, error } = await supabase
+      .from("gas_lecturas")
+      .select("id", { count: "exact", head: true })
+      .eq("condominio_id", Number(condominioId))
+      .eq("medidor_id", medidor.id);
+    if (error) {
+      setMensaje("No se pudo verificar el historial del medidor. Sus datos de lectura quedan bloqueados por seguridad: " + error.message);
+    } else {
+      setTieneLecturas((count || 0) > 0);
+      setHistorialVerificado(true);
+    }
+    setConsultandoLecturas(false);
+    setEditandoId(medidor.id);
+    setUnidadId(String(medidor.unidad_id));
+    setTanqueId(String(medidor.tanque_id));
+    setUnidadMedidaId(String(medidor.unidad_medida_id));
+    setNumeroSerie(medidor.numero_serie || "");
+    setLecturaInicial(String(medidor.lectura_inicial ?? ""));
+    setFechaLecturaInicial(medidor.fecha_lectura_inicial || fechaLocalISO());
+    setFechaInstalacion(medidor.fecha_instalacion || "");
+    setEstado(medidor.estado || "Activo");
+    setObservacion(medidor.observacion || "");
+    setFotoActualUrl(medidor.foto_medidor_url || "");
+    setFotoMedidor(null);
 
-  function editarMedidor(m: Medidor) {
-    setEditando(m);
-    setUnidadId(String(m.unidad_id));
-    setTanqueId(String(m.tanque_id));
-    setMedidaId(String(m.unidad_medida_id));
-    setNumeroSerie(m.numero_serie);
-    setLecturaInicial(String(m.lectura_inicial));
-    setFechaInicial(m.fecha_lectura_inicial);
-    setFechaInstalacion(m.fecha_instalacion || "");
-    setFechaRetiro(m.fecha_retiro || "");
-    setEstado(m.estado === "Activo" ? "Activo" : "Inactivo");
-    setObservacion(m.observacion || "");
-    setMensaje("");
-    setExito("");
-    setMostrarFormulario(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function actualizar() {
-    if (!autorizado || !condominioId || guardando) return;
-    setCargando(true);
-    setMensaje("");
-    try {
-      await cargarDatos(condominioId);
-    } catch (error) {
-      setMensaje("Error al actualizar: " + mensajeError(error));
-    } finally {
-      setCargando(false);
-    }
+  async function subirFotoMedidor() {
+    if (!fotoMedidor) return fotoActualUrl || null;
+    if (!condominioId) throw new Error("No hay condominio activo.");
+
+    const extension = fotoMedidor.name.split(".").pop() || "jpg";
+    const nombreArchivo = `${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}.${extension}`;
+
+    const ruta = `${condominioId}/medidores/${nombreArchivo}`;
+
+    const { error } = await supabase.storage
+      .from("fotos-gas")
+      .upload(ruta, fotoMedidor);
+
+    if (error) throw new Error(error.message);
+
+    const { data } = supabase.storage.from("fotos-gas").getPublicUrl(ruta);
+    return data.publicUrl;
   }
 
-  async function guardar(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!autorizado || !condominioId || guardando) return;
-    setMensaje("");
-    setExito("");
+  async function validarUnidadDisponible() {
+    if (!condominioId || !unidadId) return true;
 
-    // La edición ordinaria NO altera identidad, asignación ni lectura inicial.
-    if (editando) {
-      if (estado === "Activo" && fechaRetiro) {
-        setMensaje("Un medidor activo no puede tener fecha de retiro.");
-        return;
-      }
-      if (fechaRetiro && fechaInstalacion && fechaRetiro < fechaInstalacion) {
-        setMensaje("La fecha de retiro no puede ser anterior a la instalación.");
-        return;
-      }
-      if (!confirm(`¿Actualizar el estado y observación del medidor ${editando.numero_serie}?`)) return;
-      setGuardando(true);
-      try {
-        const { data, error } = await supabase.from("gas_medidores")
-          .update({
-            estado,
-            fecha_retiro: estado === "Activo" ? null : fechaRetiro || null,
-            observacion: observacion.trim() || null,
-          })
-          .eq("id", editando.id)
-          .eq("condominio_id", condominioId)
-          .eq("estado", editando.estado)
-          .select("id");
-        if (error) throw new Error(error.message);
-        if (!data?.length) throw new Error("El registro cambió o dejó de estar disponible. Actualice el listado.");
-        await cargarDatos(condominioId);
-        limpiarFormulario();
-        setMostrarFormulario(false);
-        setExito("Medidor actualizado. Las lecturas y datos de origen no se modificaron.");
-      } catch (error) {
-        setMensaje("No se pudo actualizar: " + mensajeError(error));
-      } finally {
-        setGuardando(false);
-      }
+    let query = supabase
+      .from("gas_medidores")
+      .select("id, numero_serie, estado")
+      .eq("condominio_id", Number(condominioId))
+      .eq("unidad_id", Number(unidadId))
+      .eq("estado", "Activo");
+
+    if (editandoId) query = query.neq("id", editandoId);
+
+    const { data, error } = await query.limit(1);
+
+    if (error) throw new Error(error.message);
+
+    return !data || data.length === 0;
+  }
+
+  async function validarSerieDisponible() {
+    if (!condominioId || !numeroSerie.trim()) return true;
+
+    let query = supabase
+      .from("gas_medidores")
+      .select("id")
+      .eq("condominio_id", Number(condominioId))
+      .ilike("numero_serie", numeroSerie.trim());
+
+    if (editandoId) query = query.neq("id", editandoId);
+
+    const { data, error } = await query.limit(1);
+
+    if (error) throw new Error(error.message);
+
+    return !data || data.length === 0;
+  }
+
+  async function guardarMedidor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!condominioId) {
+      alert("No hay condominio activo.");
       return;
     }
 
-    const serie = numeroSerie.trim().toUpperCase();
-    const lecturaTexto = lecturaInicial.trim();
-    const lectura = Number(lecturaTexto);
-    const unidad = unidades.find(u => u.id === Number(unidadId) && u.activa);
-    const tanque = tanques.find(t => t.id === Number(tanqueId) && t.estado === "Activo");
-    const medida = medidas.find(m => m.id === Number(medidaId) && m.estado === "Activo");
-    if (!unidad || !tanque || !medida || !serie || !fechaInicial || !lecturaTexto ||
-        !Number.isFinite(lectura) || lectura < 0 || !/^\d+(\.\d{1,4})?$/.test(lecturaTexto)) {
-      setMensaje("Complete apartamento, tanque, unidad, serie, fecha y lectura inicial válida (hasta cuatro decimales).");
+    if (modalidad !== "CON_MEDIDORES") {
+      alert("El condominio no está configurado con medidores.");
       return;
     }
-    if (fechaInstalacion && fechaInstalacion > fechaInicial) {
-      setMensaje("La instalación no puede ser posterior a la lectura inicial.");
+
+    if (!unidadId) {
+      alert("Debe seleccionar el apartamento.");
       return;
     }
-    if (!confirm(`¿Registrar el medidor ${serie} para el apartamento ${unidad.codigo}?`)) return;
+
+    if (!tanqueId) {
+      alert("Debe seleccionar el tanque.");
+      return;
+    }
+
+    if (!unidadMedidaId) {
+      alert("Debe seleccionar la unidad de medida.");
+      return;
+    }
+
+    const unidadSeleccionada = unidades.find((u) => u.id === Number(unidadId));
+    const tanqueSeleccionado = tanques.find((t) => t.id === Number(tanqueId));
+    const medidaSeleccionada = unidadesMedida.find((u) => u.id === Number(unidadMedidaId));
+    if (!unidadSeleccionada || unidadSeleccionada.condominio_id !== Number(condominioId) || !tanqueSeleccionado) {
+      alert("Apartamento o tanque no pertenece a las opciones activas de este condominio.");
+      return;
+    }
+    if (!medidaSeleccionada || !esMetroCubico(medidaSeleccionada)) {
+      alert("La lectura de este medidor debe registrarse en metros cúbicos (m³).");
+      return;
+    }
+    if (editandoId && (!historialVerificado || consultandoLecturas)) {
+      alert("No se pudo verificar el historial. Se cancela la edición por seguridad.");
+      return;
+    }
+
+    if (!numeroSerie.trim()) {
+      alert("Debe indicar el número de serie del medidor.");
+      return;
+    }
+
+    const lectura = Number(lecturaInicial);
+
+    if (!Number.isFinite(lectura) || lectura < 0) {
+      alert("La lectura inicial debe ser un número mayor o igual a cero.");
+      return;
+    }
+
+    if (!fechaLecturaInicial) {
+      alert("Debe indicar la fecha de lectura inicial.");
+      return;
+    }
+
     setGuardando(true);
+    setMensaje("");
+
     try {
-      const { data, error } = await supabase.from("gas_medidores")
-        .insert({
-          condominio_id: condominioId,
-          unidad_id: unidad.id,
-          tanque_id: tanque.id,
-          unidad_medida_id: medida.id,
-          numero_serie: serie,
-          lectura_inicial: lectura,
-          fecha_lectura_inicial: fechaInicial,
-          fecha_instalacion: fechaInstalacion || null,
-          estado: "Activo",
-          observacion: observacion.trim() || null,
-        })
-        .select("id")
-        .single();
-      if (error) throw new Error(error.message);
-      await cargarDatos(condominioId);
+      const unidadDisponible = await validarUnidadDisponible();
+
+      if (!unidadDisponible && estado === "Activo") {
+        alert("Este apartamento ya tiene un medidor activo registrado.");
+        setGuardando(false);
+        return;
+      }
+
+      const serieDisponible = await validarSerieDisponible();
+
+      if (!serieDisponible) {
+        alert("Ya existe un medidor con este número de serie en el condominio.");
+        setGuardando(false);
+        return;
+      }
+
+      // Revalidar el historial justo antes de guardar: puede haber cambiado desde que se abrió el formulario.
+      let original: GasMedidor | null = null;
+      let historialReal = false;
+      if (editandoId) {
+        const [actual, lecturas, facturas] = await Promise.all([
+          supabase.from("gas_medidores").select("*").eq("id", editandoId).eq("condominio_id", Number(condominioId)).single(),
+          supabase.from("gas_lecturas").select("id", { count: "exact", head: true }).eq("condominio_id", Number(condominioId)).eq("medidor_id", editandoId),
+          supabase.from("gas_facturacion_unidades").select("id", { count: "exact", head: true }).eq("condominio_id", Number(condominioId)).eq("medidor_id", editandoId),
+        ]);
+        if (actual.error || !actual.data || lecturas.error || facturas.error) {
+          throw new Error("No se pudo comprobar el historial del medidor. No se guardó ningún cambio.");
+        }
+        original = actual.data as GasMedidor;
+        historialReal = (lecturas.count || 0) > 0 || (facturas.count || 0) > 0;
+        if (historialReal && (
+          Number(unidadId) !== original.unidad_id ||
+          Number(tanqueId) !== original.tanque_id ||
+          Number(unidadMedidaId) !== original.unidad_medida_id ||
+          Number(lecturaInicial) !== Number(original.lectura_inicial)
+        )) {
+          throw new Error("Con lecturas o facturas existentes no se pueden cambiar apartamento, tanque, unidad de medida ni lectura inicial. La fecha inicial y los datos administrativos sí son editables.");
+        }
+        if (historialReal && fechaLecturaInicial !== original.fecha_lectura_inicial) {
+          const primera = await supabase.from("gas_lecturas")
+            .select("fecha_lectura")
+            .eq("condominio_id", Number(condominioId)).eq("medidor_id", editandoId)
+            .order("fecha_lectura", { ascending: true }).limit(1);
+          if (primera.error) throw new Error("No se pudo validar la cronología de las lecturas.");
+          if (primera.data?.[0]?.fecha_lectura && fechaLecturaInicial > primera.data[0].fecha_lectura) {
+            throw new Error("La fecha inicial no puede ser posterior a la primera lectura registrada.");
+          }
+          if (!window.confirm("Se corregirá la fecha inicial del medidor. Las fechas de lecturas y facturas ya registradas NO se actualizarán automáticamente. ¿Continuar?")) return;
+        }
+      }
+      const fotoUrl = await subirFotoMedidor();
+
+      const registro = {
+        condominio_id: Number(condominioId),
+        unidad_id: Number(unidadId),
+        tanque_id: Number(tanqueId),
+        unidad_medida_id: Number(unidadMedidaId),
+        numero_serie: numeroSerie.trim(),
+        lectura_inicial: lectura,
+        fecha_lectura_inicial: fechaLecturaInicial,
+        fecha_instalacion: fechaInstalacion || null,
+        fecha_retiro: estado === "Activo" ? null : fechaLocalISO(),
+        estado,
+        foto_medidor_url: fotoUrl,
+        observacion: observacion.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (editandoId) {
+        const datosActualizacion = historialReal ? {
+          numero_serie: registro.numero_serie,
+          fecha_lectura_inicial: registro.fecha_lectura_inicial,
+          fecha_instalacion: registro.fecha_instalacion,
+          fecha_retiro: registro.fecha_retiro,
+          estado: registro.estado,
+          foto_medidor_url: registro.foto_medidor_url,
+          observacion: registro.observacion,
+          updated_at: registro.updated_at,
+        } : registro;
+        const { error } = await supabase
+          .from("gas_medidores")
+          .update(datosActualizacion)
+          .eq("id", editandoId)
+          .eq("condominio_id", Number(condominioId));
+
+        if (error) throw new Error(error.message);
+
+        alert("Medidor actualizado correctamente.");
+      } else {
+        const { error } = await supabase.from("gas_medidores").insert([
+          {
+            ...registro,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+
+        if (error) throw new Error(error.message);
+
+        alert("Medidor registrado correctamente.");
+      }
+
       limpiarFormulario();
-      setMostrarFormulario(false);
-      setExito(`Medidor registrado correctamente (ID ${data.id}).`);
-    } catch (error) {
-      setMensaje("No se pudo registrar: " + mensajeError(error));
+      await cargarMedidores(condominioId);
+    } catch (error: any) {
+      alert("Error guardando medidor: " + (error?.message || String(error)));
     } finally {
       setGuardando(false);
     }
   }
 
-  const unidadNombre = (id: number) => unidades.find(u => u.id === id)?.codigo || `Unidad #${id}`;
-  const tanqueNombre = (id: number) => tanques.find(t => t.id === id)?.nombre || `Tanque #${id}`;
-  const medidaNombre = (id: number) => {
-    const medida = medidas.find(m => m.id === id);
-    return medida?.abreviatura || medida?.nombre || "";
-  };
-  const filtrados = useMemo(() => medidores.filter(m => {
-    if (filtroEstado !== "TODOS" && m.estado !== filtroEstado) return false;
-    const texto = `${m.numero_serie} ${unidades.find(u => u.id === m.unidad_id)?.codigo || ""} ${tanques.find(t => t.id === m.tanque_id)?.nombre || ""}`.toLowerCase();
-    return texto.includes(buscar.trim().toLowerCase());
-  }), [medidores, filtroEstado, buscar, unidades, tanques]);
+  // Actualización rápida de serie: no altera ID, unidad, lecturas, facturas ni cargos.
+  async function cambiarSerieReal(medidor: GasMedidor) {
+    if (!condominioId || guardando || loading) return;
+    const propuesta = window.prompt(
+      `Apartamento ${medidor.unidades?.codigo ?? medidor.unidad_id}\nSerie actual: ${medidor.numero_serie}\n\nIntroduzca el número de serie REAL del medidor:`,
+      medidor.numero_serie
+    );
+    if (propuesta === null) return;
+    const nuevaSerie = propuesta.trim();
+    if (!nuevaSerie) { alert("El número de serie no puede estar vacío."); return; }
+    if (nuevaSerie === medidor.numero_serie) return;
+    if (!window.confirm(`¿Cambiar la serie del apartamento ${medidor.unidades?.codigo ?? medidor.unidad_id} de "${medidor.numero_serie}" a "${nuevaSerie}"?\n\nNo se modificarán lecturas ni facturas.`)) return;
+
+    setGuardando(true);
+    setMensaje("");
+    try {
+      const { data: duplicados, error: errorDuplicados } = await supabase
+        .from("gas_medidores")
+        .select("id")
+        .eq("condominio_id", Number(condominioId))
+        .ilike("numero_serie", nuevaSerie)
+        .neq("id", medidor.id)
+        .limit(1);
+      if (errorDuplicados) throw errorDuplicados;
+      if (duplicados && duplicados.length > 0) throw new Error("Esta serie ya está asignada a otro medidor del condominio.");
+
+      const { data: actualizado, error: errorActualizacion } = await supabase
+        .from("gas_medidores")
+        .update({ numero_serie: nuevaSerie, updated_at: new Date().toISOString() })
+        .eq("condominio_id", Number(condominioId))
+        .eq("id", medidor.id)
+        .eq("numero_serie", medidor.numero_serie)
+        .select("id,numero_serie")
+        .maybeSingle();
+      if (errorActualizacion) throw errorActualizacion;
+      if (!actualizado) throw new Error("No se confirmó el cambio. Compruebe los permisos o si la serie fue modificada por otra persona.");
+      await cargarMedidores(condominioId);
+      setMensaje(`Serie del apartamento ${medidor.unidades?.codigo ?? medidor.unidad_id} actualizada: ${medidor.numero_serie} → ${actualizado.numero_serie}. Lecturas y facturas intactas.`);
+    } catch (e: unknown) {
+      const detalle = e instanceof Error ? e.message : String(e);
+      setMensaje(`No se pudo actualizar la serie: ${detalle}`);
+      alert(`No se pudo actualizar la serie: ${detalle}`);
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  async function cambiarEstado(medidor: GasMedidor) {
+    if (!condominioId) return;
+
+    const nuevoEstado = medidor.estado === "Activo" ? "Inactivo" : "Activo";
+
+    if (nuevoEstado === "Activo") {
+      const otroActivo = medidores.find(
+        (m) =>
+          m.unidad_id === medidor.unidad_id &&
+          m.id !== medidor.id &&
+          m.estado === "Activo"
+      );
+
+      if (otroActivo) {
+        alert(
+          "No puede activar este medidor porque el apartamento ya tiene otro medidor activo."
+        );
+        return;
+      }
+    }
+
+    const confirmar = window.confirm(
+      `¿Desea cambiar el medidor ${medidor.numero_serie} a ${nuevoEstado}?`
+    );
+
+    if (!confirmar) return;
+
+    // No se permite cambiar el estado sin comprobar el historial de lecturas.
+    const { error: errorLecturas } = await supabase
+      .from("gas_lecturas")
+      .select("id", { count: "exact", head: true })
+      .eq("condominio_id", Number(condominioId))
+      .eq("medidor_id", medidor.id);
+    if (errorLecturas) {
+      alert("No fue posible verificar las lecturas de este medidor. Operación cancelada.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("gas_medidores")
+      .update({
+        estado: nuevoEstado,
+        fecha_retiro: nuevoEstado === "Inactivo" ? fechaLocalISO() : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", medidor.id)
+      .eq("condominio_id", Number(condominioId));
+
+    if (error) {
+      alert("Error cambiando estado: " + error.message);
+      return;
+    }
+
+    await cargarMedidores(condominioId);
+  }
+
+  const medidoresFiltrados = useMemo(() => {
+    const texto = buscar.trim().toLowerCase();
+
+    if (!texto) return medidores;
+
+    return medidores.filter((medidor) => {
+      const cadena = `
+        ${medidor.id}
+        ${medidor.numero_serie || ""}
+        ${medidor.estado || ""}
+        ${medidor.observacion || ""}
+        ${medidor.unidades?.codigo || ""}
+        ${medidor.unidades?.propietario_nombre || ""}
+        ${medidor.gas_tanques?.nombre || ""}
+        ${medidor.gas_unidades_medida?.nombre || ""}
+      `.toLowerCase();
+
+      return cadena.includes(texto);
+    });
+  }, [medidores, buscar]);
+
+  const medidoresActivos = medidores.filter((m) => m.estado === "Activo").length;
+  const medidoresInactivos = medidores.length - medidoresActivos;
+
+  const unidadesConMedidorActivo = new Set(
+    medidores
+      .filter((m) => m.estado === "Activo")
+      .map((m) => Number(m.unidad_id))
+  ).size;
+
+  const unidadesPendientes = Math.max(
+    unidades.length - unidadesConMedidorActivo,
+    0
+  );
 
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
-        <header className="rounded-3xl border bg-white p-5 shadow-sm md:p-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <section className="rounded-3xl border bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <p className="text-xs font-black uppercase tracking-wider text-blue-700">VAM · Gestión de gas</p>
-              <h1 className="mt-1 text-3xl font-black text-slate-900">Configuración de Medidores</h1>
-              <p className="mt-1 text-xs text-slate-500">Medidores · Versión 1.0.1 · Registro y edición controlada</p>
-              <p className="mt-3 text-sm text-slate-600">Condominio: <strong>{condominioNombre || "No seleccionado"}</strong></p>
+              <p className="text-sm font-bold uppercase tracking-wide text-blue-700">
+                Módulo de Gas
+              </p>
+              <h1 className="mt-1 text-3xl font-black text-slate-900">
+                Medidores por Apartamento
+              </h1>
+              <p className="mt-1 text-xs text-slate-400">
+                Gas · Medidores v{VERSION}
+              </p>
+              <p className="mt-2 max-w-3xl text-slate-500">
+                Registre el medidor individual de cada apartamento, su lectura
+                inicial, tanque asociado y unidad de medida.
+              </p>
+              <p className="mt-3 text-sm font-bold text-blue-700">
+                Condominio activo: {condominioNombre || "No seleccionado"}
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                Modalidad:{" "}
+                <strong>
+                  {modalidad === "CON_MEDIDORES"
+                    ? "Con medidores"
+                    : modalidad === "SIN_MEDIDORES"
+                      ? "Sin medidores"
+                      : "Sin verificar"}
+                </strong>
+              </p>
             </div>
-            <Link href="/gas" className="rounded-xl bg-slate-800 px-4 py-2 font-bold text-white">Volver a Gas</Link>
+
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/gas"
+                className="rounded-xl bg-slate-700 px-4 py-2 font-bold text-white hover:bg-slate-800"
+              >
+                Volver a Gas
+              </Link>
+              <button
+                type="button"
+                disabled={!condominioId || loading}
+                onClick={() => void cargarTodo(condominioId)}
+                className="rounded-xl bg-blue-700 px-4 py-2 font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+              >
+                Actualizar
+              </button>
+            </div>
           </div>
-        </header>
+        </section>
 
-        {mensaje && <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">{mensaje}</div>}
-        {exito && <div role="status" className="rounded-xl border border-green-300 bg-green-50 p-4 text-sm text-green-900">{exito}</div>}
-        {cargando && <p role="status" className="rounded-xl bg-white p-4 text-sm text-slate-600">Consultando configuración y medidores…</p>}
+        {mensaje && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900">
+            {mensaje}
+          </div>
+        )}
 
-        {!cargando && autorizado && (
+        {modalidad === "CON_MEDIDORES" && (
           <>
-            <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {([
-                ["Total medidores", medidores.length],
-                ["Activos", medidores.filter(m => m.estado === "Activo").length],
-                ["Inactivos / sustituidos", medidores.filter(m => m.estado !== "Activo").length],
-              ] as const).map(([titulo, valor]) => (
-                <div key={titulo} className="rounded-2xl border bg-white p-5 shadow-sm">
-                  <p className="text-sm text-slate-500">{titulo}</p>
-                  <p className="mt-1 text-3xl font-black text-slate-900">{valor}</p>
-                </div>
-              ))}
-            </section>
-
-            <section className="rounded-3xl border bg-white p-5 shadow-sm md:p-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-black">Medidores del condominio</h2>
-                  <p className="text-sm text-slate-500">Registro, consulta y edición de estado/observaciones. Sin eliminación de medidores.</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => void actualizar()} disabled={guardando} className="rounded-xl bg-blue-700 px-4 py-2 font-bold text-white disabled:opacity-50">Actualizar</button>
-                  <button type="button" onClick={nuevoMedidor} disabled={guardando} className="rounded-xl bg-emerald-700 px-4 py-2 font-bold text-white disabled:opacity-50">Nuevo medidor</button>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <input aria-label="Buscar medidor" value={buscar} onChange={e => setBuscar(e.target.value)} placeholder="Buscar serie, apartamento o tanque…" className="w-full rounded-xl border px-4 py-3" />
-                <select aria-label="Filtrar por estado" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} className="w-full rounded-xl border bg-white px-4 py-3">
-                  <option value="TODOS">Todos los estados</option><option value="Activo">Activo</option><option value="Inactivo">Inactivo</option><option value="Sustituido">Sustituido</option>
-                </select>
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {filtrados.map(m => (
-                  <article key={m.id} className="min-w-0 rounded-2xl border p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="break-all font-black text-slate-900">{m.numero_serie}</h3>
-                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold">{m.estado}</span>
-                    </div>
-                    <dl className="mt-3 space-y-1 text-sm">
-                      <div className="flex justify-between gap-2"><dt className="text-slate-500">Apartamento</dt><dd className="font-semibold">{unidadNombre(m.unidad_id)}</dd></div>
-                      <div className="flex justify-between gap-2"><dt className="text-slate-500">Tanque</dt><dd className="text-right">{tanqueNombre(m.tanque_id)}</dd></div>
-                      <div className="flex justify-between gap-2"><dt className="text-slate-500">Lectura inicial</dt><dd>{Number(m.lectura_inicial).toLocaleString("es-DO", { maximumFractionDigits: 4 })} {medidaNombre(m.unidad_medida_id)}</dd></div>
-                      <div className="flex justify-between gap-2"><dt className="text-slate-500">Fecha inicial</dt><dd>{m.fecha_lectura_inicial}</dd></div>
-                      {m.fecha_retiro && <div className="flex justify-between gap-2"><dt className="text-slate-500">Retiro</dt><dd>{m.fecha_retiro}</dd></div>}
-                    </dl>
-                    {m.foto_medidor_url && <a href={m.foto_medidor_url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-sm font-bold text-blue-700 underline">Ver fotografía registrada</a>}
-                    {m.observacion && <p className="mt-2 text-xs text-slate-600">{m.observacion}</p>}
-                    {m.estado !== "Sustituido" && <button type="button" disabled={guardando} onClick={() => editarMedidor(m)} className="mt-4 rounded-lg bg-slate-800 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">Editar estado / observación</button>}
-                  </article>
-                ))}
-              </div>
-              {filtrados.length === 0 && <p className="mt-4 rounded-xl bg-slate-50 p-5 text-center text-sm text-slate-500">No hay medidores que coincidan con los filtros.</p>}
-            </section>
-
-            {mostrarFormulario && (
-              <section className="rounded-3xl border bg-white p-5 shadow-sm md:p-6">
-                <h2 className="text-xl font-black">{editando ? `Editar ${editando.numero_serie}` : "Registrar nuevo medidor"}</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  {editando
-                    ? "Para preservar el historial, solo se pueden modificar estado, fecha de retiro y observaciones. La sustitución formal se incorporará en otra versión."
-                    : "Registre los datos físicos y la lectura inicial. No se podrán cambiar desde la edición ordinaria."}
+            <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+              <div className="rounded-2xl border bg-white p-5 shadow-sm">
+                <p className="text-sm text-slate-500">Apartamentos</p>
+                <p className="text-3xl font-black text-slate-900">
+                  {unidades.length}
                 </p>
-                <form onSubmit={guardar} className="mt-4 grid gap-4 md:grid-cols-2">
-                  <label className="text-sm font-semibold">Apartamento
-                    <select required disabled={Boolean(editando) || guardando} value={unidadId} onChange={e => setUnidadId(e.target.value)} className="mt-1 w-full rounded-xl border bg-white p-3"><option value="">Seleccione</option>{unidades.filter(u => u.activa || u.id === editando?.unidad_id).map(u => <option key={u.id} value={u.id}>{u.codigo}</option>)}</select>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-5 shadow-sm">
+                <p className="text-sm text-slate-500">Medidores activos</p>
+                <p className="text-3xl font-black text-emerald-700">
+                  {medidoresActivos}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-5 shadow-sm">
+                <p className="text-sm text-slate-500">Pendientes de medidor</p>
+                <p className="text-3xl font-black text-amber-700">
+                  {unidadesPendientes}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-5 shadow-sm">
+                <p className="text-sm text-slate-500">Inactivos / retirados</p>
+                <p className="text-3xl font-black text-slate-700">
+                  {medidoresInactivos}
+                </p>
+              </div>
+            </section>
+
+            <section className="rounded-3xl border bg-white p-6 shadow-sm">
+              <h2 className="mb-4 text-xl font-black text-slate-900">
+                {editandoId ? "Editar medidor" : "Registrar medidor"}
+              </h2>
+
+              {editandoId !== null && (tieneLecturas || consultandoLecturas) && (
+                <p className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+                  Este medidor tiene historial: puede corregir la fecha de lectura inicial, la fecha de instalación,
+                  serie, estado, fotografía y observaciones. Por seguridad, apartamento, tanque, unidad de medida y
+                  valor de lectura inicial permanecen protegidos. Las facturas aprobadas conservan sus fechas históricas.
+                </p>
+              )}
+              <form
+                onSubmit={guardarMedidor}
+                className="grid grid-cols-1 gap-4 md:grid-cols-4"
+              >
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Apartamento *
                   </label>
-                  <label className="text-sm font-semibold">Tanque
-                    <select required disabled={Boolean(editando) || guardando} value={tanqueId} onChange={e => setTanqueId(e.target.value)} className="mt-1 w-full rounded-xl border bg-white p-3"><option value="">Seleccione</option>{tanques.filter(t => t.estado === "Activo" || t.id === editando?.tanque_id).map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}</select>
+                  <select
+                    disabled={editandoId !== null && (tieneLecturas || consultandoLecturas)}
+                    value={unidadId}
+                    onChange={(e) => setUnidadId(e.target.value)}
+                    className="w-full rounded-xl border bg-white px-4 py-3"
+                  >
+                    <option value="">Seleccione</option>
+                    {unidades.map((unidad) => (
+                      <option key={unidad.id} value={unidad.id}>
+                        {unidad.codigo} ·{" "}
+                        {unidad.propietario_nombre || "Sin propietario"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Tanque *
                   </label>
-                  <label className="text-sm font-semibold">Unidad de medida
-                    <select required disabled={Boolean(editando) || guardando} value={medidaId} onChange={e => setMedidaId(e.target.value)} className="mt-1 w-full rounded-xl border bg-white p-3"><option value="">Seleccione</option>{medidas.filter(m => m.estado === "Activo" || m.id === editando?.unidad_medida_id).map(m => <option key={m.id} value={m.id}>{m.nombre} {m.abreviatura ? `(${m.abreviatura})` : ""}</option>)}</select>
+                  <select
+                    disabled={editandoId !== null && (tieneLecturas || consultandoLecturas)}
+                    value={tanqueId}
+                    onChange={(e) => setTanqueId(e.target.value)}
+                    className="w-full rounded-xl border bg-white px-4 py-3"
+                  >
+                    <option value="">Seleccione</option>
+                    {tanques.map((tanque) => (
+                      <option key={tanque.id} value={tanque.id}>
+                        {tanque.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Unidad de lectura (m³) *
                   </label>
-                  <label className="text-sm font-semibold">Número de serie
-                    <input required disabled={Boolean(editando) || guardando} value={numeroSerie} onChange={e => setNumeroSerie(e.target.value)} className="mt-1 w-full rounded-xl border p-3" placeholder="Serie física del medidor" />
+                  <select
+                    disabled={editandoId !== null && (tieneLecturas || consultandoLecturas)}
+                    value={unidadMedidaId}
+                    onChange={(e) => setUnidadMedidaId(e.target.value)}
+                    className="w-full rounded-xl border bg-white px-4 py-3"
+                  >
+                    <option value="">Seleccione</option>
+                    {unidadesMedida.map((unidad) => (
+                      <option key={unidad.id} value={unidad.id}>
+                        {unidad.nombre}
+                        {unidad.abreviatura
+                          ? ` (${unidad.abreviatura})`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Número de serie *
                   </label>
-                  <label className="text-sm font-semibold">Lectura inicial
-                    <input required type="number" min="0" step="0.0001" disabled={Boolean(editando) || guardando} value={lecturaInicial} onChange={e => setLecturaInicial(e.target.value)} className="mt-1 w-full rounded-xl border p-3" />
+                  <input
+                    type="text"
+                    value={numeroSerie}
+                    onChange={(e) => setNumeroSerie(e.target.value)}
+                    className="w-full rounded-xl border px-4 py-3"
+                    placeholder="Ej. DJ-A1-M-001"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Lectura inicial (m³) *
                   </label>
-                  <label className="text-sm font-semibold">Fecha de lectura inicial
-                    <input required type="date" disabled={Boolean(editando) || guardando} value={fechaInicial} onChange={e => setFechaInicial(e.target.value)} className="mt-1 w-full rounded-xl border p-3" />
+                  <input
+                    disabled={editandoId !== null && (tieneLecturas || consultandoLecturas)}
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value={lecturaInicial}
+                    onChange={(e) => setLecturaInicial(e.target.value)}
+                    className="w-full rounded-xl border px-4 py-3"
+                    placeholder="0.000"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Fecha lectura inicial *
                   </label>
-                  <label className="text-sm font-semibold">Fecha de instalación (opcional)
-                    <input type="date" disabled={Boolean(editando) || guardando} value={fechaInstalacion} onChange={e => setFechaInstalacion(e.target.value)} className="mt-1 w-full rounded-xl border p-3" />
+                  <input
+                    disabled={editandoId !== null && !historialVerificado}
+                    type="date"
+                    value={fechaLecturaInicial}
+                    onChange={(e) =>
+                      setFechaLecturaInicial(e.target.value)
+                    }
+                    className="w-full rounded-xl border px-4 py-3"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Fecha instalación
                   </label>
-                  {editando && <label className="text-sm font-semibold">Estado
-                    <select value={estado} disabled={guardando} onChange={e => {
-                      const nuevo = e.target.value === "Inactivo" ? "Inactivo" : "Activo";
-                      setEstado(nuevo);
-                      if (nuevo === "Activo") setFechaRetiro("");
-                    }} className="mt-1 w-full rounded-xl border bg-white p-3"><option value="Activo">Activo</option><option value="Inactivo">Inactivo</option></select>
-                  </label>}
-                  {editando && estado === "Inactivo" && <label className="text-sm font-semibold">Fecha de retiro (si corresponde)
-                    <input type="date" disabled={guardando} value={fechaRetiro} onChange={e => setFechaRetiro(e.target.value)} className="mt-1 w-full rounded-xl border p-3" />
-                  </label>}
-                  <label className="text-sm font-semibold md:col-span-2">Observación
-                    <textarea value={observacion} disabled={guardando} onChange={e => setObservacion(e.target.value)} rows={2} className="mt-1 w-full rounded-xl border p-3" />
+                  <input
+                    type="date"
+                    value={fechaInstalacion}
+                    onChange={(e) => setFechaInstalacion(e.target.value)}
+                    className="w-full rounded-xl border px-4 py-3"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Estado
                   </label>
-                  <div className="flex flex-wrap gap-2 md:col-span-2">
-                    <button type="submit" disabled={guardando} className="rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white disabled:opacity-50">{guardando ? "Guardando…" : editando ? "Guardar cambios" : "Guardar medidor"}</button>
-                    <button type="button" disabled={guardando} onClick={() => { limpiarFormulario(); setMostrarFormulario(false); }} className="rounded-xl border bg-slate-100 px-5 py-3 font-bold text-slate-700 disabled:opacity-50">Cancelar</button>
-                  </div>
-                </form>
-                <p className="mt-3 text-xs text-amber-800">Pendiente para una versión posterior: carga de fotografía, auditoría de cambios y sustitución completa con historial de lecturas.</p>
-              </section>
-            )}
+                  <select
+                    value={estado}
+                    onChange={(e) => setEstado(e.target.value)}
+                    className="w-full rounded-xl border bg-white px-4 py-3"
+                  >
+                    <option value="Activo">Activo</option>
+                    <option value="Inactivo">Inactivo</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-sm font-semibold">
+                    Foto del medidor
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) =>
+                      setFotoMedidor(e.target.files?.[0] || null)
+                    }
+                    className="w-full rounded-xl border bg-white px-4 py-3"
+                  />
+                  {fotoActualUrl && (
+                    <a
+                      href={fotoActualUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-block text-xs font-bold text-blue-700 underline"
+                    >
+                      Ver foto actual
+                    </a>
+                  )}
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-sm font-semibold">
+                    Observación
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={observacion}
+                    onChange={(e) => setObservacion(e.target.value)}
+                    className="w-full rounded-xl border px-4 py-3"
+                    placeholder="Ubicación, condición o nota del medidor."
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-2 md:col-span-4">
+                  <button
+                    type="submit"
+                    disabled={guardando || loading || (editandoId !== null && (!historialVerificado || consultandoLecturas))}
+                    className="rounded-xl bg-emerald-700 px-5 py-3 font-black text-white hover:bg-emerald-800 disabled:opacity-50"
+                  >
+                    {guardando
+                      ? "Guardando..."
+                      : editandoId
+                        ? "Actualizar medidor"
+                        : "Guardar medidor"}
+                  </button>
+
+                  {editandoId && (
+                    <button
+                      type="button"
+                      onClick={limpiarFormulario}
+                      className="rounded-xl border bg-slate-100 px-5 py-3 font-bold text-slate-800 hover:bg-slate-200"
+                    >
+                      Cancelar edición
+                    </button>
+                  )}
+                </div>
+              </form>
+            </section>
+
+            <section className="rounded-3xl border bg-white p-6 shadow-sm">
+              <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-xl font-black text-slate-900">
+                    Medidores registrados
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Cada apartamento debe mantener un solo medidor activo.
+                  </p>
+                </div>
+
+                <input
+                  type="text"
+                  value={buscar}
+                  onChange={(e) => setBuscar(e.target.value)}
+                  className="w-full rounded-xl border px-4 py-3 md:w-80"
+                  placeholder="Buscar apartamento, serie..."
+                />
+              </div>
+
+              <div className="overflow-auto rounded-2xl border">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-100">
+                    <tr>
+                      <th className="border p-3 text-left">Apartamento</th>
+                      <th className="border p-3 text-left">Propietario</th>
+                      <th className="border p-3 text-left">Serie</th>
+                      <th className="border p-3 text-left">Tanque</th>
+                      <th className="border p-3 text-left">Unidad</th>
+                      <th className="border p-3 text-right">Lectura inicial</th>
+                      <th className="border p-3 text-left">Fecha inicial</th>
+                      <th className="border p-3 text-center">Estado</th>
+                      <th className="border p-3 text-center">Acción</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {medidoresFiltrados.map((medidor) => (
+                      <tr key={medidor.id} className="hover:bg-slate-50">
+                        <td className="border p-3 font-black">
+                          {medidor.unidades?.codigo || "-"}
+                        </td>
+                        <td className="border p-3">
+                          {medidor.unidades?.propietario_nombre ||
+                            "Sin propietario"}
+                        </td>
+                        <td className="border p-3 font-semibold">
+                          {medidor.numero_serie}
+                        </td>
+                        <td className="border p-3">
+                          {medidor.gas_tanques?.nombre || "-"}
+                        </td>
+                        <td className="border p-3">
+                          {medidor.gas_unidades_medida?.nombre || "-"}{" "}
+                          {medidor.gas_unidades_medida?.abreviatura
+                            ? `(${medidor.gas_unidades_medida.abreviatura})`
+                            : ""}
+                        </td>
+                        <td className="border p-3 text-right font-bold">
+                          {numero(medidor.lectura_inicial)}
+                        </td>
+                        <td className="border p-3">
+                          {medidor.fecha_lectura_inicial || "-"}
+                        </td>
+                        <td className="border p-3 text-center">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-black ${
+                              medidor.estado === "Activo"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-200 text-slate-700"
+                            }`}
+                          >
+                            {medidor.estado}
+                          </span>
+                        </td>
+                        <td className="border p-3">
+                          <div className="flex flex-wrap justify-center gap-2">
+                            <button
+                              type="button"
+                              disabled={guardando || loading}
+                              onClick={() => void cambiarSerieReal(medidor)}
+                              className="rounded-lg bg-blue-700 px-3 py-1 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+                            >
+                              Cambiar serie
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void editarMedidor(medidor)}
+                              className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-bold text-white hover:bg-amber-700"
+                            >
+                              Editar
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => void cambiarEstado(medidor)}
+                              className="rounded-lg bg-slate-700 px-3 py-1 text-xs font-bold text-white hover:bg-slate-800"
+                            >
+                              {medidor.estado === "Activo"
+                                ? "Inactivar"
+                                : "Activar"}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {medidoresFiltrados.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={9}
+                          className="border p-8 text-center text-slate-500"
+                        >
+                          No hay medidores registrados para este condominio.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </>
         )}
-        <p className="text-right text-xs text-slate-400">VAM · Gas / Medidores · v1.0.1</p>
       </div>
     </main>
   );

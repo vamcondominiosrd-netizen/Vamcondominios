@@ -1,0 +1,68 @@
+VAM - PLANTILLAS DE CORREO SUPABASE
+Versión 1.0
+
+1) URL CONFIGURATION
+Supabase > Authentication > URL Configuration
+
+Pruebas locales:
+Site URL:
+http://localhost:3000
+
+Redirect URL:
+http://localhost:3000/movil/activar-cuenta/confirmar
+
+Producción:
+Site URL:
+https://SU-DOMINIO-DE-VAM
+
+Redirect URL:
+https://SU-DOMINIO-DE-VAM/movil/activar-cuenta/confirmar
+
+No elimine localhost mientras esté haciendo pruebas locales.
+
+2) INVITE USER
+Supabase > Authentication > Email Templates > Invite user
+
+Subject:
+Active su cuenta VAM Condominios
+
+Body:
+Pegue TODO el contenido de:
+01_INVITE_USER_VAM.html
+
+3) RESET PASSWORD / RECOVERY
+Supabase > Authentication > Email Templates > Reset password
+
+Subject:
+Restablezca su acceso a VAM Condominios
+
+Body:
+Pegue TODO el contenido de:
+02_RESET_PASSWORD_VAM.html
+
+IMPORTANTE:
+No cambie {{ .ConfirmationURL }}. Esa variable contiene el enlace seguro generado por Supabase.
+
+4) REMITENTE
+Mientras use el SMTP predeterminado, el remitente puede seguir mostrando Supabase Auth.
+
+Para producción:
+Supabase > Authentication > SMTP Settings / Custom SMTP
+
+Nombre del remitente recomendado:
+VAM Administración de Condominios
+
+Use una dirección propia de VAM como remitente.
+
+5) PRUEBA
+- Abra /movil/acceso-unificado
+- Pulse Activar mi cuenta por primera vez
+- Escriba un correo registrado
+- Debe llegar el correo VAM
+- Pulse Activar mi cuenta VAM
+- Debe abrir /movil/activar-cuenta/confirmar
+- Cree la contraseña
+- VAM debe mostrar Propietario, Directiva o ambos según corresponda
+
+NOTA:
+El flujo actual usa Invite user para cuentas nuevas y Reset password para cuentas ya existentes. Por eso deben personalizarse ambas plantillas.

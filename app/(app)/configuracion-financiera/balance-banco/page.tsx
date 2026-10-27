@@ -1,682 +1,203 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import RoleGuard from "../../RoleGuard";
+import Link from "next/link";
+import { Landmark, WalletCards, ShieldCheck, ShieldOff, ArrowLeft, RefreshCw, Plus, BookOpenCheck, Search, Building2 } from "lucide-react";
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+import StatCard from "@/components/vam/enterprise/StatCard";
 import { supabase } from "@/app/lib/supabaseClient";
 
-type CuentaBancaria = {
-  id: number;
-  condominio_id: number;
-  nombre_banco: string | null;
-  numero_cuenta: string | null;
-  tipo_cuenta: string | null;
-  moneda: string | null;
-  fondo_inicial: number | null;
-  balance_actual: number | null;
-  fondo_ordinario: number | null;
-  fondo_extraordinario: number | null;
-  fondo_reserva: number | null;
-  fondo_tipo: string | null;
-  activa: boolean | null;
-  created_at: string | null;
+type Cuenta = {
+  id: number; condominio_id: number; nombre_banco: string | null;
+  numero_cuenta: string | null; tipo_cuenta: string | null;
+  moneda: string | null; fondo_inicial: number | null;
+  balance_actual: number | null; fondo_ordinario: number | null;
+  fondo_extraordinario: number | null; fondo_reserva: number | null;
+  fondo_tipo: string | null; activa: boolean | null; created_at: string | null;
 };
+type Formulario = {
+  nombre_banco: string; numero_cuenta: string; tipo_cuenta: string;
+  moneda: string; fondo_tipo: string; activa: boolean;
+  fondo_inicial: string; balance_actual: string; fondo_ordinario: string;
+  fondo_extraordinario: string; fondo_reserva: string;
+};
+const vacio = (): Formulario => ({ nombre_banco: "", numero_cuenta: "", tipo_cuenta: "CORRIENTE", moneda: "DOP", fondo_tipo: "ORDINARIO", activa: true, fondo_inicial: "0", balance_actual: "0", fondo_ordinario: "0", fondo_extraordinario: "0", fondo_reserva: "0" });
+const camposMonetarios = ["fondo_inicial", "balance_actual", "fondo_ordinario", "fondo_extraordinario", "fondo_reserva"] as const;
+const dinero = (n: number | null | undefined, moneda = "DOP") => `${moneda === "USD" ? "US$" : "RD$"} ${Number(n ?? 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const roles = ["Super Admin", "Administrador", "Administrador General", "Administrador Condominio", "Administrador de Condominio", "Tesorero"];
 
-export default function BalanceBancoPage() {
-  const [condominioId, setCondominioId] = useState("");
+export default function CuentasBancariasPage() {
+  const [condominioId, setCondominioId] = useState<number | null>(null);
   const [condominioNombre, setCondominioNombre] = useState("");
-
-  const [cuentas, setCuentas] = useState<CuentaBancaria[]>([]);
-  const [cuentaEditandoId, setCuentaEditandoId] = useState<number | null>(null);
-
-  const [nombreBanco, setNombreBanco] = useState("");
-  const [numeroCuenta, setNumeroCuenta] = useState("");
-  const [tipoCuenta, setTipoCuenta] = useState("");
-  const [moneda, setMoneda] = useState("DOP");
-  const [fondoInicial, setFondoInicial] = useState("");
-  const [balanceActual, setBalanceActual] = useState("");
-  const [fondoOrdinario, setFondoOrdinario] = useState("");
-  const [fondoExtraordinario, setFondoExtraordinario] = useState("");
-  const [fondoReserva, setFondoReserva] = useState("");
-  const [fondoTipo, setFondoTipo] = useState("ORDINARIO");
-  const [activa, setActiva] = useState(true);
-
+  const [cuentas, setCuentas] = useState<Cuenta[]>([]);
+  const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
-  const [mensaje, setMensaje] = useState("");
+  const [error, setError] = useState("");
+  const [exito, setExito] = useState("");
+  const [busqueda, setBusqueda] = useState("");
+  const [filtro, setFiltro] = useState("TODAS");
+  const [editando, setEditando] = useState<number | null>(null);
+  const [form, setForm] = useState<Formulario>(vacio());
+  const [mostrarFormulario, setMostrarFormulario] = useState(false);
 
-  useEffect(() => {
-    const id = localStorage.getItem("condominio_id") || "";
-    const nombre = localStorage.getItem("condominio_nombre") || "";
-
-    setCondominioId(id);
-    setCondominioNombre(nombre);
-
-    if (id) {
-      cargarCuentas(id);
-    }
+  const cargar = useCallback(async (id: number) => {
+    setCargando(true); setError("");
+    const { data, error: err } = await supabase.from("cuentas_bancarias")
+      .select("id,condominio_id,nombre_banco,numero_cuenta,tipo_cuenta,moneda,fondo_inicial,balance_actual,fondo_ordinario,fondo_extraordinario,fondo_reserva,fondo_tipo,activa,created_at")
+      .eq("condominio_id", id).order("id", { ascending: true });
+    if (err) setError(`No se pudieron consultar las cuentas: ${err.message}`);
+    else setCuentas((data ?? []) as Cuenta[]);
+    setCargando(false);
   }, []);
 
-  async function cargarCuentas(id: string) {
-    const { data, error } = await supabase
-      .from("cuentas_bancarias")
-      .select(`
-        id,
-        condominio_id,
-        nombre_banco,
-        numero_cuenta,
-        tipo_cuenta,
-        moneda,
-        fondo_inicial,
-        balance_actual,
-        fondo_ordinario,
-        fondo_extraordinario,
-        fondo_reserva,
-        fondo_tipo,
-        activa,
-        created_at
-      `)
-      .eq("condominio_id", Number(id))
-      .order("id", { ascending: true });
-
-    if (error) {
-      setMensaje("Error cargando cuentas bancarias: " + error.message);
-      return;
+  useEffect(() => {
+    const valor = window.localStorage.getItem("condominio_id");
+    const id = Number(valor);
+    setCondominioNombre(window.localStorage.getItem("condominio_nombre") || "Condominio no seleccionado");
+    if (!valor || !Number.isSafeInteger(id) || id <= 0) {
+      setError("Seleccione primero un condominio desde el menú principal.");
+      setCargando(false); return;
     }
+    setCondominioId(id); void cargar(id);
+  }, [cargar]);
 
-    setCuentas((data as CuentaBancaria[]) || []);
-  }
+  const filtradas = useMemo(() => cuentas.filter(c => {
+    const texto = `${c.nombre_banco ?? ""} ${c.numero_cuenta ?? ""} ${c.tipo_cuenta ?? ""}`.toLowerCase();
+    return texto.includes(busqueda.toLowerCase()) && (filtro === "TODAS" || (filtro === "ACTIVAS" ? c.activa === true : c.activa !== true));
+  }), [cuentas, busqueda, filtro]);
+  const activas = cuentas.filter(c => c.activa).length;
+  const monedas = [...new Set(cuentas.map(c => c.moneda || "DOP"))];
+  const balances = monedas.map(moneda => ({ moneda, total: cuentas.filter(c => (c.moneda || "DOP") === moneda).reduce((a, c) => a + Number(c.balance_actual ?? 0), 0) }));
 
-  function limpiarFormulario() {
-    setCuentaEditandoId(null);
-    setNombreBanco("");
-    setNumeroCuenta("");
-    setTipoCuenta("");
-    setMoneda("DOP");
-    setFondoInicial("");
-    setBalanceActual("");
-    setFondoOrdinario("");
-    setFondoExtraordinario("");
-    setFondoReserva("");
-    setFondoTipo("ORDINARIO");
-    setActiva(true);
-  }
-
-  async function guardarCuenta(e: React.FormEvent) {
-    e.preventDefault();
-
-    if (!condominioId) {
-      setMensaje("No hay condominio activo.");
-      return;
-    }
-
-    if (!nombreBanco.trim()) {
-      setMensaje("Debe indicar el nombre del banco.");
-      return;
-    }
-
-    if (!numeroCuenta.trim()) {
-      setMensaje("Debe indicar el número de cuenta.");
-      return;
-    }
-
-    setGuardando(true);
-    setMensaje("");
-
-    const registro = {
-      condominio_id: Number(condominioId),
-      nombre_banco: nombreBanco.trim(),
-      numero_cuenta: numeroCuenta.trim(),
-      tipo_cuenta: tipoCuenta.trim() || null,
-      moneda: moneda.trim() || "DOP",
-      fondo_inicial: Number(fondoInicial || 0),
-      balance_actual: Number(balanceActual || 0),
-      fondo_ordinario: Number(fondoOrdinario || 0),
-      fondo_extraordinario: Number(fondoExtraordinario || 0),
-      fondo_reserva: Number(fondoReserva || 0),
-      fondo_tipo: fondoTipo,
-      activa,
-    };
-
-    let error;
-
-    if (cuentaEditandoId) {
-      const respuesta = await supabase
-        .from("cuentas_bancarias")
-        .update(registro)
-        .eq("id", cuentaEditandoId)
-        .eq("condominio_id", Number(condominioId));
-
-      error = respuesta.error;
-    } else {
-      const respuesta = await supabase.from("cuentas_bancarias").insert([
-        registro,
-      ]);
-
-      error = respuesta.error;
-    }
-
-    setGuardando(false);
-
-    if (error) {
-      setMensaje("Error guardando cuenta bancaria: " + error.message);
-      return;
-    }
-
-    setMensaje(
-      cuentaEditandoId
-        ? "Cuenta bancaria actualizada correctamente."
-        : "Cuenta bancaria registrada correctamente."
-    );
-
-    limpiarFormulario();
-    cargarCuentas(condominioId);
-  }
-
-  function cargarParaEditar(item: CuentaBancaria) {
-    setCuentaEditandoId(item.id);
-    setNombreBanco(item.nombre_banco || "");
-    setNumeroCuenta(item.numero_cuenta || "");
-    setTipoCuenta(item.tipo_cuenta || "");
-    setMoneda(item.moneda || "DOP");
-    setFondoInicial(String(item.fondo_inicial || 0));
-    setBalanceActual(String(item.balance_actual || 0));
-    setFondoOrdinario(String(item.fondo_ordinario || 0));
-    setFondoExtraordinario(String(item.fondo_extraordinario || 0));
-    setFondoReserva(String(item.fondo_reserva || 0));
-    setFondoTipo(item.fondo_tipo || "ORDINARIO");
-    setActiva(Boolean(item.activa));
-
+  function editar(c: Cuenta) {
+    setEditando(c.id); setMostrarFormulario(true); setError(""); setExito("");
+    setForm({ nombre_banco: c.nombre_banco || "", numero_cuenta: c.numero_cuenta || "", tipo_cuenta: c.tipo_cuenta || "", moneda: c.moneda || "DOP", fondo_tipo: c.fondo_tipo || "ORDINARIO", activa: c.activa === true,
+      fondo_inicial: String(c.fondo_inicial ?? 0), balance_actual: String(c.balance_actual ?? 0), fondo_ordinario: String(c.fondo_ordinario ?? 0), fondo_extraordinario: String(c.fondo_extraordinario ?? 0), fondo_reserva: String(c.fondo_reserva ?? 0) });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+  function nuevo() { setEditando(null); setForm(vacio()); setError(""); setExito(""); setMostrarFormulario(true); }
+  function cancelar() { setEditando(null); setForm(vacio()); setMostrarFormulario(false); }
+  function actualizar<K extends keyof Formulario>(campo: K, valor: Formulario[K]) { setForm(prev => ({ ...prev, [campo]: valor })); }
 
-  async function cambiarEstadoCuenta(item: CuentaBancaria) {
-    const nuevoEstado = !item.activa;
-
-    const confirmar = confirm(
-      `¿Desea ${nuevoEstado ? "activar" : "inactivar"} esta cuenta bancaria?`
-    );
-
-    if (!confirmar) return;
-
-    const { error } = await supabase
-      .from("cuentas_bancarias")
-      .update({
-        activa: nuevoEstado,
-      })
-      .eq("id", item.id)
-      .eq("condominio_id", Number(condominioId));
-
-    if (error) {
-      setMensaje("Error cambiando estado de cuenta: " + error.message);
-      return;
+  async function guardar(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); if (!condominioId || guardando) return;
+    setError(""); setExito("");
+    if (!form.nombre_banco.trim() || !form.numero_cuenta.trim()) { setError("El banco y el número de cuenta son obligatorios."); return; }
+    const duplicada = cuentas.some(c => c.id !== editando && (c.numero_cuenta || "").trim() === form.numero_cuenta.trim() && (c.nombre_banco || "").trim().toLowerCase() === form.nombre_banco.trim().toLowerCase());
+    if (duplicada) { setError("Esta cuenta ya está registrada en el condominio."); return; }
+    const datosBase = { nombre_banco: form.nombre_banco.trim(), numero_cuenta: form.numero_cuenta.trim(), tipo_cuenta: form.tipo_cuenta.trim() || null, moneda: form.moneda, fondo_tipo: form.fondo_tipo, activa: form.activa };
+    let datos: Record<string, unknown> = { ...datosBase };
+    if (!editando) {
+      for (const campo of camposMonetarios) {
+        const numero = Number(form[campo]);
+        if (!Number.isFinite(numero) || numero < 0) { setError(`Importe inválido en ${campo.replaceAll("_", " ")}.`); return; }
+        datos[campo] = numero;
+      }
+      datos = { ...datos, condominio_id: condominioId };
+      // Los fondos de apertura deben ser consistentes cuando se declaren.
+      const suma = Number(datos.fondo_ordinario) + Number(datos.fondo_extraordinario) + Number(datos.fondo_reserva);
+      if (Math.abs(suma - Number(datos.balance_actual)) > 0.01) {
+        setError("El balance inicial debe coincidir con la suma de fondos ordinario, extraordinario y reserva."); return;
+      }
     }
-
-    setMensaje("Estado de cuenta actualizado correctamente.");
-    cargarCuentas(condominioId);
+    setGuardando(true);
+    try {
+      if (editando) {
+        const { data, error: err } = await supabase.from("cuentas_bancarias").update(datos)
+          .eq("id", editando).eq("condominio_id", condominioId).select("id");
+        if (err) throw err;
+        if (!data?.length) throw new Error("No se actualizó la cuenta. Verifique permisos y políticas de seguridad.");
+      } else {
+        const { data, error: err } = await supabase.from("cuentas_bancarias").insert(datos).select("id");
+        if (err) throw err;
+        if (!data?.length) throw new Error("No se confirmó el registro. Verifique permisos y políticas de seguridad.");
+      }
+      setExito(editando ? "Datos generales actualizados. Los saldos permanecen intactos." : "Cuenta bancaria registrada correctamente.");
+      cancelar(); await cargar(condominioId);
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : String((e as { message?: string })?.message || "Error desconocido")); }
+    finally { setGuardando(false); }
   }
 
-  function dinero(valor: number | null | undefined) {
-    return Number(valor || 0).toLocaleString("es-DO", {
-      minimumFractionDigits: 2,
-    });
+  async function cambiarEstado(c: Cuenta) {
+    if (!condominioId || guardando) return;
+    if (!window.confirm(`¿${c.activa ? "Inactivar" : "Activar"} la cuenta ${c.nombre_banco} · ${c.numero_cuenta}?`)) return;
+    setGuardando(true); setError(""); setExito("");
+    const { data, error: err } = await supabase.from("cuentas_bancarias").update({ activa: !c.activa })
+      .eq("id", c.id).eq("condominio_id", condominioId).select("id");
+    setGuardando(false);
+    if (err) setError(err.message);
+    else if (!data?.length) setError("No se actualizó el estado. Verifique permisos.");
+    else { setExito("Estado actualizado correctamente."); await cargar(condominioId); }
   }
 
-  const totalFondoInicial = cuentas.reduce(
-    (sum, c) => sum + Number(c.fondo_inicial || 0),
-    0
-  );
-
-  const totalBalanceActual = cuentas.reduce(
-    (sum, c) => sum + Number(c.balance_actual || 0),
-    0
-  );
-
-  const totalFondoOrdinario = cuentas.reduce(
-    (sum, c) => sum + Number(c.fondo_ordinario || 0),
-    0
-  );
-
-  const totalFondoExtraordinario = cuentas.reduce(
-    (sum, c) => sum + Number(c.fondo_extraordinario || 0),
-    0
-  );
-
-  const totalFondoReserva = cuentas.reduce(
-    (sum, c) => sum + Number(c.fondo_reserva || 0),
-    0
-  );
-
-  return (
-    <RoleGuard roles={["Super Admin", "Administrador", "Tesorero"]}>
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">
-            Cuentas Bancarias / Fondos
-          </h1>
-
-          <p className="text-slate-500">
-            Configuración oficial de cuentas bancarias, balance actual y fondos
-            del condominio.
-          </p>
+  return <RoleGuard roles={roles}>
+    <PageContainer>
+      <ModuleMenu
+        title="Banco"
+        subtitle="Cuentas bancarias, fondos y control financiero por condominio."
+        tone="green"
+        items={[
+          { href: "/banco", label: "Dashboard Banco", icon: Landmark },
+          { href: "/configuracion-financiera/balance-banco", label: "Cuentas Bancarias", icon: Building2 },
+          { href: "/finanzas/control-bancario", label: "Control Bancario", icon: BookOpenCheck },
+        ]}
+      />
+      <ModuleToolbar
+        title="Cuentas Bancarias"
+        subtitle={`Administración de cuentas y consulta de fondos · ${condominioNombre} · v1.3.0`}
+        icon={Landmark}
+        actions={<div className="flex flex-wrap items-center gap-2">
+          <Link href="/banco" className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><ArrowLeft className="h-4 w-4" /> Banco</Link>
+          <button type="button" onClick={nuevo} disabled={!condominioId} className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-50"><Plus className="h-4 w-4" /> Registrar cuenta</button>
+        </div>}
+      />
+      {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>}
+      {exito && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{exito}</div>}
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard title="Cuentas registradas" value={String(cuentas.length)} subtitle="Cuentas del condominio" icon={WalletCards} tone="blue" />
+        <StatCard title="Cuentas activas" value={String(activas)} subtitle="Disponibles para operación" icon={ShieldCheck} tone="green" />
+        <StatCard title="Cuentas inactivas" value={String(cuentas.length - activas)} subtitle="Fuera de operación" icon={ShieldOff} tone="slate" />
+        <div className="rounded-2xl border bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-slate-500">Balance por moneda</p>
+          {balances.length ? balances.map(b => <p key={b.moneda} className="mt-2 text-lg font-black text-slate-900">{dinero(b.total, b.moneda)}</p>) : <p className="mt-2 text-lg font-bold text-slate-600">Sin cuentas</p>}
         </div>
-
-        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
-          <p className="text-sm text-blue-800 font-semibold">
-            Fuente oficial del banco
-          </p>
-
-          <p className="text-sm text-blue-700 mt-1">
-            Este módulo usa la tabla <strong>cuentas_bancarias</strong>. La tabla
-            vieja <strong>balances_banco</strong> ya no debe usarse para reportes
-            financieros.
-          </p>
-        </div>
-
-        <div className="bg-white rounded-2xl p-5 shadow-sm border">
-          <p className="text-xs uppercase tracking-wide text-slate-500">
-            Condominio activo
-          </p>
-
-          <p className="font-bold text-slate-800 mt-1">
-            {condominioNombre || "No seleccionado"}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <ResumenCard
-            titulo="Fondo inicial"
-            valor={totalFondoInicial}
-            color="text-blue-700"
-          />
-
-          <ResumenCard
-            titulo="Balance actual banco"
-            valor={totalBalanceActual}
-            color="text-green-700"
-          />
-
-          <ResumenCard
-            titulo="Fondo ordinario"
-            valor={totalFondoOrdinario}
-            color="text-emerald-700"
-          />
-
-          <ResumenCard
-            titulo="Fondo extraordinario"
-            valor={totalFondoExtraordinario}
-            color="text-purple-700"
-          />
-
-          <ResumenCard
-            titulo="Fondo reserva"
-            valor={totalFondoReserva}
-            color="text-amber-700"
-          />
-        </div>
-
-        <div className="bg-white rounded-2xl p-6 shadow-sm border">
-          <h2 className="text-xl font-bold mb-4">
-            {cuentaEditandoId ? "Editar cuenta bancaria" : "Registrar cuenta bancaria"}
-          </h2>
-
-          <form
-            onSubmit={guardarCuenta}
-            className="grid grid-cols-1 md:grid-cols-3 gap-4"
-          >
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Banco *
-              </label>
-
-              <input
-                type="text"
-                value={nombreBanco}
-                onChange={(e) => setNombreBanco(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full"
-                placeholder="Ej. Banco Popular Dominicano"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Número de cuenta *
-              </label>
-
-              <input
-                type="text"
-                value={numeroCuenta}
-                onChange={(e) => setNumeroCuenta(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full"
-                placeholder="Número de cuenta"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Tipo de cuenta
-              </label>
-
-              <input
-                type="text"
-                value={tipoCuenta}
-                onChange={(e) => setTipoCuenta(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full"
-                placeholder="Corriente / Ahorro"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Moneda
-              </label>
-
-              <select
-                value={moneda}
-                onChange={(e) => setMoneda(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full bg-white"
-              >
-                <option value="DOP">DOP - Peso Dominicano</option>
-                <option value="USD">USD - Dólar</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Fondo inicial
-              </label>
-
-              <input
-                type="number"
-                step="0.01"
-                value={fondoInicial}
-                onChange={(e) => setFondoInicial(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full"
-                placeholder="0.00"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Balance actual banco
-              </label>
-
-              <input
-                type="number"
-                step="0.01"
-                value={balanceActual}
-                onChange={(e) => setBalanceActual(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full"
-                placeholder="0.00"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Fondo ordinario
-              </label>
-
-              <input
-                type="number"
-                step="0.01"
-                value={fondoOrdinario}
-                onChange={(e) => setFondoOrdinario(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full"
-                placeholder="0.00"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Fondo extraordinario
-              </label>
-
-              <input
-                type="number"
-                step="0.01"
-                value={fondoExtraordinario}
-                onChange={(e) => setFondoExtraordinario(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full"
-                placeholder="0.00"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Fondo reserva
-              </label>
-
-              <input
-                type="number"
-                step="0.01"
-                value={fondoReserva}
-                onChange={(e) => setFondoReserva(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full"
-                placeholder="0.00"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Fondo principal
-              </label>
-
-              <select
-                value={fondoTipo}
-                onChange={(e) => setFondoTipo(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full bg-white"
-              >
-                <option value="ORDINARIO">ORDINARIO</option>
-                <option value="EXTRAORDINARIO">EXTRAORDINARIO</option>
-                <option value="RESERVA">RESERVA</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-1">
-                Estado
-              </label>
-
-              <select
-                value={activa ? "true" : "false"}
-                onChange={(e) => setActiva(e.target.value === "true")}
-                className="border rounded-lg px-3 py-2 w-full bg-white"
-              >
-                <option value="true">Activa</option>
-                <option value="false">Inactiva</option>
-              </select>
-            </div>
-
-            <div className="md:col-span-3 flex gap-2">
-              <button
-                type="submit"
-                disabled={guardando}
-                className="bg-blue-700 hover:bg-blue-800 text-white px-5 py-2 rounded-lg font-semibold disabled:opacity-60"
-              >
-                {guardando
-                  ? "Guardando..."
-                  : cuentaEditandoId
-                  ? "Actualizar cuenta"
-                  : "Guardar cuenta"}
-              </button>
-
-              {cuentaEditandoId && (
-                <button
-                  type="button"
-                  onClick={limpiarFormulario}
-                  className="bg-slate-700 hover:bg-slate-800 text-white px-5 py-2 rounded-lg font-semibold"
-                >
-                  Cancelar edición
-                </button>
-              )}
-            </div>
-          </form>
-
-          {mensaje && (
-            <div className="mt-4 bg-blue-50 border border-blue-200 text-blue-700 rounded-xl p-3 text-sm">
-              {mensaje}
-            </div>
-          )}
-        </div>
-
-        <div className="bg-white rounded-2xl p-6 shadow-sm border">
-          <h2 className="text-xl font-bold mb-4">
-            Cuentas bancarias registradas
-          </h2>
-
-          <div className="overflow-auto border rounded-xl">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-100">
-                <tr>
-                  <th className="p-3 border text-left">Banco</th>
-                  <th className="p-3 border text-left">Cuenta</th>
-                  <th className="p-3 border text-left">Tipo</th>
-                  <th className="p-3 border text-left">Moneda</th>
-                  <th className="p-3 border text-right">Fondo inicial</th>
-                  <th className="p-3 border text-right">Balance actual</th>
-                  <th className="p-3 border text-right">Ordinario</th>
-                  <th className="p-3 border text-right">Extraordinario</th>
-                  <th className="p-3 border text-right">Reserva</th>
-                  <th className="p-3 border text-center">Estado</th>
-                  <th className="p-3 border text-center">Acción</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {cuentas.map((c) => (
-                  <tr key={c.id}>
-                    <td className="p-3 border font-semibold">
-                      {c.nombre_banco || "-"}
-                    </td>
-
-                    <td className="p-3 border">{c.numero_cuenta || "-"}</td>
-
-                    <td className="p-3 border">{c.tipo_cuenta || "-"}</td>
-
-                    <td className="p-3 border">{c.moneda || "DOP"}</td>
-
-                    <td className="p-3 border text-right">
-                      RD$ {dinero(c.fondo_inicial)}
-                    </td>
-
-                    <td className="p-3 border text-right font-bold text-green-700">
-                      RD$ {dinero(c.balance_actual)}
-                    </td>
-
-                    <td className="p-3 border text-right">
-                      RD$ {dinero(c.fondo_ordinario)}
-                    </td>
-
-                    <td className="p-3 border text-right">
-                      RD$ {dinero(c.fondo_extraordinario)}
-                    </td>
-
-                    <td className="p-3 border text-right">
-                      RD$ {dinero(c.fondo_reserva)}
-                    </td>
-
-                    <td className="p-3 border text-center">
-                      <span
-                        className={
-                          c.activa
-                            ? "bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold"
-                            : "bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold"
-                        }
-                      >
-                        {c.activa ? "Activa" : "Inactiva"}
-                      </span>
-                    </td>
-
-                    <td className="p-3 border text-center">
-                      <div className="flex justify-center gap-2">
-                        <button
-                          onClick={() => cargarParaEditar(c)}
-                          className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs"
-                        >
-                          Editar
-                        </button>
-
-                        <button
-                          onClick={() => cambiarEstadoCuenta(c)}
-                          className={
-                            c.activa
-                              ? "bg-red-700 text-white px-4 py-2 rounded-lg text-xs"
-                              : "bg-green-700 text-white px-4 py-2 rounded-lg text-xs"
-                          }
-                        >
-                          {c.activa ? "Inactivar" : "Activar"}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-
-                {cuentas.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={11}
-                      className="p-6 text-center text-slate-500 border"
-                    >
-                      No hay cuentas bancarias registradas para este condominio.
-                    </td>
-                  </tr>
-                )}
-
-                {cuentas.length > 0 && (
-                  <tr className="bg-slate-100 font-bold">
-                    <td className="p-3 border" colSpan={4}>
-                      TOTAL
-                    </td>
-
-                    <td className="p-3 border text-right">
-                      RD$ {dinero(totalFondoInicial)}
-                    </td>
-
-                    <td className="p-3 border text-right text-green-700">
-                      RD$ {dinero(totalBalanceActual)}
-                    </td>
-
-                    <td className="p-3 border text-right">
-                      RD$ {dinero(totalFondoOrdinario)}
-                    </td>
-
-                    <td className="p-3 border text-right">
-                      RD$ {dinero(totalFondoExtraordinario)}
-                    </td>
-
-                    <td className="p-3 border text-right">
-                      RD$ {dinero(totalFondoReserva)}
-                    </td>
-
-                    <td className="p-3 border text-center" colSpan={2}>
-                      -
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      </section>
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <strong>Control financiero:</strong> los balances y fondos existentes se consultan aquí, pero no se modifican durante la edición de una cuenta. Los ajustes contables deben hacerse mediante el flujo bancario autorizado.
       </div>
-    </RoleGuard>
-  );
+      {mostrarFormulario && <SectionCard title={editando ? `Editar cuenta #${editando}` : "Registrar cuenta bancaria"} subtitle="Datos generales y configuración de fondos">
+        <div className="mb-4 flex justify-end"><button type="button" onClick={cancelar} className="text-sm font-semibold text-slate-600 hover:text-slate-900">Cerrar formulario</button></div>
+        <form onSubmit={guardar} className="space-y-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Campo titulo="Banco *" valor={form.nombre_banco} cambiar={v => actualizar("nombre_banco", v)} />
+            <Campo titulo="Número de cuenta *" valor={form.numero_cuenta} cambiar={v => actualizar("numero_cuenta", v)} />
+            <Campo titulo="Tipo de cuenta" valor={form.tipo_cuenta} cambiar={v => actualizar("tipo_cuenta", v)} />
+            <label className="block text-sm font-semibold text-slate-700">Moneda<select value={form.moneda} onChange={e => actualizar("moneda", e.target.value)} className="mt-1 w-full rounded-lg border p-3"><option value="DOP">DOP · Peso dominicano</option><option value="USD">USD · Dólar</option></select></label>
+            <label className="block text-sm font-semibold text-slate-700">Fondo principal<select value={form.fondo_tipo} onChange={e => actualizar("fondo_tipo", e.target.value)} className="mt-1 w-full rounded-lg border p-3"><option value="ORDINARIO">Ordinario</option><option value="EXTRAORDINARIO">Extraordinario</option><option value="RESERVA">Reserva</option></select></label>
+            <label className="block text-sm font-semibold text-slate-700">Estado<select value={form.activa ? "SI" : "NO"} onChange={e => actualizar("activa", e.target.value === "SI")} className="mt-1 w-full rounded-lg border p-3"><option value="SI">Activa</option><option value="NO">Inactiva</option></select></label>
+          </div>
+          {!editando && <div className="rounded-xl bg-slate-50 p-4"><h3 className="mb-1 font-bold">Saldos de apertura</h3><p className="mb-4 text-xs text-slate-500">Para una cuenta nueva, indique los saldos iniciales verificados. El balance debe coincidir con la suma de los tres fondos.</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              {camposMonetarios.map(k => <Campo key={k} titulo={k.replaceAll("_", " ")} valor={form[k]} cambiar={v => actualizar(k, v)} tipo="number" />)}
+            </div></div>}
+          {editando && <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Edición limitada a datos generales. No se actualizarán fondo inicial, balance ni distribución de fondos.</p>}
+          <div className="flex flex-wrap gap-3"><button type="submit" disabled={guardando} className="rounded-xl bg-blue-700 px-6 py-3 font-semibold text-white disabled:opacity-50">{guardando ? "Guardando…" : editando ? "Guardar cambios" : "Registrar cuenta"}</button><button type="button" onClick={cancelar} className="rounded-xl border px-6 py-3 font-semibold">Cancelar</button></div>
+        </form>
+      </SectionCard>}
+      <SectionCard title="Cuentas del condominio" subtitle="Consulta de cuentas bancarias, balances y fondos">
+        <div className="mb-4 flex justify-end"><button type="button" onClick={() => condominioId && void cargar(condominioId)} disabled={cargando} className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold disabled:opacity-50"><RefreshCw className="h-4 w-4" /> Actualizar lista</button></div>
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_190px]"><input aria-label="Buscar cuenta" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar banco o número de cuenta…" className="rounded-lg border p-3"/><select aria-label="Filtrar estado" value={filtro} onChange={e => setFiltro(e.target.value)} className="rounded-lg border p-3"><option value="TODAS">Todas</option><option value="ACTIVAS">Activas</option><option value="INACTIVAS">Inactivas</option></select></div>
+        <div className="overflow-x-auto rounded-xl border"><table className="min-w-[920px] w-full text-left text-sm"><thead className="bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3">Banco / Cuenta</th><th className="p-3">Tipo / Moneda</th><th className="p-3 text-right">Balance</th><th className="p-3 text-right">Ordinario</th><th className="p-3 text-right">Extraordinario</th><th className="p-3 text-right">Reserva</th><th className="p-3">Estado</th><th className="p-3">Acciones</th></tr></thead>
+          <tbody>{filtradas.map(c => <tr key={c.id} className="border-t hover:bg-slate-50"><td className="p-3"><p className="font-bold">{c.nombre_banco || "—"}</p><p className="font-mono text-xs text-slate-500">{c.numero_cuenta || "—"}</p></td><td className="p-3">{c.tipo_cuenta || "—"}<p className="text-xs text-slate-500">{c.moneda || "DOP"} · {c.fondo_tipo || "—"}</p></td><td className="p-3 text-right font-bold">{dinero(c.balance_actual, c.moneda || "DOP")}</td><td className="p-3 text-right">{dinero(c.fondo_ordinario, c.moneda || "DOP")}</td><td className="p-3 text-right">{dinero(c.fondo_extraordinario, c.moneda || "DOP")}</td><td className="p-3 text-right">{dinero(c.fondo_reserva, c.moneda || "DOP")}</td><td className="p-3"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${c.activa ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-700"}`}>{c.activa ? "Activa" : "Inactiva"}</span></td><td className="p-3"><div className="flex gap-2"><button type="button" onClick={() => editar(c)} className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-white">Editar</button><button type="button" onClick={() => void cambiarEstado(c)} disabled={guardando} className="rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-50">{c.activa ? "Inactivar" : "Activar"}</button></div></td></tr>)}
+          {!cargando && !filtradas.length && <tr><td colSpan={8} className="p-8 text-center text-slate-500">{cuentas.length ? "No hay resultados con estos filtros." : "No hay cuentas registradas para este condominio."}</td></tr>}
+          {cargando && <tr><td colSpan={8} className="p-8 text-center text-slate-500">Cargando cuentas bancarias…</td></tr>}</tbody></table></div>
+        <p className="mt-3 text-xs text-slate-500">Los totales se muestran por moneda; no se mezclan pesos y dólares. Fuente: cuentas_bancarias.</p>
+      </SectionCard>
+    </PageContainer>
+  </RoleGuard>;
 }
-
-function ResumenCard({
-  titulo,
-  valor,
-  color,
-}: {
-  titulo: string;
-  valor: number;
-  color: string;
-}) {
-  return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm border">
-      <p className="text-sm text-slate-500">{titulo}</p>
-      <h2 className={`text-xl font-black mt-2 ${color}`}>
-        RD$ {Number(valor || 0).toLocaleString("es-DO", {
-          minimumFractionDigits: 2,
-        })}
-      </h2>
-    </div>
-  );
-}
+function Indicador({ titulo, valor }: { titulo: string; valor: string }) { return <div className="rounded-2xl border bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">{titulo}</p><p className="mt-2 text-3xl font-black text-slate-900">{valor}</p></div>; }
+function Campo({ titulo, valor, cambiar, tipo = "text" }: { titulo: string; valor: string; cambiar: (v: string) => void; tipo?: string }) { return <label className="block text-sm font-semibold capitalize text-slate-700">{titulo}<input type={tipo} min={tipo === "number" ? "0" : undefined} step={tipo === "number" ? "0.01" : undefined} value={valor} onChange={e => cambiar(e.target.value)} className="mt-1 w-full rounded-lg border p-3 font-normal" /></label>; }

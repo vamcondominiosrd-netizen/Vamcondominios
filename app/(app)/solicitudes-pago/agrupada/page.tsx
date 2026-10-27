@@ -62,7 +62,7 @@ type SoporteSubido = {
   url: string;
 };
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const BUCKET_SOPORTES = "solicitudes-pago-agrupadas";
 const ESTADO_INICIAL = "Pendiente aprobación tesorero";
 const MAX_ARCHIVO_BYTES = 10 * 1024 * 1024;
@@ -236,6 +236,7 @@ export default function SolicitudPagoAgrupadaPage() {
 
     if (error) {
       console.error(error);
+      alert("No se pudieron cargar las facturas pendientes de Gas: " + error.message);
       setFacturasGas([]);
       setCargandoGas(false);
       return;
@@ -250,7 +251,7 @@ export default function SolicitudPagoAgrupadaPage() {
     );
 
     setFacturasGas(
-      ((data as GasFacturaPendiente[]) || []).filter(
+      ((data as unknown as GasFacturaPendiente[]) || []).filter(
         (f) => !yaAgregadas.has(Number(f.id))
       )
     );
@@ -594,12 +595,20 @@ export default function SolicitudPagoAgrupadaPage() {
       }
     }
 
-    const numerosFactura = facturas.map((factura) =>
-      factura.no_factura.trim().toLowerCase()
-    );
+    // Una misma factura de gas puede abastecer varios tanques: comparten NCF,
+    // pero cada recepción tiene un identificador de origen distinto.
+    const manuales = facturas.filter((f) => f.fuente === "MANUAL");
+    const numerosManuales = manuales.map((f) => f.no_factura.trim().toLowerCase());
+    if (new Set(numerosManuales).size !== numerosManuales.length) {
+      alert("Hay números de facturas manuales duplicados.");
+      return false;
+    }
 
-    if (new Set(numerosFactura).size !== numerosFactura.length) {
-      alert("Hay números de factura duplicados dentro de la solicitud.");
+    const idsGas = facturas
+      .filter((f) => f.fuente === "GAS")
+      .map((f) => f.origen_id);
+    if (idsGas.some((id) => id === null) || new Set(idsGas).size !== idsGas.length) {
+      alert("Hay recepciones de gas duplicadas o sin identificador.");
       return false;
     }
 
@@ -616,23 +625,6 @@ export default function SolicitudPagoAgrupadaPage() {
 
     setMostrarVistaPrevia(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  async function obtenerProximoNumeroSolicitud() {
-    const { data, error } = await supabase.rpc(
-      "obtener_proximo_numero_solicitud",
-      {
-        p_condominio_id: Number(condominioId),
-      }
-    );
-
-    if (error) {
-      throw new Error(
-        "No se pudo obtener el próximo número de solicitud: " + error.message
-      );
-    }
-
-    return Number(data || 1);
   }
 
   async function subirSoporteGeneral(): Promise<SoporteSubido> {
@@ -695,9 +687,6 @@ export default function SolicitudPagoAgrupadaPage() {
     setLoading(true);
 
     let soporteSubido: SoporteSubido | null = null;
-    let solicitudCreadaId: number | null = null;
-    let numeroSolicitudCreada: number | null = null;
-
     try {
       soporteSubido = await subirSoporteGeneral();
 
@@ -733,119 +722,46 @@ export default function SolicitudPagoAgrupadaPage() {
         })
         .join("\n");
 
-      let ultimoError = "";
-
-      for (let intento = 1; intento <= 3; intento += 1) {
-        const numeroSolicitud = await obtenerProximoNumeroSolicitud();
-
-        const { data: solicitud, error } = await supabase
-          .from("solicitudes_pago")
-          .insert({
+      // Un único RPC ejecuta encabezado, detalles y vinculación de gas
+      // dentro de la MISMA transacción de PostgreSQL.
+      const { data: numeroCreado, error: guardarError } = await supabase.rpc(
+        "vam_crear_solicitud_agrupada",
+        {
+          p_encabezado: {
             condominio_id: Number(condominioId),
             condominio: condominioNombre,
             fecha_solicitud: fechaSolicitud,
             proveedor_id: Number(proveedorId),
             categoria_id: Number(categoriaId),
             concepto: concepto.trim(),
-            detalle: `Solicitud agrupada de facturas\n\n${detalleTexto}\n\nTotal facturas: ${
-              facturas.length
-            }\nMonto base registrado: RD$ ${dinero(
-              montoGeneral
-            )}\nITBIS registrado: RD$ ${dinero(
-              itbisGeneral
-            )}\nTotal general: RD$ ${dinero(totalGeneral)}`,
-            monto: montoGeneral,
-            itbis: itbisGeneral,
-            total: totalGeneral,
-            no_factura: "VARIAS",
-            ncf: "VARIOS",
-            metodo_pago: "Cheque",
-            cuenta_banco: null,
+            detalle: `Solicitud agrupada de facturas\n\n${detalleTexto}\n\nTotal facturas: ${facturas.length}\nMonto base registrado: RD$ ${dinero(montoGeneral)}\nITBIS registrado: RD$ ${dinero(itbisGeneral)}\nTotal general: RD$ ${dinero(totalGeneral)}`,
+            monto: Number(montoGeneral.toFixed(2)),
+            itbis: Number(itbisGeneral.toFixed(2)),
+            total: Number(totalGeneral.toFixed(2)),
             soporte_url: soporteSubido.url,
-            prioridad: "Normal",
-            estado: ESTADO_INICIAL,
             created_by: usuario,
-            numero_solicitud: numeroSolicitud,
-            origen_modulo: "PAGO_AGRUPADO",
-          })
-          .select("id, numero_solicitud")
-          .single();
-
-        if (!error && solicitud) {
-          solicitudCreadaId = Number(solicitud.id);
-          numeroSolicitudCreada = Number(
-            solicitud.numero_solicitud || numeroSolicitud
-          );
-          break;
+          },
+          p_detalles: facturas.map((factura) => ({
+            no_factura: factura.no_factura.trim(),
+            fecha_factura: factura.fecha_factura,
+            ncf: factura.ncf.trim() || null,
+            monto: Number(factura.monto || 0),
+            itbis: Number(factura.itbis || 0),
+            total: Number(factura.total || factura.monto || 0),
+            soporte_url: factura.soporte_url || soporteSubido?.url || null,
+            origen_modulo: factura.origen_modulo,
+            origen_id: factura.origen_id,
+          })),
         }
-
-        ultimoError = error?.message || "Error creando la solicitud.";
-
-        const consecutivoDuplicado =
-          error?.code === "23505" &&
-          ultimoError.includes(
-            "solicitudes_pago_condominio_numero_unique"
-          );
-
-        if (!consecutivoDuplicado) {
-          throw new Error(ultimoError);
-        }
+      );
+      if (guardarError) {
+        throw new Error(guardarError.message);
       }
-
-      if (!solicitudCreadaId) {
-        throw new Error(
-          ultimoError ||
-            "No fue posible generar un número único para la solicitud."
-        );
-      }
-
-      const detalleInsert = facturas.map((factura) => ({
-        solicitud_pago_id: solicitudCreadaId,
-        condominio_id: Number(condominioId),
-        proveedor_id: Number(proveedorId),
-        no_factura: factura.no_factura.trim(),
-        fecha_factura: factura.fecha_factura,
-        ncf: factura.ncf.trim() || null,
-        concepto: concepto.trim(),
-        monto: Number(factura.monto || 0),
-        itbis: Number(factura.itbis || 0),
-        total: Number(factura.total || factura.monto || 0),
-        soporte_url: factura.soporte_url || soporteSubido?.url || null,
-        origen_modulo: factura.origen_modulo,
-        origen_id: factura.origen_id,
-      }));
-
-      const { error: detalleError } = await supabase
-        .from("solicitudes_pago_detalle")
-        .insert(detalleInsert);
-
-      if (detalleError) {
-        const { error: rollbackError } = await supabase
-          .from("solicitudes_pago")
-          .delete()
-          .eq("id", solicitudCreadaId)
-          .eq("condominio_id", Number(condominioId));
-
-        if (!rollbackError && soporteSubido) {
-          await eliminarSoporteSubido(soporteSubido.ruta);
-          soporteSubido = null;
-          solicitudCreadaId = null;
-        }
-
-        if (rollbackError) {
-          throw new Error(
-            `Falló el detalle (${detalleError.message}) y no fue posible revertir la solicitud ${solicitudCreadaId}. Revísela antes de continuar.`
-          );
-        }
-
-        throw new Error(
-          "No se pudo guardar el detalle de las facturas. La solicitud fue revertida para evitar registros incompletos."
-        );
-      }
-
+      const numeroSolicitudCreada = Number(numeroCreado);
+      // La función devuelve el número consecutivo de la solicitud.
       alert(
         `Solicitud agrupada No. ${String(
-          numeroSolicitudCreada || solicitudCreadaId
+          numeroSolicitudCreada
         ).padStart(
           5,
           "0"
@@ -854,7 +770,7 @@ export default function SolicitudPagoAgrupadaPage() {
 
       window.location.href = "/solicitudes-pago";
     } catch (error: unknown) {
-      if (!solicitudCreadaId && soporteSubido) {
+      if (soporteSubido) {
         await eliminarSoporteSubido(soporteSubido.ruta);
       }
 

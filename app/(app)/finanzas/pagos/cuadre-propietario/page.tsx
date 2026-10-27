@@ -739,6 +739,11 @@ export default function CuadrePropietarioPage() {
         tone="blue"
         items={[
           {
+            href: "/finanzas/cuentas-por-cobrar/saldos-iniciales",
+            label: "Saldos iniciales",
+            icon: WalletCards,
+          },
+          {
             href: "/finanzas/pagos/cuadre-propietario",
             label: "Cuadre de pagos",
             icon: ClipboardCheck,

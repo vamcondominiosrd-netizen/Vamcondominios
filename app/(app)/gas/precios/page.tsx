@@ -1,3 +1,10 @@
+/*
+ * VAM Administración de Condominios
+ * Módulo: Gas / Precios de Gas
+ * Versión: v1.1.0
+ * Corrección: proveedores filtrados por condominio activo.
+ */
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -80,7 +87,7 @@ export default function GasPreciosPage() {
 
     await Promise.all([
       cargarPrecios(id),
-      cargarProveedores(),
+      cargarProveedores(id),
       cargarUnidades(),
     ]);
 
@@ -115,10 +122,16 @@ export default function GasPreciosPage() {
     setPrecios((data as GasPrecio[]) || []);
   }
 
-  async function cargarProveedores() {
+  async function cargarProveedores(id: string) {
+    if (!id) {
+      setProveedores([]);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("catalogo_proveedores")
       .select("id, nombre_proveedor")
+      .eq("condominio_id", Number(id))
       .order("nombre_proveedor", { ascending: true });
 
     if (error) {

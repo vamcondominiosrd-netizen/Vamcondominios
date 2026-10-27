@@ -9,6 +9,8 @@ import {
   SearchCheck,
   Upload,
   WalletCards,
+  Building2,
+  BookOpenCheck,
 } from "lucide-react";
 
 import PageContainer from "@/components/vam/enterprise/PageContainer";
@@ -25,7 +27,21 @@ type AccesoBanco = {
   icono: any;
 };
 
+const MODULO_VERSION = "v1.0.1";
+
 const accesosBanco: AccesoBanco[] = [
+  {
+    titulo: "Cuentas Bancarias",
+    descripcion: "Consultar y administrar las cuentas bancarias del condominio.",
+    href: "/configuracion-financiera/balance-banco",
+    icono: Building2,
+  },
+  {
+    titulo: "Control Bancario",
+    descripcion: "Consultar movimientos, ingresos, egresos, balances y cierres bancarios.",
+    href: "/finanzas/control-bancario",
+    icono: BookOpenCheck,
+  },
   {
     titulo: "Importar Banco",
     descripcion: "Subir archivo bancario del período para procesar transacciones.",
@@ -63,10 +79,12 @@ export default function BancoPage() {
     <PageContainer>
       <ModuleMenu
         title="Banco"
-        subtitle="Importaciones, identificación de pagos, pagos identificados y alias."
+        subtitle="Cuentas bancarias, control bancario, importaciones e identificación de pagos."
         tone="green"
         items={[
           { href: "/banco", label: "Dashboard", icon: BarChart3 },
+          { href: "/configuracion-financiera/balance-banco", label: "Cuentas Bancarias", icon: Building2 },
+          { href: "/finanzas/control-bancario", label: "Control Bancario", icon: BookOpenCheck },
           { href: "/archivo-banco/importar", label: "Importar Banco", icon: Upload },
           { href: "/archivo-banco/identificar", label: "Identificar", icon: SearchCheck },
           { href: "/pagos-identificados", label: "Identificados", icon: WalletCards },
@@ -77,7 +95,7 @@ export default function BancoPage() {
 
       <ModuleToolbar
         title="Dashboard Banco"
-        subtitle="Centro operativo para importación bancaria, identificación de pagos y mantenimiento de alias."
+        subtitle="Centro operativo de cuentas, control bancario, importación e identificación de pagos."
         icon={Landmark}
         actions={
           <ModuleActions
@@ -104,7 +122,7 @@ export default function BancoPage() {
         }
       />
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
         <StatCard
           title="Paso 1"
           value="Importar"
@@ -202,6 +220,10 @@ export default function BancoPage() {
           </div>
         </div>
       </section>
+
+      <div className="text-right text-xs font-semibold text-slate-400">
+        Dashboard Banco · {MODULO_VERSION} · 16/10/2026
+      </div>
     </PageContainer>
   );
 }
