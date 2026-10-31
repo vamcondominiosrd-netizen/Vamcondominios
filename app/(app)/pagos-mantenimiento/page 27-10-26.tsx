@@ -1,0 +1,3096 @@
+"use client";
+
+/*
+ * VAM Administración de Condominios
+ * Módulo: Pagos de Mantenimiento
+ * Versión: v1.0.7
+ * Fecha de versión: 16/10/2026
+ *
+ * CAMBIOS v1.0.6
+ * - Consulta saldos iniciales por condominio y unidad.
+ * - Desglosa deuda inicial y cuotas; actualiza total y monto sugerido.
+ * - Conserva comprobantes, pagos históricos y flujo bancario.
+ *
+ * CAMBIOS v1.0.5
+ * - Muestra dentro de Pago Mantenimiento el comprobante enviado por el propietario.
+ * - Conserva el comprobante original recuperado desde pagos_movil.
+ * - Permite abrir comprobantes con URL completa o ruta privada del bucket
+ *   comprobantes-pagos-propietarios mediante URL firmada.
+ * - No modifica el flujo de registro ni la generación del recibo.
+ *
+ * CAMBIOS v1.0.4
+ * - Corrige recuperación del comprobante móvil usando únicamente columnas
+ *   confirmadas de pagos_movil.
+ * - Elimina tipo_fondo y otros campos no existentes de la consulta directa.
+ * - Cuando el comprobante se recupera desde pagos_movil, el fondo usa
+ *   ORDINARIO como valor seguro por defecto para pagos de mantenimiento.
+ *
+ * CAMBIOS v1.0.3
+ * - Si el pago viene desde Comprobantes del propietario, ya no depende únicamente
+ *   de localStorage para recuperar la información preparada.
+ * - Si falta o está desactualizado vam_pago_movil_preparar, recupera pagos_movil
+ *   directamente por pago_movil_id + condominio_id y reconstruye el contexto.
+ * - Precarga unidad, fondo, fecha, monto, método, referencia y comprobante original.
+ * - Mantiene el flujo final hacia /recibos/pago/mantenimiento/{pago_id}.
+ *
+ * CAMBIOS v1.0.1
+ * - Se valida en el frontend el control matemático devuelto por el motor de pagos.
+ * - Se exige que monto aplicado + nuevo saldo a favor = monto realmente recibido.
+ * - Se detiene el flujo posterior si el RPC responde con un control inconsistente.
+ * - La bitácora muestra aplicado, saldo a favor nuevo y total de control.
+ * - Se conserva el flujo de pagos históricos, conciliación, banco y contabilidad.
+ *
+ * CAMBIOS v1.0.0
+ * - Se incorpora control visible de nombre y versión del módulo.
+ * - Los pagos históricos se cargan únicamente al seleccionar una unidad.
+ * - Se separa la consulta de pagos históricos y su detalle para reducir fallos de fetch.
+ * - Los errores de red en históricos ya no bloquean ni derriban el módulo principal.
+ * - Se mantiene intacto el flujo de pagos activos, conciliación y registro contable.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/app/lib/supabaseClient";
+import { generarAsientoPagoMantenimiento } from "@/app/lib/contabilidad/generarAsientoPagoMantenimiento";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import PagoMantenimientoToolbar from "./components/PagoMantenimientoToolbar";
+import PagoResumen from "./components/PagoResumen";
+import PagoForm from "./components/PagoForm";
+import PagoHistorial from "./components/PagoHistorial";
+
+import type { CuentaBancaria, Pago, Unidad } from "./types";
+
+type TipoRegistro = "ACTIVO" | "HISTORICO";
+
+type PeriodoHistoricoForm = {
+  periodo: string;
+  monto: string;
+};
+
+type PagoHistorico = {
+  id: number;
+  unidad_id: number;
+  fecha_pago: string;
+  monto_total: number;
+  referencia_banco: string | null;
+  numero_documento: string | null;
+  descripcion: string;
+  estado: string;
+  movimiento_banco_id: number | null;
+  archivo_banco_id: number | null;
+  pago_identificado_id: number | null;
+  pagos_historicos_detalle?: Array<{
+    periodo: string;
+    monto_aplicado: number;
+  }>;
+};
+
+type TransaccionHistorica = {
+  id: number;
+  archivo_banco_id: number | null;
+  fecha_posteo: string;
+  monto_transaccion: number;
+  no_serial: string | null;
+  descripcion_banco: string;
+  estado: string | null;
+};
+
+type PagoMovilPreparado = {
+  version?: number;
+  origen?: string;
+  preparado_at?: string;
+  pago_movil_id: number;
+  condominio_id: number;
+  unidad_id: number;
+  propietario_id?: number | null;
+  no_apartamento?: string;
+  nombre_propietario?: string;
+  concepto?: string;
+  tipo_fondo?: string;
+  fecha_pago?: string;
+  monto?: number | string;
+  metodo_pago?: string;
+  banco_reportado?: string;
+  referencia?: string;
+  comprobante_url?: string | null;
+  recibido_at?: string | null;
+};
+
+const MODULO_NOMBRE = "Pagos de Propietarios – Mantenimiento y Gas";
+const MODULO_VERSION = "v1.0.7";
+const MODULO_FECHA_VERSION = "16/10/2026";
+
+function normalizarTexto(valor: string) {
+  return valor
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+function fechaLocalISO() {
+  const hoy = new Date();
+  const anio = hoy.getFullYear();
+  const mes = String(hoy.getMonth() + 1).padStart(2, "0");
+  const dia = String(hoy.getDate()).padStart(2, "0");
+
+  return `${anio}-${mes}-${dia}`;
+}
+
+
+function obtenerContextoPagoMovilQuery() {
+  if (typeof window === "undefined") {
+    return { origen: "", pagoMovilId: 0 };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+
+  return {
+    origen: String(params.get("origen") || "").trim().toLowerCase(),
+    pagoMovilId: Number(params.get("pago_movil_id") || 0),
+  };
+}
+
+function normalizarMetodoPagoFormulario(valor?: string | null) {
+  const metodo = normalizarTexto(String(valor || ""));
+
+  if (metodo === "TRANSFERENCIA") return "Transferencia";
+  if (metodo === "DEPOSITO") return "Depósito";
+  if (metodo === "EFECTIVO") return "Efectivo";
+  if (metodo === "CHEQUE") return "Cheque";
+
+  return String(valor || "").trim();
+}
+
+function normalizarFondoFormulario(valor?: string | null) {
+  const fondo = normalizarTexto(String(valor || ""));
+
+  if (fondo === "EXTRAORDINARIO") return "EXTRAORDINARIO";
+  if (fondo === "RESERVA") return "RESERVA";
+
+  return "ORDINARIO";
+}
+
+function obtenerPagoMovilPreparadoActivo(): PagoMovilPreparado | null {
+  if (typeof window === "undefined") return null;
+
+  const params = new URLSearchParams(window.location.search);
+  const origen = String(params.get("origen") || "").trim().toLowerCase();
+
+  if (origen !== "propietario") return null;
+
+  const raw = localStorage.getItem("vam_pago_movil_preparar");
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as PagoMovilPreparado;
+
+    if (
+      !parsed ||
+      !Number(parsed.pago_movil_id) ||
+      !Number(parsed.condominio_id) ||
+      !Number(parsed.unidad_id)
+    ) {
+      return null;
+    }
+
+    const idQuery = Number(params.get("pago_movil_id") || 0);
+
+    if (
+      idQuery > 0 &&
+      Number(parsed.pago_movil_id) !== idQuery
+    ) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function limpiarPagoMovilPreparado() {
+  if (typeof window === "undefined") return;
+
+  localStorage.removeItem("vam_pago_movil_preparar");
+  localStorage.removeItem("vam_pago_movil_preparar_id");
+}
+
+function obtenerPermisosLocales(): string[] {
+  try {
+    const raw = localStorage.getItem("permisos_usuario") || "";
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) =>
+        normalizarTexto(
+          typeof item === "string"
+            ? item
+            : String(item?.codigo || item?.nombre || item?.permiso || ""),
+        ),
+      );
+    }
+
+    return [];
+  } catch {
+    return (localStorage.getItem("permisos_usuario") || "")
+      .split(",")
+      .map(normalizarTexto)
+      .filter(Boolean);
+  }
+}
+
+export default function PagosMantenimientoPage() {
+  const router = useRouter();
+
+  const [condominioId, setCondominioId] = useState<string>("");
+  const [condominioNombre, setCondominioNombre] = useState("");
+  const [cuotaOrdinaria, setCuotaOrdinaria] = useState<number>(0);
+
+  const [unidades, setUnidades] = useState<Unidad[]>([]);
+  const [cuentas, setCuentas] = useState<CuentaBancaria[]>([]);
+  const [pagos, setPagos] = useState<Pago[]>([]);
+  const [pagosHistoricos, setPagosHistoricos] = useState<PagoHistorico[]>([]);
+  const [transaccionesHistoricas, setTransaccionesHistoricas] = useState<
+    TransaccionHistorica[]
+  >([]);
+
+  const [unidadId, setUnidadId] = useState("");
+  const [tipoFondo, setTipoFondo] = useState("ORDINARIO");
+  const [fechaPago, setFechaPago] = useState("");
+  const [monto, setMonto] = useState("");
+  const [metodoPago, setMetodoPago] = useState("");
+  const [referencia, setReferencia] = useState("");
+  const [comprobante, setComprobante] = useState<File | null>(null);
+  const [comprobanteMovilOriginal, setComprobanteMovilOriginal] = useState("");
+  const [abriendoComprobanteMovil, setAbriendoComprobanteMovil] = useState(false);
+
+  const [balancePendienteUnidad, setBalancePendienteUnidad] = useState(0);
+  const [saldoInicialPendienteUnidad, setSaldoInicialPendienteUnidad] = useState(0);
+  const [cuotasPendientesUnidad, setCuotasPendientesUnidad] = useState(0);
+  const [gasPendienteUnidad, setGasPendienteUnidad] = useState(0);
+  const [gasConMedidores, setGasConMedidores] = useState(false);
+  const [saldoFavorDisponible, setSaldoFavorDisponible] = useState(0);
+  const [cargandoSituacionPago, setCargandoSituacionPago] = useState(false);
+
+  const [tipoRegistro, setTipoRegistro] = useState<TipoRegistro>("ACTIVO");
+  const [puedeGestionarHistoricos, setPuedeGestionarHistoricos] =
+    useState(false);
+  const [usarTransaccionImportada, setUsarTransaccionImportada] =
+    useState(true);
+  const [transaccionHistoricaId, setTransaccionHistoricaId] = useState("");
+  const [cuentaHistoricaId, setCuentaHistoricaId] = useState("");
+  const [descripcionHistorica, setDescripcionHistorica] = useState("");
+  const [observacionHistorica, setObservacionHistorica] = useState("");
+  const [beneficiarioHistorico, setBeneficiarioHistorico] = useState("");
+  const [periodosHistoricos, setPeriodosHistoricos] = useState<
+    PeriodoHistoricoForm[]
+  >([{ periodo: "", monto: "" }]);
+
+  const [loading, setLoading] = useState(false);
+  const [cargandoHistoricos, setCargandoHistoricos] = useState(false);
+  const [cargandoTransacciones, setCargandoTransacciones] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [mensaje, setMensaje] = useState("");
+  const [bitacoraProceso, setBitacoraProceso] = useState<string[]>([]);
+
+  function agregarBitacora(texto: string) {
+    const linea = `${new Date().toLocaleTimeString()} - ${texto}`;
+    console.log("[Pagos Mantenimiento]", linea);
+    setBitacoraProceso((prev) => [...prev, linea]);
+  }
+
+  useEffect(() => {
+    const id = localStorage.getItem("condominio_id") || "";
+    const nombre = localStorage.getItem("condominio_nombre") || "";
+
+    if (!id) {
+      router.push("/login");
+      return;
+    }
+
+    const rol = normalizarTexto(
+      localStorage.getItem("usuario_rol") || localStorage.getItem("rol") || "",
+    );
+    const permisos = obtenerPermisosLocales();
+
+    const esAdministrador =
+      rol.includes("ADMINISTRADOR GENERAL") ||
+      rol.includes("ADMINISTRADOR CONDOMINIO") ||
+      rol === "ADMINISTRADOR" ||
+      rol === "ADMIN";
+
+    const tienePermisoExplicito = permisos.some((permiso) =>
+      [
+        "PAGOS HISTORICOS",
+        "PAGOS_HISTORICOS",
+        "GESTIONAR PAGOS HISTORICOS",
+        "GESTIONAR_PAGOS_HISTORICOS",
+      ].includes(permiso),
+    );
+
+    setPuedeGestionarHistoricos(esAdministrador || tienePermisoExplicito);
+
+    const hoy = fechaLocalISO();
+
+    setCondominioId(id);
+    setCondominioNombre(nombre);
+    setFechaPago(hoy);
+
+    cargarConfiguracionCargos(id);
+    void cargarConfiguracionGas(id);
+    cargarUnidades(id);
+    cargarCuentas(id);
+    cargarPagos(id);
+    void cargarPagoMovilPreparadoInicial(id);
+
+    // Los pagos históricos se cargan únicamente cuando el usuario
+    // selecciona una unidad. Esto evita traer todo el histórico del
+    // condominio al abrir la pantalla y reduce errores de red innecesarios.
+    setPagosHistoricos([]);
+  }, [router]);
+
+  function aplicarPagoMovilPreparadoAlFormulario(
+    preparado: PagoMovilPreparado,
+  ) {
+    setComprobanteMovilOriginal(
+      String(preparado.comprobante_url || "").trim(),
+    );
+
+    setUnidadId(String(preparado.unidad_id || ""));
+    setTipoFondo(normalizarFondoFormulario(preparado.tipo_fondo));
+
+    if (preparado.fecha_pago) {
+      setFechaPago(String(preparado.fecha_pago).split("T")[0]);
+    }
+
+    const montoPreparado = Number(preparado.monto || 0);
+    if (montoPreparado > 0) {
+      setMonto(String(montoPreparado));
+    }
+
+    if (preparado.metodo_pago) {
+      setMetodoPago(
+        normalizarMetodoPagoFormulario(preparado.metodo_pago),
+      );
+    }
+
+    if (preparado.referencia) {
+      setReferencia(String(preparado.referencia));
+    }
+  }
+
+  async function buscarPagoMovilPreparadoDesdeBD(
+    idCondominio: string,
+  ): Promise<PagoMovilPreparado | null> {
+    const contexto = obtenerContextoPagoMovilQuery();
+
+    if (
+      contexto.origen !== "propietario" ||
+      !contexto.pagoMovilId ||
+      !idCondominio
+    ) {
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from("pagos_movil")
+      .select(
+        "id,condominio_id,unidad_id,estado,pago_id,comprobante_url,monto,fecha_pago,referencia,recibido_at,revisado_at",
+      )
+      .eq("id", contexto.pagoMovilId)
+      .eq("condominio_id", Number(idCondominio))
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "[Pagos Mantenimiento] Error recuperando comprobante móvil:",
+        error.message,
+      );
+      return null;
+    }
+
+    if (!data) return null;
+
+    const preparado: PagoMovilPreparado = {
+      version: 3,
+      origen: "propietario",
+      preparado_at: new Date().toISOString(),
+      pago_movil_id: Number((data as any).id),
+      condominio_id: Number((data as any).condominio_id),
+      unidad_id: Number((data as any).unidad_id),
+
+      // pagos_movil no contiene tipo_fondo en el esquema actual.
+      // Este flujo corresponde al pago ordinario de mantenimiento.
+      tipo_fondo: "ORDINARIO",
+
+      fecha_pago: String(
+        (data as any).fecha_pago ||
+          (data as any).recibido_at ||
+          fechaLocalISO(),
+      ).split("T")[0],
+      monto: Number((data as any).monto || 0),
+      referencia: String((data as any).referencia || ""),
+      comprobante_url: (data as any).comprobante_url || null,
+      recibido_at: (data as any).recibido_at || null,
+    };
+
+    if (
+      !preparado.pago_movil_id ||
+      !preparado.condominio_id ||
+      !preparado.unidad_id
+    ) {
+      return null;
+    }
+
+    localStorage.setItem(
+      "vam_pago_movil_preparar",
+      JSON.stringify(preparado),
+    );
+    localStorage.setItem(
+      "vam_pago_movil_preparar_id",
+      String(preparado.pago_movil_id),
+    );
+
+    return preparado;
+  }
+
+  async function cargarPagoMovilPreparadoInicial(idCondominio: string) {
+    const contexto = obtenerContextoPagoMovilQuery();
+
+    if (
+      contexto.origen !== "propietario" ||
+      !contexto.pagoMovilId
+    ) {
+      return;
+    }
+
+    let preparado = obtenerPagoMovilPreparadoActivo();
+
+    if (!preparado) {
+      preparado = await buscarPagoMovilPreparadoDesdeBD(idCondominio);
+    }
+
+    if (!preparado) {
+      setMensaje(
+        `No fue posible recuperar el comprobante móvil #${contexto.pagoMovilId}. Revise que siga disponible en Comprobantes.`,
+      );
+      return;
+    }
+
+    aplicarPagoMovilPreparadoAlFormulario(preparado);
+
+    agregarBitacora(
+      `Comprobante móvil #${preparado.pago_movil_id} preparado para registrar el pago.`,
+    );
+  }
+
+  async function abrirComprobanteMovilOriginal() {
+    const almacenado = String(comprobanteMovilOriginal || "").trim();
+
+    if (!almacenado) {
+      alert("Este pago móvil no tiene comprobante asociado.");
+      return;
+    }
+
+    setAbriendoComprobanteMovil(true);
+
+    try {
+      if (/^https?:\/\//i.test(almacenado)) {
+        window.open(almacenado, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      const ruta = almacenado
+        .replace(/^\/+/, "")
+        .replace(/^comprobantes-pagos-propietarios\//, "");
+
+      const { data, error } = await supabase.storage
+        .from("comprobantes-pagos-propietarios")
+        .createSignedUrl(ruta, 600);
+
+      if (error || !data?.signedUrl) {
+        throw new Error(
+          error?.message ||
+            "No fue posible generar el acceso temporal al comprobante.",
+        );
+      }
+
+      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    } catch (error: any) {
+      console.error(
+        "[Pagos Mantenimiento] Error abriendo comprobante móvil:",
+        error?.message || error,
+      );
+
+      alert(
+        "No fue posible abrir el comprobante del propietario: " +
+          (error?.message || "Error desconocido."),
+      );
+    } finally {
+      setAbriendoComprobanteMovil(false);
+    }
+  }
+
+  async function cargarConfiguracionGas(id: string) {
+    const { data, error } = await supabase
+      .from("gas_configuracion")
+      .select("modalidad")
+      .eq("condominio_id", Number(id))
+      .maybeSingle();
+
+    if (error) {
+      console.warn("No se pudo verificar la modalidad de gas:", error.message);
+      setGasConMedidores(false);
+      return;
+    }
+    setGasConMedidores(normalizarTexto(String(data?.modalidad || "")) === "CON_MEDIDORES");
+  }
+
+  async function cargarConfiguracionCargos(id: string) {
+    const { data, error } = await supabase
+      .from("configuracion_cargos")
+      .select("cuota_ordinaria")
+      .eq("condominio_id", Number(id))
+      .eq("activa", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error cargando configuración de cargos:", error.message);
+      setCuotaOrdinaria(0);
+      return;
+    }
+
+    setCuotaOrdinaria(Number(data?.cuota_ordinaria || 0));
+  }
+
+  async function cargarUnidades(id: string) {
+    const { data, error } = await supabase
+      .from("unidades")
+      .select(
+        "id, client_id, codigo, propietario_id, propietario_nombre, propietario_cedula, propietario_telefono, cuota_mensual_actual",
+      )
+      .eq("condominio_id", Number(id))
+      .eq("activa", true)
+      .order("codigo", { ascending: true });
+
+    if (error) {
+      alert("Error cargando unidades: " + error.message);
+      return;
+    }
+
+    setUnidades((data as Unidad[]) || []);
+  }
+
+  async function cargarCuentas(id: string) {
+    const { data, error } = await supabase
+      .from("cuentas_bancarias")
+      .select(
+        `
+        id,
+        nombre_banco,
+        numero_cuenta,
+        fondo_tipo,
+        balance_actual,
+        fondo_ordinario,
+        fondo_extraordinario,
+        fondo_reserva
+      `,
+      )
+      .eq("condominio_id", Number(id))
+      .eq("activa", true)
+      .order("nombre_banco", { ascending: true });
+
+    if (error) {
+      alert("Error cargando cuentas: " + error.message);
+      return;
+    }
+
+    const cuentasCargadas = (data as CuentaBancaria[]) || [];
+    setCuentas(cuentasCargadas);
+
+    if (!cuentaHistoricaId && cuentasCargadas.length > 0) {
+      const ordinaria =
+        cuentasCargadas.find((cuenta) => cuenta.fondo_tipo === "ORDINARIO") ||
+        cuentasCargadas[0];
+
+      setCuentaHistoricaId(String(ordinaria.id));
+    }
+  }
+
+  async function cargarPagos(id: string) {
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("pagos")
+      .select(
+        `
+        id,
+        unidad_id,
+        monto,
+        fecha_pago,
+        referencia,
+        metodo,
+        metodo_pago,
+        origen,
+        tipo_fondo,
+        descripcion,
+        periodo,
+        comprobante_url,
+        bank_transaction_id,
+        pago_identificado_id,
+        unidades (
+          codigo,
+          propietario_nombre
+        )
+      `,
+      )
+      .eq("condominio_id", Number(id))
+      .order("fecha_pago", { ascending: false })
+      .order("id", { ascending: false });
+
+    setLoading(false);
+
+    if (error) {
+      alert("Error cargando pagos: " + error.message);
+      return;
+    }
+
+    setPagos((data || []) as Pago[]);
+  }
+
+  async function cargarPagosHistoricos(id: string, idUnidad?: string) {
+    if (!id || !idUnidad) {
+      setPagosHistoricos([]);
+      setCargandoHistoricos(false);
+      return;
+    }
+
+    setCargandoHistoricos(true);
+
+    try {
+      /*
+       * Separamos encabezado y detalle en dos consultas.
+       * La consulta relacional anidada anterior podía producir
+       * "TypeError: Failed to fetch" y afectar la pantalla en desarrollo.
+       */
+      const { data: historicosData, error: historicosError } = await supabase
+        .from("pagos_historicos_propietarios")
+        .select(
+          `
+          id,
+          unidad_id,
+          fecha_pago,
+          monto_total,
+          referencia_banco,
+          numero_documento,
+          descripcion,
+          estado,
+          movimiento_banco_id,
+          archivo_banco_id,
+          pago_identificado_id
+        `,
+        )
+        .eq("condominio_id", Number(id))
+        .eq("unidad_id", Number(idUnidad))
+        .order("fecha_pago", { ascending: false })
+        .order("id", { ascending: false });
+
+      if (historicosError) {
+        console.warn(
+          "[Pagos Mantenimiento] No se pudieron cargar los encabezados históricos:",
+          historicosError.message,
+        );
+        setPagosHistoricos([]);
+        return;
+      }
+
+      const historicos = (historicosData || []) as Array<
+        Omit<PagoHistorico, "pagos_historicos_detalle">
+      >;
+
+      if (historicos.length === 0) {
+        setPagosHistoricos([]);
+        return;
+      }
+
+      const idsHistoricos = historicos
+        .map((item) => Number(item.id))
+        .filter((valor) => valor > 0);
+
+      const { data: detallesData, error: detallesError } = await supabase
+        .from("pagos_historicos_detalle")
+        .select("pago_historico_id, periodo, monto_aplicado")
+        .in("pago_historico_id", idsHistoricos)
+        .order("periodo", { ascending: true });
+
+      if (detallesError) {
+        console.warn(
+          "[Pagos Mantenimiento] Los pagos históricos cargaron, pero no fue posible obtener su detalle:",
+          detallesError.message,
+        );
+
+        // Los encabezados siguen siendo útiles aunque el detalle falle.
+        setPagosHistoricos(
+          historicos.map((historico) => ({
+            ...historico,
+            pagos_historicos_detalle: [],
+          })) as PagoHistorico[],
+        );
+        return;
+      }
+
+      const detallesPorPago = new Map<
+        number,
+        Array<{ periodo: string; monto_aplicado: number }>
+      >();
+
+      for (const detalle of detallesData || []) {
+        const pagoHistoricoId = Number((detalle as any).pago_historico_id || 0);
+        if (!pagoHistoricoId) continue;
+
+        const lista = detallesPorPago.get(pagoHistoricoId) || [];
+        lista.push({
+          periodo: String((detalle as any).periodo || ""),
+          monto_aplicado: Number((detalle as any).monto_aplicado || 0),
+        });
+        detallesPorPago.set(pagoHistoricoId, lista);
+      }
+
+      const resultado = historicos.map((historico) => ({
+        ...historico,
+        pagos_historicos_detalle:
+          detallesPorPago.get(Number(historico.id)) || [],
+      })) as PagoHistorico[];
+
+      setPagosHistoricos(resultado);
+    } catch (error: any) {
+      /*
+       * La consulta histórica es auxiliar. Un fallo de conexión no debe
+       * impedir que el usuario registre o consulte los pagos activos.
+       */
+      console.warn(
+        "[Pagos Mantenimiento] No se pudieron cargar los pagos históricos:",
+        error?.message || String(error || "Error desconocido"),
+      );
+      setPagosHistoricos([]);
+    } finally {
+      setCargandoHistoricos(false);
+    }
+  }
+
+  async function consultarSituacionPagoUnidad(
+    idCondominio: string,
+    idUnidad: string | number,
+  ) {
+    const [cargosRespuesta, creditosRespuesta, inicialesRespuesta, gasConfiguracionRespuesta] = await Promise.all([
+      supabase
+        .from("cargos_periodicos")
+        .select("id, balance, estado, tipo_cargo")
+        .eq("condominio_id", Number(idCondominio))
+        .eq("unidad_id", Number(idUnidad))
+        .gt("balance", 0),
+
+      supabase
+        .from("creditos_propietarios")
+        .select("id, monto_disponible, estado")
+        .eq("condominio_id", Number(idCondominio))
+        .eq("unidad_id", Number(idUnidad))
+        .gt("monto_disponible", 0),
+
+      supabase
+        .from("saldos_iniciales_propietarios")
+        .select("id, balance, estado, fecha_corte")
+        .eq("condominio_id", Number(idCondominio))
+        .eq("unidad_id", Number(idUnidad))
+        .gt("balance", 0),
+
+      supabase
+        .from("gas_configuracion")
+        .select("modalidad")
+        .eq("condominio_id", Number(idCondominio))
+        .maybeSingle(),
+    ]);
+
+    if (cargosRespuesta.error) {
+      throw new Error(
+        "Error consultando cargos pendientes: " +
+          cargosRespuesta.error.message,
+      );
+    }
+
+    if (creditosRespuesta.error) {
+      throw new Error(
+        "Error consultando saldo a favor: " +
+          creditosRespuesta.error.message,
+      );
+    }
+
+    if (inicialesRespuesta.error) {
+      throw new Error(
+        "Error consultando saldos iniciales: " +
+          inicialesRespuesta.error.message,
+      );
+    }
+
+    const saldoInicialPendiente = (inicialesRespuesta.data || [])
+      .filter((saldo: any) =>
+        ["PENDIENTE", "PARCIAL"].includes(
+          normalizarTexto(String(saldo?.estado || "PENDIENTE")),
+        ),
+      )
+      .reduce(
+        (total: number, saldo: any) =>
+          total + Math.max(Number(saldo?.balance || 0), 0),
+        0,
+      );
+
+    // Solo integrar gas cuando la modalidad esté confirmada.
+    // Si falla la consulta, no presentar una deuda incompleta como total.
+    if (gasConfiguracionRespuesta.error) {
+      throw new Error("Error consultando modalidad de gas: " + gasConfiguracionRespuesta.error.message);
+    }
+    const conMedidores = normalizarTexto(String(gasConfiguracionRespuesta.data?.modalidad || "")) === "CON_MEDIDORES";
+
+    const gasPendiente = conMedidores
+      ? (cargosRespuesta.data || [])
+          .filter((cargo: any) =>
+            normalizarTexto(String(cargo?.tipo_cargo || "")) === "GAS" &&
+            normalizarTexto(String(cargo?.estado || "")) !== "PAGADO"
+          )
+          .reduce((total: number, cargo: any) => total + Math.max(Number(cargo?.balance || 0), 0), 0)
+      : 0;
+
+    const balanceCuotas = (cargosRespuesta.data || [])
+      .filter((cargo: any) => {
+        const estado = normalizarTexto(String(cargo?.estado || "PENDIENTE"));
+        const tipoCargo = normalizarTexto(String(cargo?.tipo_cargo || ""));
+
+        return (
+          estado !== "PAGADO" &&
+          ["ORDINARIO", "MANTENIMIENTO"].includes(tipoCargo)
+        );
+      })
+      .reduce(
+        (total: number, cargo: any) =>
+          total + Math.max(Number(cargo?.balance || 0), 0),
+        0,
+      );
+
+    const saldoFavor = (creditosRespuesta.data || [])
+      .filter(
+        (credito: any) =>
+          normalizarTexto(String(credito?.estado || "")) === "DISPONIBLE",
+      )
+      .reduce(
+        (total: number, credito: any) =>
+          total + Math.max(Number(credito?.monto_disponible || 0), 0),
+        0,
+      );
+
+    const balancePendiente = balanceCuotas + gasPendiente + saldoInicialPendiente;
+
+    return {
+      balancePendiente,
+      balanceCuotas,
+      gasPendiente,
+      conMedidores,
+      saldoInicialPendiente,
+      saldoFavor,
+      montoSugerido: Math.max(balancePendiente - saldoFavor, 0),
+    };
+  }
+
+  async function cargarSituacionPagoUnidad(
+    idCondominio: string,
+    idUnidad: string | number,
+  ) {
+    if (!idCondominio || !idUnidad) {
+      setBalancePendienteUnidad(0);
+      setSaldoInicialPendienteUnidad(0);
+      setCuotasPendientesUnidad(0);
+      setGasPendienteUnidad(0);
+      setSaldoFavorDisponible(0);
+      return;
+    }
+
+    setCargandoSituacionPago(true);
+
+    try {
+      const situacion = await consultarSituacionPagoUnidad(
+        idCondominio,
+        idUnidad,
+      );
+
+      setBalancePendienteUnidad(situacion.balancePendiente);
+      setSaldoInicialPendienteUnidad(situacion.saldoInicialPendiente);
+      setCuotasPendientesUnidad(situacion.balanceCuotas);
+      setGasPendienteUnidad(situacion.gasPendiente);
+      setGasConMedidores(situacion.conMedidores);
+      setSaldoFavorDisponible(situacion.saldoFavor);
+    } catch (error: any) {
+      console.error(
+        "Error cargando situación financiera de la unidad:",
+        error?.message || error,
+      );
+      setBalancePendienteUnidad(0);
+      setSaldoInicialPendienteUnidad(0);
+      setCuotasPendientesUnidad(0);
+      setGasPendienteUnidad(0);
+      setSaldoFavorDisponible(0);
+    }
+
+    setCargandoSituacionPago(false);
+  }
+
+  async function cargarTransaccionesHistoricas(
+    idCondominio: string,
+    idUnidad: string,
+  ) {
+    if (!idCondominio || !idUnidad) {
+      setTransaccionesHistoricas([]);
+      return;
+    }
+
+    setCargandoTransacciones(true);
+
+    try {
+      const [identificadosRespuesta, pagosRespuesta, historicosRespuesta] =
+        await Promise.all([
+          supabase
+            .from("pagos_identificados")
+            .select(
+              "id, archivo_banco_id, fecha_posteo, monto_transaccion, no_serial, descripcion_banco, estado",
+            )
+            .eq("condominio_id", Number(idCondominio))
+            .eq("unidad_id", Number(idUnidad))
+            .order("fecha_posteo", { ascending: true })
+            .order("id", { ascending: true }),
+
+          supabase
+            .from("pagos")
+            .select("bank_transaction_id, pago_identificado_id")
+            .eq("condominio_id", Number(idCondominio))
+            .eq("unidad_id", Number(idUnidad)),
+
+          supabase
+            .from("pagos_historicos_propietarios")
+            .select("archivo_banco_id, pago_identificado_id")
+            .eq("condominio_id", Number(idCondominio))
+            .eq("unidad_id", Number(idUnidad)),
+        ]);
+
+      if (identificadosRespuesta.error) {
+        throw identificadosRespuesta.error;
+      }
+
+      if (pagosRespuesta.error) {
+        throw pagosRespuesta.error;
+      }
+
+      if (historicosRespuesta.error) {
+        throw historicosRespuesta.error;
+      }
+
+      const archivosUsados = new Set<number>();
+      const identificadosUsados = new Set<number>();
+
+      for (const pago of pagosRespuesta.data || []) {
+        if ((pago as any).bank_transaction_id) {
+          archivosUsados.add(Number((pago as any).bank_transaction_id));
+        }
+        if ((pago as any).pago_identificado_id) {
+          identificadosUsados.add(Number((pago as any).pago_identificado_id));
+        }
+      }
+
+      for (const historico of historicosRespuesta.data || []) {
+        if ((historico as any).archivo_banco_id) {
+          archivosUsados.add(Number((historico as any).archivo_banco_id));
+        }
+        if ((historico as any).pago_identificado_id) {
+          identificadosUsados.add(
+            Number((historico as any).pago_identificado_id),
+          );
+        }
+      }
+
+      const disponibles = (identificadosRespuesta.data || [])
+        .filter((item: any) => {
+          const archivoId = Number(item.archivo_banco_id || 0);
+          const identificadoId = Number(item.id || 0);
+
+          return (
+            !archivosUsados.has(archivoId) &&
+            !identificadosUsados.has(identificadoId)
+          );
+        })
+        .map((item: any): TransaccionHistorica => ({
+          id: Number(item.id),
+          archivo_banco_id: item.archivo_banco_id
+            ? Number(item.archivo_banco_id)
+            : null,
+          fecha_posteo: String(item.fecha_posteo || ""),
+          monto_transaccion: Number(item.monto_transaccion || 0),
+          no_serial: item.no_serial ? String(item.no_serial) : null,
+          descripcion_banco: String(item.descripcion_banco || ""),
+          estado: item.estado ? String(item.estado) : null,
+        }));
+
+      setTransaccionesHistoricas(disponibles);
+    } catch (error: any) {
+      console.error(
+        "Error cargando transacciones históricas:",
+        error?.message || error,
+      );
+      setTransaccionesHistoricas([]);
+    }
+
+    setCargandoTransacciones(false);
+  }
+
+  async function refrescarDatos() {
+    if (!condominioId) return;
+
+    await Promise.all([
+      cargarConfiguracionCargos(condominioId),
+      cargarUnidades(condominioId),
+      cargarCuentas(condominioId),
+      cargarPagos(condominioId),
+      cargarPagosHistoricos(condominioId, unidadId || undefined),
+    ]);
+
+    if (unidadId) {
+      await Promise.all([
+        cargarTransaccionesHistoricas(condominioId, unidadId),
+        cargarSituacionPagoUnidad(condominioId, unidadId),
+      ]);
+    }
+  }
+
+  const cuentaAsignada = useMemo(() => {
+    return cuentas.find((c) => c.fondo_tipo === tipoFondo) || null;
+  }, [cuentas, tipoFondo]);
+
+  const cuentaHistorica = useMemo(() => {
+    return (
+      cuentas.find((cuenta) => String(cuenta.id) === cuentaHistoricaId) || null
+    );
+  }, [cuentas, cuentaHistoricaId]);
+
+  const unidadSeleccionada = useMemo(() => {
+    return unidades.find((u) => String(u.id) === unidadId) || null;
+  }, [unidades, unidadId]);
+
+  const cuotaUnidadSeleccionada = useMemo(() => {
+    if (!unidadSeleccionada) return 0;
+
+    const cuotaConfigurada = Number(cuotaOrdinaria || 0);
+    const cuotaUnidad = Number(
+      unidadSeleccionada.cuota_mensual_actual || 0,
+    );
+
+    return cuotaConfigurada > 0 ? cuotaConfigurada : cuotaUnidad;
+  }, [cuotaOrdinaria, unidadSeleccionada]);
+
+  const montoSugeridoUnidad = useMemo(() => {
+    return Math.max(
+      Number(balancePendienteUnidad || 0) -
+        Number(saldoFavorDisponible || 0),
+      0,
+    );
+  }, [balancePendienteUnidad, saldoFavorDisponible]);
+
+  const pagosUnidadSeleccionada = useMemo(() => {
+    if (!unidadId) return [];
+
+    return pagos.filter(
+      (p: any) => String(p.unidad_id || "") === String(unidadId),
+    );
+  }, [pagos, unidadId]);
+
+  const pagosHistoricosUnidad = useMemo(() => {
+    if (!unidadId) return [];
+
+    return pagosHistoricos.filter(
+      (pago) => String(pago.unidad_id) === String(unidadId),
+    );
+  }, [pagosHistoricos, unidadId]);
+
+  const totalDistribuidoHistorico = useMemo(() => {
+    return periodosHistoricos.reduce(
+      (total, detalle) => total + Number(detalle.monto || 0),
+      0,
+    );
+  }, [periodosHistoricos]);
+
+  function seleccionarUnidad(idUnidad: string) {
+    setUnidadId(idUnidad);
+    setTransaccionHistoricaId("");
+    setTransaccionesHistoricas([]);
+    setPeriodosHistoricos([{ periodo: "", monto: "" }]);
+    setBalancePendienteUnidad(0);
+    setGasPendienteUnidad(0);
+    setSaldoFavorDisponible(0);
+
+    const unidad = unidades.find((u) => String(u.id) === idUnidad);
+
+    if (!unidad) {
+      setMonto("");
+      setBeneficiarioHistorico("");
+      return;
+    }
+
+    setBeneficiarioHistorico(unidad.propietario_nombre || unidad.codigo);
+
+    /*
+     * En pagos activos el monto representa exclusivamente el dinero
+     * realmente recibido del propietario. No se completa automáticamente con
+     * la cuota, porque la unidad puede tener saldo a favor o un balance menor.
+     * El comportamiento del registro histórico se conserva.
+     */
+    if (tipoRegistro === "ACTIVO") {
+      setMonto("");
+    } else {
+      const cuotaConfigurada = Number(cuotaOrdinaria || 0);
+      const cuotaUnidad = Number(unidad.cuota_mensual_actual || 0);
+      const cuota = cuotaConfigurada > 0 ? cuotaConfigurada : cuotaUnidad;
+      setMonto(cuota > 0 ? String(cuota) : "");
+    }
+
+    if (condominioId) {
+      cargarPagosHistoricos(condominioId, idUnidad);
+      cargarTransaccionesHistoricas(condominioId, idUnidad);
+
+      if (tipoRegistro === "ACTIVO") {
+        cargarSituacionPagoUnidad(condominioId, idUnidad);
+      }
+    }
+  }
+
+  function cambiarTipoRegistro(tipo: TipoRegistro) {
+    setTipoRegistro(tipo);
+    setFechaPago(fechaLocalISO());
+    setMetodoPago("");
+    setReferencia("");
+    setComprobante(null);
+    setComprobanteMovilOriginal("");
+    setTransaccionHistoricaId("");
+    setDescripcionHistorica("");
+    setObservacionHistorica("");
+    setUsarTransaccionImportada(true);
+    setPeriodosHistoricos([{ periodo: "", monto: "" }]);
+
+    /*
+     * En pagos activos el monto se deja vacío para que el usuario registre
+     * el depósito real. La cuota y el saldo a favor se muestran como guía.
+     */
+    setMonto("");
+
+    if (tipo === "ACTIVO" && unidadSeleccionada && condominioId) {
+      cargarSituacionPagoUnidad(condominioId, unidadSeleccionada.id);
+      void cargarPagoMovilPreparadoInicial(condominioId);
+    }
+
+    const inputFile = document.getElementById(
+      "comprobante",
+    ) as HTMLInputElement | null;
+
+    if (inputFile) inputFile.value = "";
+  }
+
+  function seleccionarTransaccionHistorica(idSeleccionado: string) {
+    setTransaccionHistoricaId(idSeleccionado);
+
+    const transaccion = transaccionesHistoricas.find(
+      (item) => String(item.id) === idSeleccionado,
+    );
+
+    if (!transaccion) return;
+
+    setFechaPago(transaccion.fecha_posteo);
+    setMonto(String(transaccion.monto_transaccion));
+    setReferencia(transaccion.no_serial || "");
+    setDescripcionHistorica(
+      `Pago histórico - ${transaccion.descripcion_banco}`,
+    );
+
+    setPeriodosHistoricos((actuales) => {
+      if (actuales.length === 1 && !actuales[0].periodo && !actuales[0].monto) {
+        return [
+          {
+            periodo: "",
+            monto: String(transaccion.monto_transaccion),
+          },
+        ];
+      }
+
+      return actuales;
+    });
+  }
+
+  function actualizarPeriodoHistorico(
+    index: number,
+    campo: keyof PeriodoHistoricoForm,
+    valor: string,
+  ) {
+    setPeriodosHistoricos((actuales) =>
+      actuales.map((detalle, posicion) =>
+        posicion === index ? { ...detalle, [campo]: valor } : detalle,
+      ),
+    );
+  }
+
+  function agregarPeriodoHistorico() {
+    setPeriodosHistoricos((actuales) => [
+      ...actuales,
+      { periodo: "", monto: "" },
+    ]);
+  }
+
+  function eliminarPeriodoHistorico(index: number) {
+    setPeriodosHistoricos((actuales) => {
+      if (actuales.length === 1) {
+        return [{ periodo: "", monto: "" }];
+      }
+
+      return actuales.filter((_, posicion) => posicion !== index);
+    });
+  }
+
+  async function subirComprobante(unidadIdPago: number) {
+    if (!comprobante || !condominioId) return null;
+
+    const extension = comprobante.name.split(".").pop();
+    const nombreArchivo = `${condominioId}/${Date.now()}-unidad-${unidadIdPago}.${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("comprobantes-pagos")
+      .upload(nombreArchivo, comprobante, { upsert: true });
+
+    if (uploadError) throw new Error(uploadError.message);
+
+    const { data } = supabase.storage
+      .from("comprobantes-pagos")
+      .getPublicUrl(nombreArchivo);
+
+    return data.publicUrl;
+  }
+
+  async function buscarPagosPorReferencia(
+    referenciaLimpia: string,
+    idCondominio: string,
+  ) {
+    if (!referenciaLimpia) return [];
+
+    const { data, error } = await supabase
+      .from("pagos")
+      .select(
+        `
+        id,
+        unidad_id,
+        fecha_pago,
+        monto,
+        referencia,
+        periodo,
+        unidades (
+          codigo,
+          propietario_nombre
+        )
+      `,
+      )
+      .eq("condominio_id", Number(idCondominio))
+      .eq("referencia", referenciaLimpia)
+      .order("fecha_pago", { ascending: false })
+      .order("id", { ascending: false });
+
+    if (error) {
+      throw new Error("Error validando referencia duplicada: " + error.message);
+    }
+
+    return data || [];
+  }
+
+  function formatearFechaReferencia(fecha: string | null | undefined) {
+    const texto = String(fecha || "");
+    const partes = texto.split("-");
+
+    if (partes.length !== 3) return texto || "-";
+
+    return `${partes[2]}/${partes[1]}/${partes[0]}`;
+  }
+
+  function formatearMontoReferencia(valor: number | string | null | undefined) {
+    return Number(valor || 0).toLocaleString("es-DO", {
+      style: "currency",
+      currency: "DOP",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function detallePagoReferencia(pago: any) {
+    const relacionUnidad = Array.isArray(pago?.unidades)
+      ? pago.unidades[0]
+      : pago?.unidades;
+
+    const codigoUnidad = relacionUnidad?.codigo || `Unidad ID ${pago?.unidad_id || "-"}`;
+    const propietario = relacionUnidad?.propietario_nombre || "Sin propietario identificado";
+    const periodoTexto = pago?.periodo
+      ? nombreMesPeriodo(String(pago.periodo).split(",")[0].trim())
+      : "Sin período";
+
+    return (
+      `Pago ID: ${pago?.id || "-"}\n` +
+      `Apartamento: ${codigoUnidad}\n` +
+      `Propietario: ${propietario}\n` +
+      `Fecha: ${formatearFechaReferencia(pago?.fecha_pago)}\n` +
+      `Monto: ${formatearMontoReferencia(pago?.monto)}\n` +
+      `Período: ${periodoTexto}\n` +
+      `Referencia: ${pago?.referencia || "-"}`
+    );
+  }
+
+  function nombreMesPeriodo(periodo: string) {
+    const nombresMeses = [
+      "Enero",
+      "Febrero",
+      "Marzo",
+      "Abril",
+      "Mayo",
+      "Junio",
+      "Julio",
+      "Agosto",
+      "Septiembre",
+      "Octubre",
+      "Noviembre",
+      "Diciembre",
+    ];
+
+    const [anioTexto, mesTexto] = String(periodo || "").split("-");
+    const anio = Number(anioTexto);
+    const mes = Number(mesTexto);
+
+    if (!anio || !mes || mes < 1 || mes > 12) return periodo || "";
+
+    return `${nombresMeses[mes - 1]} ${anio}`;
+  }
+
+  async function obtenerPeriodosPago(
+    idCondominio: string,
+    idUnidad: number,
+    montoPago: number,
+  ) {
+    const { data, error } = await supabase
+      .from("cargos_periodicos")
+      .select("id, periodo, balance, estado, tipo_cargo")
+      .eq("condominio_id", Number(idCondominio))
+      .eq("unidad_id", idUnidad)
+      .gt("balance", 0)
+      .neq("estado", "PAGADO")
+      .order("anio", { ascending: true })
+      .order("mes", { ascending: true })
+      .order("id", { ascending: true });
+
+    if (error) {
+      throw new Error(
+        "Error buscando cargos pendientes para identificar el mes pagado: " +
+          error.message,
+      );
+    }
+
+    const { data: configGas } = await supabase
+      .from("gas_configuracion")
+      .select("modalidad")
+      .eq("condominio_id", Number(idCondominio))
+      .maybeSingle();
+    const conMedidores = normalizarTexto(String(configGas?.modalidad || "")) === "CON_MEDIDORES";
+
+    let restante = Number(montoPago || 0);
+    const periodos: string[] = [];
+
+    for (const cargo of data || []) {
+      if (restante <= 0) break;
+
+      const balance = Number((cargo as any).balance || 0);
+      const periodo = String((cargo as any).periodo || "");
+
+      const tipo = normalizarTexto(String((cargo as any).tipo_cargo || ""));
+      if (balance <= 0 || !periodo ||
+          !(["ORDINARIO", "MANTENIMIENTO"].includes(tipo) || (conMedidores && tipo === "GAS"))) continue;
+
+      periodos.push(periodo);
+      restante -= Math.min(restante, balance);
+    }
+
+    const periodosUnicos = Array.from(new Set(periodos.filter(Boolean)));
+
+    return {
+      periodos: periodosUnicos,
+      mesesTexto: periodosUnicos.map(nombreMesPeriodo).join(", "),
+    };
+  }
+
+  async function obtenerPeriodosAplicadosReales(pagoId: number) {
+    const { data, error } = await supabase
+      .from("pagos_aplicaciones")
+      .select(
+        `
+        id,
+        monto_aplicado,
+        cargos_periodicos (
+          periodo
+        )
+      `,
+      )
+      .eq("pago_id", pagoId)
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.warn(
+        "No se pudieron consultar los períodos aplicados del pago:",
+        error.message,
+      );
+
+      const { data: pagoData } = await supabase
+        .from("pagos")
+        .select("periodo")
+        .eq("id", pagoId)
+        .maybeSingle();
+
+      const periodosRespaldo = String(pagoData?.periodo || "")
+        .split(",")
+        .map((periodo) => periodo.trim())
+        .filter(Boolean);
+
+      return {
+        periodos: Array.from(new Set(periodosRespaldo)),
+        mesesTexto: Array.from(new Set(periodosRespaldo))
+          .map(nombreMesPeriodo)
+          .join(", "),
+      };
+    }
+
+    const periodos = (data || [])
+      .map((aplicacion: any) => {
+        const cargo = Array.isArray(aplicacion.cargos_periodicos)
+          ? aplicacion.cargos_periodicos[0]
+          : aplicacion.cargos_periodicos;
+
+        return String(cargo?.periodo || "").trim();
+      })
+      .filter(Boolean);
+
+    const periodosUnicos = Array.from(new Set(periodos));
+
+    return {
+      periodos: periodosUnicos,
+      mesesTexto: periodosUnicos.map(nombreMesPeriodo).join(", "),
+    };
+  }
+
+  async function guardarPago(e: React.FormEvent) {
+    e.preventDefault();
+    setMensaje("");
+    setBitacoraProceso([]);
+    agregarBitacora("Paso 1: Iniciando validación del pago...");
+
+    if (!unidadId || !fechaPago || !monto) {
+      alert("Debe completar unidad, fecha y monto.");
+      return;
+    }
+
+    if (!condominioId) {
+      alert("No se encontró el condominio activo.");
+      return;
+    }
+
+    if (!cuentaAsignada) {
+      alert(
+        "No existe cuenta bancaria configurada para el fondo seleccionado.",
+      );
+      return;
+    }
+
+    if (!metodoPago) {
+      alert("Debe seleccionar el método de pago.");
+      return;
+    }
+
+    const montoNumerico = Number(monto || 0);
+
+    if (montoNumerico <= 0) {
+      alert("El monto debe ser mayor que cero.");
+      return;
+    }
+
+    const unidad = unidades.find((u) => String(u.id) === unidadId);
+
+    if (!unidad) {
+      alert("Debe seleccionar una unidad válida.");
+      return;
+    }
+
+    let pagoMovilPreparado = obtenerPagoMovilPreparadoActivo();
+
+    if (!pagoMovilPreparado) {
+      pagoMovilPreparado =
+        await buscarPagoMovilPreparadoDesdeBD(condominioId);
+
+      if (pagoMovilPreparado) {
+        aplicarPagoMovilPreparadoAlFormulario(pagoMovilPreparado);
+      }
+    }
+
+    if (
+      pagoMovilPreparado &&
+      Number(pagoMovilPreparado.condominio_id) !== Number(condominioId)
+    ) {
+      alert(
+        "El comprobante preparado pertenece a otro condominio. Regrese a Comprobantes y vuelva a preparar el pago."
+      );
+      return;
+    }
+
+    if (
+      pagoMovilPreparado &&
+      Number(pagoMovilPreparado.unidad_id) !== Number(unidad.id)
+    ) {
+      alert(
+        "La unidad seleccionada no coincide con el comprobante preparado. Revise la unidad antes de continuar."
+      );
+      return;
+    }
+
+    const referenciaLimpia =
+      referencia.trim() || `PAGO_MANUAL_${unidad.id}_${Date.now()}`;
+
+    setGuardando(true);
+
+    let pagoMovilActual: any = null;
+
+    try {
+      if (pagoMovilPreparado) {
+        agregarBitacora(
+          `Paso 1.0: Verificando comprobante móvil #${pagoMovilPreparado.pago_movil_id}...`
+        );
+
+        const { data: pagoMovilData, error: pagoMovilError } = await supabase
+          .from("pagos_movil")
+          .select(
+            "id,condominio_id,unidad_id,estado,pago_id,comprobante_url,monto,fecha_pago,referencia,recibido_at,revisado_at"
+          )
+          .eq("id", Number(pagoMovilPreparado.pago_movil_id))
+          .eq("condominio_id", Number(condominioId))
+          .maybeSingle();
+
+        if (pagoMovilError) {
+          throw new Error(
+            "No fue posible verificar el comprobante móvil: " +
+              pagoMovilError.message
+          );
+        }
+
+        if (!pagoMovilData) {
+          throw new Error(
+            "No se encontró el comprobante móvil preparado."
+          );
+        }
+
+        pagoMovilActual = pagoMovilData;
+
+        const estadoMovil = normalizarTexto(
+          String(pagoMovilActual.estado || "")
+        );
+
+        if (
+          Number(pagoMovilActual.pago_id || 0) > 0 ||
+          estadoMovil.includes("APLICADO")
+        ) {
+          const pagoExistenteId = Number(
+            pagoMovilActual.pago_id || 0
+          );
+
+          limpiarPagoMovilPreparado();
+
+          alert(
+            "Este comprobante ya fue aplicado" +
+              (pagoExistenteId
+                ? ` al pago #${pagoExistenteId}.`
+                : ".") +
+              "\n\nNo se creará un pago duplicado."
+          );
+
+          setGuardando(false);
+
+          if (pagoExistenteId) {
+            router.push(
+              `/recibos/pago/mantenimiento/${pagoExistenteId}`
+            );
+          }
+
+          return;
+        }
+
+        agregarBitacora(
+          "Paso 1.0 OK: Comprobante móvil validado y pendiente de aplicación."
+        );
+      }
+      agregarBitacora(
+        "Paso 1.1: Validando balance pendiente y saldo a favor...",
+      );
+
+      const situacionActual = await consultarSituacionPagoUnidad(
+        condominioId,
+        unidad.id,
+      );
+
+      setBalancePendienteUnidad(situacionActual.balancePendiente);
+      setSaldoInicialPendienteUnidad(situacionActual.saldoInicialPendiente);
+      setCuotasPendientesUnidad(situacionActual.balanceCuotas);
+      setGasPendienteUnidad(situacionActual.gasPendiente);
+      setGasConMedidores(situacionActual.conMedidores);
+      setSaldoFavorDisponible(situacionActual.saldoFavor);
+
+      const montoSugeridoActual = situacionActual.montoSugerido;
+
+      if (situacionActual.balancePendiente <= 0) {
+        const continuarSinCargo = confirm(
+          "UNIDAD SIN CARGOS PENDIENTES\n\n" +
+            `La unidad ${unidad.codigo} no tiene saldos iniciales ni cuotas pendientes.\n\n` +
+            `Monto recibido: ${formatearMontoReferencia(montoNumerico)}\n` +
+            `Saldo a favor actual: ${formatearMontoReferencia(
+              situacionActual.saldoFavor,
+            )}\n\n` +
+            "Si continúa, el dinero recibido podría quedar como saldo a favor para cargos futuros. " +
+            "¿Confirma que este es el depósito real recibido?",
+        );
+
+        if (!continuarSinCargo) {
+          agregarBitacora(
+            "Paso 1.1 detenido: el usuario canceló porque la unidad no tiene cargos pendientes.",
+          );
+          setGuardando(false);
+          return;
+        }
+      } else if (montoNumerico > montoSugeridoActual + 0.009) {
+        const excedenteEstimado = Math.max(
+          montoNumerico - montoSugeridoActual,
+          0,
+        );
+
+        const continuarMonto = confirm(
+          "VALIDACIÓN DEL MONTO RECIBIDO\n\n" +
+            `Unidad: ${unidad.codigo}\n` +
+            `Saldo inicial pendiente: ${formatearMontoReferencia(situacionActual.saldoInicialPendiente)}\n` +
+            `Cuotas pendientes: ${formatearMontoReferencia(situacionActual.balanceCuotas)}\n` +
+            (situacionActual.conMedidores ? `Gas pendiente: ${formatearMontoReferencia(situacionActual.gasPendiente)}\n` : "") +
+            `Balance pendiente total: ${formatearMontoReferencia(
+              situacionActual.balancePendiente,
+            )}\n` +
+            `Saldo a favor disponible: ${formatearMontoReferencia(
+              situacionActual.saldoFavor,
+            )}\n` +
+            `Monto sugerido para saldar pendientes: ${formatearMontoReferencia(
+              montoSugeridoActual,
+            )}\n` +
+            `Monto digitado como recibido: ${formatearMontoReferencia(
+              montoNumerico,
+            )}\n\n` +
+            `Con los cargos actuales, aproximadamente ${formatearMontoReferencia(
+              excedenteEstimado,
+            )} podrían quedar como nuevo saldo a favor.\n\n` +
+            "El campo Monto debe contener únicamente el dinero realmente depositado por el propietario. " +
+            "¿Confirma que el monto digitado es el depósito real recibido?",
+        );
+
+        if (!continuarMonto) {
+          agregarBitacora(
+            "Paso 1.1 detenido: el usuario canceló después de revisar el monto recibido.",
+          );
+          setGuardando(false);
+          return;
+        }
+      }
+
+      agregarBitacora(
+        `Paso 1.1 OK: Balance pendiente ${formatearMontoReferencia(
+          situacionActual.balancePendiente,
+        )}; saldo a favor ${formatearMontoReferencia(
+          situacionActual.saldoFavor,
+        )}; monto sugerido ${formatearMontoReferencia(
+          montoSugeridoActual,
+        )}.`,
+      );
+
+      agregarBitacora("Paso 2: Validando posibles pagos duplicados...");
+
+      const pagosMismaReferencia = await buscarPagosPorReferencia(
+        referenciaLimpia,
+        condominioId,
+      );
+
+      const pagosCoincidenciaExacta = pagosMismaReferencia.filter(
+        (pago: any) =>
+          Number(pago.unidad_id) === Number(unidad.id) &&
+          String(pago.fecha_pago || "") === fechaPago,
+      );
+
+      if (pagosCoincidenciaExacta.length > 0) {
+        const coincidenciasMismoMonto = pagosCoincidenciaExacta.filter(
+          (pago: any) =>
+            Math.round(Number(pago?.monto || 0) * 100) ===
+            Math.round(montoNumerico * 100)
+        );
+
+        /*
+         * Si el pago viene de un comprobante móvil y ya existe un pago
+         * exactamente igual, NO permitimos crear otro. Ofrecemos vincular
+         * el comprobante al pago existente para corregir casos anteriores.
+         */
+        if (
+          pagoMovilActual &&
+          coincidenciasMismoMonto.length > 0
+        ) {
+          const pagoExistente = coincidenciasMismoMonto[0] as any;
+          const pagoExistenteId = Number(pagoExistente.id || 0);
+          const comprobanteOriginalUrl = String(
+            pagoMovilActual?.comprobante_url ||
+              pagoMovilPreparado?.comprobante_url ||
+              ""
+          ).trim();
+
+          const vincularExistente = confirm(
+            "PAGO YA REGISTRADO\n\n" +
+              `Ya existe el pago #${pagoExistenteId} con la misma unidad, fecha, monto y referencia.\n\n` +
+              "Para evitar duplicarlo, VAM puede vincular ahora este comprobante móvil al pago ya existente.\n\n" +
+              "¿Desea vincularlo?"
+          );
+
+          if (!vincularExistente) {
+            agregarBitacora(
+              "Paso 2 detenido: existe un pago idéntico y se evitó crear un duplicado."
+            );
+            setGuardando(false);
+            return;
+          }
+
+          if (comprobanteOriginalUrl) {
+            const { error: errorActualizarPago } = await supabase
+              .from("pagos")
+              .update({
+                comprobante_url: comprobanteOriginalUrl,
+              })
+              .eq("id", pagoExistenteId)
+              .eq("condominio_id", Number(condominioId));
+
+            if (errorActualizarPago) {
+              throw new Error(
+                "No se pudo asociar el comprobante al pago existente: " +
+                  errorActualizarPago.message
+              );
+            }
+          }
+
+          const { error: errorVinculoExistente } = await supabase
+            .from("pagos_movil")
+            .update({
+              estado: "APLICADO",
+              pago_id: pagoExistenteId,
+              aplicado_at: new Date().toISOString(),
+            })
+            .eq("id", Number(pagoMovilActual.id))
+            .eq("condominio_id", Number(condominioId));
+
+          if (errorVinculoExistente) {
+            throw new Error(
+              "No se pudo marcar el comprobante como aplicado: " +
+                errorVinculoExistente.message
+            );
+          }
+
+          limpiarPagoMovilPreparado();
+
+          agregarBitacora(
+            `Paso 2 OK: Comprobante móvil vinculado al pago existente #${pagoExistenteId}. No se creó duplicado.`
+          );
+
+          alert(
+            `El comprobante fue vinculado correctamente al pago #${pagoExistenteId}.\n\nNo se creó un pago nuevo.`
+          );
+
+          setGuardando(false);
+          await cargarPagos(condominioId);
+          router.push(
+            `/recibos/pago/mantenimiento/${pagoExistenteId}`
+          );
+          return;
+        }
+
+        const detalle = pagosCoincidenciaExacta
+          .map((pago: any) => detallePagoReferencia(pago))
+          .join("\n\n------------------------------\n\n");
+
+        const continuar = confirm(
+          "POSIBLE PAGO DUPLICADO\n\n" +
+            "Ya existe un pago con la MISMA UNIDAD, MISMA FECHA y MISMA REFERENCIA.\n\n" +
+            detalle +
+            "\n\nVerifique cuidadosamente antes de continuar. ¿Desea registrar el nuevo pago de todas formas?",
+        );
+
+        if (!continuar) {
+          agregarBitacora(
+            "Paso 2 detenido: el usuario canceló por posible pago duplicado exacto.",
+          );
+          setGuardando(false);
+          return;
+        }
+
+        agregarBitacora(
+          `Paso 2 AVISO: se continuará pese a ${pagosCoincidenciaExacta.length} coincidencia(s) exacta(s).`,
+        );
+      } else if (pagosMismaReferencia.length > 0) {
+        const detalle = pagosMismaReferencia
+          .map((pago: any) => detallePagoReferencia(pago))
+          .join("\n\n------------------------------\n\n");
+
+        const continuar = confirm(
+          "REFERENCIA UTILIZADA ANTERIORMENTE\n\n" +
+            `La referencia ${referenciaLimpia} aparece en ${pagosMismaReferencia.length} pago(s) registrado(s). ` +
+            "La referencia puede repetirse, por lo que esto NO bloquea automáticamente el nuevo pago.\n\n" +
+            detalle +
+            "\n\nVerifique que el nuevo pago pertenece al propietario correcto. ¿Desea continuar?",
+        );
+
+        if (!continuar) {
+          agregarBitacora(
+            "Paso 2 detenido: el usuario canceló después de revisar una referencia repetida.",
+          );
+          setGuardando(false);
+          return;
+        }
+
+        agregarBitacora(
+          `Paso 2 AVISO: referencia repetida encontrada en ${pagosMismaReferencia.length} pago(s); el usuario confirmó continuar.`,
+        );
+      } else {
+        agregarBitacora(
+          "Paso 2 OK: no se encontraron pagos anteriores con esta referencia.",
+        );
+      }
+
+      agregarBitacora(
+        "Paso 3: Preparando comprobante del pago..."
+      );
+
+      const comprobanteNuevoUrl = await subirComprobante(unidad.id);
+
+      const comprobanteOriginalUrl = String(
+        pagoMovilActual?.comprobante_url ||
+          pagoMovilPreparado?.comprobante_url ||
+          ""
+      ).trim();
+
+      const comprobanteUrl =
+        comprobanteNuevoUrl || comprobanteOriginalUrl || null;
+
+      agregarBitacora(
+        comprobanteNuevoUrl
+          ? "Paso 3 OK: Se utilizará el comprobante nuevo seleccionado por el administrador."
+          : comprobanteOriginalUrl
+            ? "Paso 3 OK: Se reutilizará el comprobante original enviado por el propietario."
+            : "Paso 3 AVISO: El pago se registrará sin comprobante."
+      );
+
+      agregarBitacora(
+        "Paso 4: Buscando cargos pendientes para identificar período pagado...",
+      );
+
+      const periodosPago = await obtenerPeriodosPago(
+        condominioId,
+        unidad.id,
+        montoNumerico,
+      );
+
+      const periodoPago =
+        periodosPago.periodos.length > 0
+          ? periodosPago.periodos.join(",")
+          : fechaPago.slice(0, 7);
+
+      const conceptoUnificado = situacionActual.conMedidores ? "mantenimiento y gas" : "mantenimiento";
+    const descripcionPago = periodosPago.mesesTexto
+        ? `Pago ${conceptoUnificado} ${periodosPago.mesesTexto} - Unidad ${unidad.codigo}`
+        : `Pago ${conceptoUnificado} ${nombreMesPeriodo(fechaPago.slice(0, 7))} - Unidad ${unidad.codigo}`;
+
+      agregarBitacora(
+        `Paso 4 OK: Período detectado: ${periodoPago}. Descripción: ${descripcionPago}`,
+      );
+
+      agregarBitacora(
+        "Paso 5: Ejecutando función central registrar_pago_mantenimiento_completo()...",
+      );
+
+      const { data: resultado, error: errorRegistroCompleto } =
+        await supabase.rpc("registrar_pago_mantenimiento_completo", {
+          p_condominio_id: Number(condominioId),
+          p_unidad_id: unidad.id,
+          p_fecha_pago: fechaPago,
+          p_monto: montoNumerico,
+          p_metodo_pago: metodoPago,
+          p_referencia: referenciaLimpia,
+          p_cuenta_bancaria_id: cuentaAsignada.id,
+          p_comprobante_url: comprobanteUrl,
+          p_tipo_fondo: tipoFondo,
+        });
+
+      if (errorRegistroCompleto) {
+        agregarBitacora(
+          "ERROR Paso 5: La función central no pudo completar el pago. " +
+            errorRegistroCompleto.message,
+        );
+        alert(
+          "No se pudo completar el pago. No debe quedar el proceso a medias: " +
+            errorRegistroCompleto.message,
+        );
+        setGuardando(false);
+        await cargarPagos(condominioId);
+        return;
+      }
+
+      const resultadoRpc = resultado as any;
+      const pagoId = Number(resultadoRpc?.pago_id || 0);
+
+      if (!pagoId) {
+        agregarBitacora(
+          "ERROR Paso 5: La función central respondió sin pago_id.",
+        );
+        alert(
+          "El pago pudo haberse registrado, pero la función no devolvió el ID del pago. Revise la base de datos antes de continuar.",
+        );
+        setGuardando(false);
+        await cargarPagos(condominioId);
+        return;
+      }
+
+      /*
+       * Si este registro proviene del portal del propietario, aseguramos
+       * inmediatamente la trazabilidad:
+       * pagos_movil -> pagos y comprobante original -> pago definitivo.
+       * Esto también apaga "Preparar pago" en la bandeja de Comprobantes.
+       */
+      if (pagoMovilActual) {
+        if (comprobanteUrl) {
+          const { error: errorComprobantePago } = await supabase
+            .from("pagos")
+            .update({
+              comprobante_url: comprobanteUrl,
+            })
+            .eq("id", pagoId)
+            .eq("condominio_id", Number(condominioId));
+
+          if (errorComprobantePago) {
+            throw new Error(
+              `El pago #${pagoId} fue creado, pero no se pudo vincular el comprobante: ` +
+                errorComprobantePago.message
+            );
+          }
+        }
+
+        const { error: errorAplicarPagoMovil } = await supabase
+          .from("pagos_movil")
+          .update({
+            estado: "APLICADO",
+            pago_id: pagoId,
+            aplicado_at: new Date().toISOString(),
+          })
+          .eq("id", Number(pagoMovilActual.id))
+          .eq("condominio_id", Number(condominioId));
+
+        if (errorAplicarPagoMovil) {
+          throw new Error(
+            `El pago #${pagoId} fue registrado, pero no se pudo marcar el comprobante móvil como aplicado: ` +
+              errorAplicarPagoMovil.message
+          );
+        }
+
+        limpiarPagoMovilPreparado();
+
+        agregarBitacora(
+          `Paso 5.0 OK: Comprobante móvil #${pagoMovilActual.id} vinculado al pago #${pagoId} y marcado APLICADO.`
+        );
+      }
+
+      /*
+       * CONTROL FRONTEND v1.0.1
+       * El motor SQL v1.0.1 ya valida transaccionalmente:
+       * monto aplicado + nuevo saldo a favor = monto recibido.
+       * Aquí se realiza una segunda validación antes de continuar
+       * con asiento contable, mensaje final y recibo.
+       */
+      const montoAplicadoConfirmado = Number(
+        resultadoRpc?.monto_nuevo_aplicado ?? 0,
+      );
+
+      const nuevoSaldoFavorConfirmado = Number(
+        resultadoRpc?.nuevo_saldo_favor ??
+          resultadoRpc?.monto_no_aplicado ??
+          0,
+      );
+
+      const controlTotalConfirmado = Number(
+        resultadoRpc?.control_total ??
+          montoAplicadoConfirmado + nuevoSaldoFavorConfirmado,
+      );
+
+      const controlCuadradoRpc = resultadoRpc?.control_cuadrado === true;
+      const controlCuadradoLocal =
+        Math.round(controlTotalConfirmado * 100) ===
+        Math.round(montoNumerico * 100);
+
+      if (!controlCuadradoRpc || !controlCuadradoLocal) {
+        agregarBitacora(
+          `ERROR Paso 5: Control del pago inconsistente. Recibido ${formatearMontoReferencia(
+            montoNumerico,
+          )}; aplicado ${formatearMontoReferencia(
+            montoAplicadoConfirmado,
+          )}; saldo a favor ${formatearMontoReferencia(
+            nuevoSaldoFavorConfirmado,
+          )}; control ${formatearMontoReferencia(controlTotalConfirmado)}.`,
+        );
+
+        alert(
+          "CONTROL DE PAGO INCONSISTENTE\n\n" +
+            `Pago recibido: ${formatearMontoReferencia(montoNumerico)}\n` +
+            `Aplicado a cargos: ${formatearMontoReferencia(
+              montoAplicadoConfirmado,
+            )}\n` +
+            `Nuevo saldo a favor: ${formatearMontoReferencia(
+              nuevoSaldoFavorConfirmado,
+            )}\n` +
+            `Total controlado: ${formatearMontoReferencia(
+              controlTotalConfirmado,
+            )}\n\n` +
+            "El flujo se detuvo antes de generar el asiento contable. Revise el pago antes de continuar.",
+        );
+
+        setGuardando(false);
+        await Promise.all([
+          cargarPagos(condominioId),
+          cargarSituacionPagoUnidad(condominioId, unidad.id),
+        ]);
+        return;
+      }
+
+      agregarBitacora(
+        `Paso 5 OK: Pago completo registrado. ID pago: ${pagoId}.`,
+      );
+
+      agregarBitacora(
+        `Paso 5 CONTROL OK: Recibido ${formatearMontoReferencia(
+          montoNumerico,
+        )}; aplicado ${formatearMontoReferencia(
+          montoAplicadoConfirmado,
+        )}; nuevo saldo a favor ${formatearMontoReferencia(
+          nuevoSaldoFavorConfirmado,
+        )}; total control ${formatearMontoReferencia(
+          controlTotalConfirmado,
+        )}.`,
+      );
+
+      agregarBitacora(
+        "Paso 5.1: Consultando los períodos realmente aplicados...",
+      );
+
+      const periodosAplicadosReales =
+        await obtenerPeriodosAplicadosReales(pagoId);
+
+      const mesesAplicadosTexto =
+        periodosAplicadosReales.mesesTexto ||
+        periodosPago.mesesTexto ||
+        nombreMesPeriodo(fechaPago.slice(0, 7));
+
+      const descripcionPagoConfirmada = `Pago ${conceptoUnificado} ${mesesAplicadosTexto} - Unidad ${unidad.codigo}`;
+
+      agregarBitacora(
+        `Paso 5.1 OK: Fecha bancaria ${fechaPago}. Períodos aplicados: ${
+          periodosAplicadosReales.periodos.join(", ") ||
+          periodoPago
+        }.`,
+      );
+
+      if (nuevoSaldoFavorConfirmado > 0) {
+        agregarBitacora(
+          `Paso 5.2: Nuevo saldo a favor generado: ${formatearMontoReferencia(
+            nuevoSaldoFavorConfirmado,
+          )}.`,
+        );
+      } else {
+        agregarBitacora(
+          "Paso 5.2: El pago fue aplicado completamente; no se generó saldo a favor nuevo.",
+        );
+      }
+
+      agregarBitacora("Paso 6: Generando asiento contable...");
+
+      const asientoResultado = await generarAsientoPagoMantenimiento({
+        condominio_id: Number(condominioId),
+        pago_id: pagoId,
+        fecha: fechaPago,
+        monto: montoNumerico,
+        referencia: referenciaLimpia,
+        descripcion: descripcionPagoConfirmada,
+        usuario: null,
+      });
+
+      if (!asientoResultado.ok) {
+        agregarBitacora(
+          "ERROR Paso 6: No se pudo generar asiento contable. " +
+            asientoResultado.error,
+        );
+        alert(
+          "Pago registrado, cargos y Control Bancario actualizados, pero no se pudo generar el asiento contable: " +
+            asientoResultado.error,
+        );
+      } else {
+        agregarBitacora(
+          asientoResultado.duplicado
+            ? "Paso 6 OK: El asiento contable ya existía."
+            : "Paso 6 OK: Asiento contable generado correctamente.",
+        );
+      }
+
+      agregarBitacora("Paso 7: Proceso completado correctamente.");
+
+      setMensaje(
+        `Pago registrado correctamente. Fecha bancaria: ${fechaPago}. Períodos aplicados: ${mesesAplicadosTexto}. Aplicado a cargos: ${formatearMontoReferencia(
+          montoAplicadoConfirmado,
+        )}. Nuevo saldo a favor: ${formatearMontoReferencia(
+          nuevoSaldoFavorConfirmado,
+        )}. Control del pago: CUADRADO.${
+          pagoMovilActual
+            ? " Comprobante del propietario vinculado y marcado como APLICADO."
+            : ""
+        }`,
+      );
+
+      setUnidadId("");
+      setTipoFondo("ORDINARIO");
+      setFechaPago(fechaLocalISO());
+      setMonto("");
+      setMetodoPago("");
+      setReferencia("");
+      setComprobante(null);
+      setComprobanteMovilOriginal("");
+
+      const inputFile = document.getElementById(
+        "comprobante",
+      ) as HTMLInputElement | null;
+
+      if (inputFile) inputFile.value = "";
+
+      await cargarCuentas(condominioId);
+      await cargarPagos(condominioId);
+
+      router.push(`/recibos/pago/mantenimiento/${pagoId}`);
+    } catch (error: any) {
+      agregarBitacora(
+        "ERROR GENERAL: " + (error.message || "Error registrando el pago."),
+      );
+      alert(error.message || "Error registrando el pago.");
+    }
+
+    setGuardando(false);
+  }
+
+  async function guardarPagoHistorico(e: React.FormEvent) {
+    e.preventDefault();
+    setMensaje("");
+    setBitacoraProceso([]);
+
+    if (!puedeGestionarHistoricos) {
+      alert("No tiene permiso para registrar pagos históricos.");
+      return;
+    }
+
+    if (!condominioId || !unidadSeleccionada) {
+      alert("Debe seleccionar una unidad.");
+      return;
+    }
+
+    if (!cuentaHistorica) {
+      alert("Debe seleccionar una cuenta bancaria.");
+      return;
+    }
+
+    if (!fechaPago || Number(monto || 0) <= 0) {
+      alert("Debe indicar fecha y monto válidos.");
+      return;
+    }
+
+    if (!metodoPago) {
+      alert("Debe seleccionar el método de pago.");
+      return;
+    }
+
+    if (usarTransaccionImportada && !transaccionHistoricaId) {
+      alert("Debe seleccionar una transacción bancaria pendiente.");
+      return;
+    }
+
+    const detallesValidos = periodosHistoricos
+      .map((detalle) => ({
+        periodo: detalle.periodo.trim(),
+        monto: Number(detalle.monto || 0),
+        concepto: "Mantenimiento histórico",
+        observacion:
+          "Registro histórico; no modifica cargos ni créditos actuales.",
+      }))
+      .filter((detalle) => detalle.periodo || detalle.monto > 0);
+
+    if (detallesValidos.length === 0) {
+      alert("Debe indicar al menos un periodo histórico.");
+      return;
+    }
+
+    const tieneDetalleInvalido = detallesValidos.some(
+      (detalle) =>
+        !/^\d{4}-(0[1-9]|1[0-2])$/.test(detalle.periodo) || detalle.monto <= 0,
+    );
+
+    if (tieneDetalleInvalido) {
+      alert("Revise los periodos y montos históricos.");
+      return;
+    }
+
+    const montoNumerico = Number(monto || 0);
+
+    if (
+      Math.round(totalDistribuidoHistorico * 100) !==
+      Math.round(montoNumerico * 100)
+    ) {
+      alert(
+        `El total distribuido (${totalDistribuidoHistorico.toFixed(
+          2,
+        )}) debe coincidir con el monto depositado (${montoNumerico.toFixed(
+          2,
+        )}).`,
+      );
+      return;
+    }
+
+    const transaccion = transaccionesHistoricas.find(
+      (item) => String(item.id) === transaccionHistoricaId,
+    );
+
+    setGuardando(true);
+    agregarBitacora("Pago histórico: iniciando validación...");
+
+    try {
+      const descripcionFinal =
+        descripcionHistorica.trim() ||
+        `Pago histórico de mantenimiento - Unidad ${unidadSeleccionada.codigo}`;
+
+      const numeroDocumento = `HIST-${unidadSeleccionada.codigo}-${Date.now()}`;
+
+      agregarBitacora(
+        "Pago histórico: ejecutando registrar_pago_historico_completo()...",
+      );
+
+      const { data, error } = await supabase.rpc(
+        "registrar_pago_historico_completo",
+        {
+          p_condominio_id: Number(condominioId),
+          p_unidad_id: unidadSeleccionada.id,
+          p_cuenta_bancaria_id: cuentaHistorica.id,
+          p_fecha_pago: fechaPago,
+          p_monto_total: montoNumerico,
+          p_metodo_pago: metodoPago,
+          p_referencia_banco: referencia.trim() || null,
+          p_numero_documento: numeroDocumento,
+          p_descripcion: descripcionFinal,
+          p_observacion: observacionHistorica.trim() || null,
+          p_archivo_banco_id:
+            usarTransaccionImportada && transaccion?.archivo_banco_id
+              ? transaccion.archivo_banco_id
+              : null,
+          p_pago_identificado_id:
+            usarTransaccionImportada && transaccion ? transaccion.id : null,
+          p_beneficiario:
+            beneficiarioHistorico.trim() ||
+            unidadSeleccionada.propietario_nombre ||
+            unidadSeleccionada.codigo,
+          p_periodos: detallesValidos,
+        },
+      );
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const resultado = data as any;
+
+      agregarBitacora(
+        `Pago histórico registrado. ID: ${resultado?.pago_historico_id || "-"}. Movimiento bancario: ${
+          resultado?.movimiento_banco_id || "-"
+        }.`,
+      );
+
+      setMensaje(
+        "Pago histórico registrado correctamente. Se agregó al Control Bancario sin afectar cargos ni créditos actuales.",
+      );
+
+      setTransaccionHistoricaId("");
+      setDescripcionHistorica("");
+      setObservacionHistorica("");
+      setReferencia("");
+      setMonto("");
+      setMetodoPago("");
+      setPeriodosHistoricos([{ periodo: "", monto: "" }]);
+
+      await Promise.all([
+        cargarPagosHistoricos(condominioId, unidadId),
+        cargarTransaccionesHistoricas(condominioId, unidadId),
+        cargarCuentas(condominioId),
+      ]);
+    } catch (error: any) {
+      agregarBitacora(
+        "ERROR PAGO HISTÓRICO: " + (error?.message || "No se pudo registrar."),
+      );
+      alert(error?.message || "No se pudo registrar el pago histórico.");
+    }
+
+    setGuardando(false);
+  }
+
+  const pagosResumen = unidadId ? pagosUnidadSeleccionada : pagos;
+
+  const totalPagado = pagosResumen.reduce(
+    (sum, p) => sum + Number(p.monto || 0),
+    0,
+  );
+  const cantidadPagos = pagosResumen.length;
+  const promedioPago = cantidadPagos > 0 ? totalPagado / cantidadPagos : 0;
+  const ultimoPago = pagosResumen[0]?.fecha_pago || "-";
+
+  return (
+    <PageContainer>
+      <PagoMantenimientoToolbar onRefresh={refrescarDatos} />
+
+      {mensaje && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+          {mensaje}
+        </div>
+      )}
+
+      {bitacoraProceso.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-800">
+              Bitácora del proceso de pago
+            </h3>
+            <span className="text-xs text-slate-500">Depuración</span>
+          </div>
+          <div className="max-h-56 space-y-1 overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+            {bitacoraProceso.map((linea, index) => (
+              <div
+                key={`${linea}-${index}`}
+                className={
+                  linea.includes("ERROR") ? "font-semibold text-red-700" : ""
+                }
+              >
+                {linea}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <PagoResumen
+        totalPagado={totalPagado}
+        cantidadPagos={cantidadPagos}
+        promedioPago={promedioPago}
+        ultimoPago={ultimoPago}
+      />
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <p className="mb-3 text-sm font-black text-slate-900">
+          Tipo de registro
+        </p>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => cambiarTipoRegistro("ACTIVO")}
+            className={`rounded-xl border p-4 text-left transition ${
+              tipoRegistro === "ACTIVO"
+                ? "border-blue-600 bg-blue-50 text-blue-900"
+                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <p className="font-black">Pago de periodo activo</p>
+            <p className="mt-1 text-xs">
+              Aplica a cargos actuales, actualiza el Control Bancario y genera
+              recibo.
+            </p>
+          </button>
+
+          <button
+            type="button"
+            disabled={!puedeGestionarHistoricos}
+            onClick={() => cambiarTipoRegistro("HISTORICO")}
+            className={`rounded-xl border p-4 text-left transition ${
+              tipoRegistro === "HISTORICO"
+                ? "border-amber-600 bg-amber-50 text-amber-950"
+                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            } disabled:cursor-not-allowed disabled:opacity-50`}
+          >
+            <p className="font-black">Pago histórico</p>
+            <p className="mt-1 text-xs">
+              Registra periodos anteriores sin afectar cargos ni créditos
+              actuales.
+            </p>
+          </button>
+        </div>
+
+        {!puedeGestionarHistoricos && (
+          <p className="mt-3 text-xs font-semibold text-amber-700">
+            El registro histórico está disponible solo para administradores o
+            usuarios con permiso específico.
+          </p>
+        )}
+      </div>
+
+      {tipoRegistro === "ACTIVO" && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+            <p className="font-black">Fecha bancaria y período pagado</p>
+            <p className="mt-1">
+              La fecha del formulario es la fecha real en que entró el dinero.
+              El sistema puede aplicar ese pago a uno o varios meses anteriores
+              según los cargos pendientes de la unidad.
+            </p>
+          </div>
+
+          {unidadSeleccionada && (
+            <div className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-900">
+                    Situación de pago de {unidadSeleccionada.codigo}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    El monto recibido debe ser exactamente el dinero que entró
+                    al banco o fue entregado por el propietario.
+                  </p>
+                </div>
+
+                {cargandoSituacionPago && (
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                    Consultando...
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-xs font-bold uppercase text-slate-500">
+                    Cuota ordinaria
+                  </p>
+                  <p className="mt-1 text-lg font-black text-slate-900">
+                    {formatearMontoReferencia(cuotaUnidadSeleccionada)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-amber-50 p-3">
+                  <p className="text-xs font-bold uppercase text-amber-700">
+                    Deuda total pendiente
+                  </p>
+                  <p className="mt-1 text-lg font-black text-amber-950">
+                    {formatearMontoReferencia(balancePendienteUnidad)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-blue-50 p-3">
+                  <p className="text-xs font-bold uppercase text-blue-700">
+                    Saldo a favor disponible
+                  </p>
+                  <p className="mt-1 text-lg font-black text-blue-950">
+                    {formatearMontoReferencia(saldoFavorDisponible)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-emerald-50 p-3">
+                  <p className="text-xs font-bold uppercase text-emerald-700">
+                    Monto sugerido
+                  </p>
+                  <p className="mt-1 text-lg font-black text-emerald-950">
+                    {formatearMontoReferencia(montoSugeridoUnidad)}
+                  </p>
+                </div>
+              </div>
+
+              <div className={`mt-3 grid gap-3 ${gasConMedidores ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+                <div className="rounded-xl border border-amber-200 bg-white p-3">
+                  <p className="text-xs font-bold uppercase text-amber-700">Saldo inicial pendiente</p>
+                  <p className="mt-1 text-lg font-black text-slate-900">
+                    {formatearMontoReferencia(saldoInicialPendienteUnidad)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-bold uppercase text-slate-600">Cuotas de mantenimiento pendientes</p>
+                  <p className="mt-1 text-lg font-black text-slate-900">
+                    {formatearMontoReferencia(cuotasPendientesUnidad)}
+                  </p>
+                </div>
+                {gasConMedidores && (
+                  <div className="rounded-xl border border-cyan-200 bg-white p-3">
+                    <p className="text-xs font-bold uppercase text-cyan-700">Gas pendiente</p>
+                    <p className="mt-1 text-lg font-black text-slate-900">
+                      {formatearMontoReferencia(gasPendienteUnidad)}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {saldoFavorDisponible > 0 && balancePendienteUnidad > 0 && (
+                <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+                  <span className="font-black">Saldo a favor disponible:</span>{" "}
+                  VAM utilizará primero{" "}
+                  {formatearMontoReferencia(
+                    Math.min(
+                      saldoFavorDisponible,
+                      balancePendienteUnidad,
+                    ),
+                  )}{" "}
+                  del saldo a favor. Digite en <strong>Monto</strong> solamente
+                  el depósito nuevo realmente recibido.
+                </div>
+              )}
+
+              {balancePendienteUnidad <= 0 && !cargandoSituacionPago && (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  <span className="font-black">Sin deudas pendientes.</span>{" "}
+                  Si registra un nuevo pago, el importe podría quedar como
+                  saldo a favor para períodos futuros.
+                </div>
+              )}
+            </div>
+          )}
+
+          {comprobanteMovilOriginal && (
+            <div className="rounded-2xl border border-violet-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-wide text-violet-700">
+                    Comprobante enviado por el propietario
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-800">
+                    El comprobante original está vinculado a este pago móvil.
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Se conservará y se asociará al pago definitivo al registrar.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void abrirComprobanteMovilOriginal()}
+                  disabled={abriendoComprobanteMovil}
+                  className="inline-flex items-center justify-center rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-black text-white hover:bg-violet-800 disabled:opacity-50"
+                >
+                  {abriendoComprobanteMovil
+                    ? "Abriendo..."
+                    : "Ver comprobante"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <PagoForm
+          unidades={unidades}
+          unidadId={unidadId}
+          setUnidadId={setUnidadId}
+          seleccionarUnidad={seleccionarUnidad}
+          tipoFondo={tipoFondo}
+          setTipoFondo={setTipoFondo}
+          fechaPago={fechaPago}
+          setFechaPago={setFechaPago}
+          monto={monto}
+          setMonto={setMonto}
+          metodoPago={metodoPago}
+          setMetodoPago={setMetodoPago}
+          referencia={referencia}
+          setReferencia={setReferencia}
+          setComprobante={setComprobante}
+          unidadSeleccionada={unidadSeleccionada}
+          cuentaAsignada={cuentaAsignada}
+          guardando={guardando}
+          guardarPago={guardarPago}
+          />
+        </div>
+      )}
+
+      {tipoRegistro === "HISTORICO" && puedeGestionarHistoricos && (
+        <form
+          onSubmit={guardarPagoHistorico}
+          className="space-y-5 rounded-2xl border border-amber-200 bg-white p-5 shadow-sm"
+        >
+          <div>
+            <h2 className="text-lg font-black text-slate-900">
+              Registrar pago histórico
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              El ingreso se enviará al Control Bancario, pero no pagará cargos
+              actuales ni generará saldo a favor.
+            </p>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-3">
+            <label className="space-y-1 text-sm font-semibold text-slate-700">
+              Unidad
+              <select
+                value={unidadId}
+                onChange={(event) => seleccionarUnidad(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2"
+                required
+              >
+                <option value="">Seleccione una unidad</option>
+                {unidades.map((unidad) => (
+                  <option key={unidad.id} value={unidad.id}>
+                    {unidad.codigo}
+                    {unidad.propietario_nombre
+                      ? ` - ${unidad.propietario_nombre}`
+                      : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1 text-sm font-semibold text-slate-700">
+              Cuenta bancaria
+              <select
+                value={cuentaHistoricaId}
+                onChange={(event) => setCuentaHistoricaId(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2"
+                required
+              >
+                <option value="">Seleccione la cuenta</option>
+                {cuentas.map((cuenta) => (
+                  <option key={cuenta.id} value={cuenta.id}>
+                    {cuenta.nombre_banco} - {cuenta.numero_cuenta}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1 text-sm font-semibold text-slate-700">
+              Método de pago
+              <select
+                value={metodoPago}
+                onChange={(event) => setMetodoPago(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2"
+                required
+              >
+                <option value="">Seleccione</option>
+                <option value="TRANSFERENCIA">Transferencia</option>
+                <option value="DEPÓSITO">Depósito</option>
+                <option value="EFECTIVO">Efectivo</option>
+                <option value="CHEQUE">Cheque</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-black text-slate-900">
+                  Fuente del pago histórico
+                </p>
+                <p className="text-xs text-slate-600">
+                  Use la transacción importada cuando el depósito esté en el
+                  archivo del banco.
+                </p>
+              </div>
+
+              <div className="flex rounded-lg border border-slate-300 bg-white p-1">
+                <button
+                  type="button"
+                  onClick={() => setUsarTransaccionImportada(true)}
+                  className={`rounded-md px-3 py-2 text-xs font-bold ${
+                    usarTransaccionImportada
+                      ? "bg-slate-900 text-white"
+                      : "text-slate-600"
+                  }`}
+                >
+                  Archivo bancario
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUsarTransaccionImportada(false);
+                    setTransaccionHistoricaId("");
+                  }}
+                  className={`rounded-md px-3 py-2 text-xs font-bold ${
+                    !usarTransaccionImportada
+                      ? "bg-slate-900 text-white"
+                      : "text-slate-600"
+                  }`}
+                >
+                  Registro manual
+                </button>
+              </div>
+            </div>
+
+            {usarTransaccionImportada && (
+              <label className="mt-4 block space-y-1 text-sm font-semibold text-slate-700">
+                Transacción bancaria pendiente
+                <select
+                  value={transaccionHistoricaId}
+                  onChange={(event) =>
+                    seleccionarTransaccionHistorica(event.target.value)
+                  }
+                  disabled={!unidadId || cargandoTransacciones}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100"
+                  required
+                >
+                  <option value="">
+                    {cargandoTransacciones
+                      ? "Cargando transacciones..."
+                      : "Seleccione una transacción"}
+                  </option>
+                  {transaccionesHistoricas.map((transaccion) => (
+                    <option key={transaccion.id} value={transaccion.id}>
+                      {transaccion.fecha_posteo} | RD${" "}
+                      {transaccion.monto_transaccion.toLocaleString("es-DO", {
+                        minimumFractionDigits: 2,
+                      })}{" "}
+                      | {transaccion.descripcion_banco}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-4">
+            <label className="space-y-1 text-sm font-semibold text-slate-700">
+              Fecha real del depósito
+              <input
+                type="date"
+                value={fechaPago}
+                onChange={(event) => setFechaPago(event.target.value)}
+                readOnly={usarTransaccionImportada && !!transaccionHistoricaId}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 read-only:bg-slate-100"
+                required
+              />
+            </label>
+
+            <label className="space-y-1 text-sm font-semibold text-slate-700">
+              Monto total
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={monto}
+                onChange={(event) => setMonto(event.target.value)}
+                readOnly={usarTransaccionImportada && !!transaccionHistoricaId}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 read-only:bg-slate-100"
+                required
+              />
+            </label>
+
+            <label className="space-y-1 text-sm font-semibold text-slate-700">
+              Referencia bancaria
+              <input
+                type="text"
+                value={referencia}
+                onChange={(event) => setReferencia(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+            </label>
+
+            <label className="space-y-1 text-sm font-semibold text-slate-700">
+              Beneficiario / propietario
+              <input
+                type="text"
+                value={beneficiarioHistorico}
+                onChange={(event) =>
+                  setBeneficiarioHistorico(event.target.value)
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+            </label>
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-black text-blue-950">
+                  Periodos históricos cubiertos
+                </p>
+                <p className="text-xs text-blue-800">
+                  El total distribuido debe coincidir con el monto depositado.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={agregarPeriodoHistorico}
+                className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-black text-white"
+              >
+                + Agregar periodo
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {periodosHistoricos.map((detalle, index) => (
+                <div
+                  key={`periodo-historico-${index}`}
+                  className="grid gap-2 rounded-xl bg-white p-3 md:grid-cols-[1fr_1fr_auto]"
+                >
+                  <label className="space-y-1 text-xs font-bold text-slate-700">
+                    Periodo
+                    <input
+                      type="month"
+                      value={detalle.periodo}
+                      onChange={(event) =>
+                        actualizarPeriodoHistorico(
+                          index,
+                          "periodo",
+                          event.target.value,
+                        )
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                      required
+                    />
+                  </label>
+
+                  <label className="space-y-1 text-xs font-bold text-slate-700">
+                    Monto aplicado
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={detalle.monto}
+                      onChange={(event) =>
+                        actualizarPeriodoHistorico(
+                          index,
+                          "monto",
+                          event.target.value,
+                        )
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                      required
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => eliminarPeriodoHistorico(index)}
+                    className="self-end rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-700"
+                  >
+                    Quitar
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-4 text-sm font-black">
+              <span>
+                Monto: RD${" "}
+                {Number(monto || 0).toLocaleString("es-DO", {
+                  minimumFractionDigits: 2,
+                })}
+              </span>
+              <span
+                className={
+                  Math.round(totalDistribuidoHistorico * 100) ===
+                  Math.round(Number(monto || 0) * 100)
+                    ? "text-emerald-700"
+                    : "text-red-700"
+                }
+              >
+                Distribuido: RD${" "}
+                {totalDistribuidoHistorico.toLocaleString("es-DO", {
+                  minimumFractionDigits: 2,
+                })}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <label className="space-y-1 text-sm font-semibold text-slate-700">
+              Descripción
+              <textarea
+                value={descripcionHistorica}
+                onChange={(event) =>
+                  setDescripcionHistorica(event.target.value)
+                }
+                rows={3}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2"
+                placeholder="Ej.: Pago histórico correspondiente a agosto-diciembre de 2025."
+              />
+            </label>
+
+            <label className="space-y-1 text-sm font-semibold text-slate-700">
+              Observación
+              <textarea
+                value={observacionHistorica}
+                onChange={(event) =>
+                  setObservacionHistorica(event.target.value)
+                }
+                rows={3}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2"
+                placeholder="Motivo y aclaraciones para auditoría."
+              />
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+            <p className="font-black">Efecto del registro</p>
+            <p className="mt-1">
+              Se registrará como ingreso bancario en la fecha indicada y como
+              historial del propietario. No modificará cargos, balances de
+              cargos ni créditos actuales.
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            disabled={guardando}
+            className="w-full rounded-xl bg-amber-600 px-4 py-3 font-black text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            {guardando ? "Registrando..." : "Registrar pago histórico"}
+          </button>
+        </form>
+      )}
+
+      {unidadId && unidadSeleccionada && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+          <p className="font-black">
+            Historial filtrado por unidad: {unidadSeleccionada.codigo}
+          </p>
+          <p className="mt-1">
+            Se muestran los pagos activos y los pagos históricos registrados
+            para esta unidad.
+          </p>
+        </div>
+      )}
+
+      {!unidadId && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-black">
+            Seleccione una unidad para ver su historial.
+          </p>
+          <p className="mt-1">
+            El historial de pagos se mostrará debajo solamente para la unidad
+            seleccionada.
+          </p>
+        </div>
+      )}
+
+      <PagoHistorial
+        pagos={unidadId ? pagosUnidadSeleccionada : []}
+        loading={loading}
+      />
+
+      {unidadId && (
+        <div className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-amber-100 bg-amber-50 px-5 py-4">
+            <div>
+              <h3 className="font-black text-amber-950">Pagos históricos</h3>
+              <p className="text-xs text-amber-800">
+                No afectan cargos ni créditos actuales.
+              </p>
+            </div>
+
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-amber-900">
+              {pagosHistoricosUnidad.length} registro(s)
+            </span>
+          </div>
+
+          {cargandoHistoricos ? (
+            <div className="p-6 text-sm text-slate-500">
+              Cargando pagos históricos...
+            </div>
+          ) : pagosHistoricosUnidad.length === 0 ? (
+            <div className="p-6 text-sm text-slate-500">
+              Esta unidad no tiene pagos históricos registrados.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Fecha depósito</th>
+                    <th className="px-4 py-3">Periodos cubiertos</th>
+                    <th className="px-4 py-3 text-right">Monto</th>
+                    <th className="px-4 py-3">Referencia</th>
+                    <th className="px-4 py-3">Movimiento banco</th>
+                    <th className="px-4 py-3">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagosHistoricosUnidad.map((historico) => {
+                    const periodos = (historico.pagos_historicos_detalle || [])
+                      .map((detalle) => nombreMesPeriodo(detalle.periodo))
+                      .join(", ");
+
+                    return (
+                      <tr
+                        key={historico.id}
+                        className="border-t border-slate-100"
+                      >
+                        <td className="px-4 py-3">{historico.fecha_pago}</td>
+                        <td className="px-4 py-3">
+                          {periodos || "Sin distribución"}
+                        </td>
+                        <td className="px-4 py-3 text-right font-black">
+                          RD${" "}
+                          {Number(historico.monto_total || 0).toLocaleString(
+                            "es-DO",
+                            {
+                              minimumFractionDigits: 2,
+                            },
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {historico.referencia_banco || "-"}
+                        </td>
+                        <td className="px-4 py-3">
+                          {historico.movimiento_banco_id || "-"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`rounded-full px-2 py-1 text-xs font-black ${
+                              historico.estado === "REGISTRADO"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {historico.estado}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-4 flex justify-end">
+        <span className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-[10px] font-semibold text-slate-400 shadow-sm">
+          {MODULO_NOMBRE} · {MODULO_VERSION} · {MODULO_FECHA_VERSION}
+        </span>
+      </div>
+    </PageContainer>
+  );
+}

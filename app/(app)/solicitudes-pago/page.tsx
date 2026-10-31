@@ -291,6 +291,7 @@ export default function SolicitudesPagoPage() {
     referencia_banco: "",
   });
   const [chequeArchivo, setChequeArchivo] = useState<File | null>(null);
+  const [beneficiarioNominaCheque, setBeneficiarioNominaCheque] = useState("");
 
   useEffect(() => {
     const idGuardado = localStorage.getItem("condominio_id") || "";
@@ -757,8 +758,16 @@ export default function SolicitudesPagoPage() {
   function solicitudUsaCheque(s: SolicitudPagoOperativa) {
     const metodo = normalizar(s.metodo_pago);
 
-    // Si la solicitud no tiene método definido, VAM permite emitir cheque.
-    if (!metodo) return true;
+    // Nómina llega desde RH con metodo_pago = "Pendiente".
+    // Mientras el método no se haya definido, VAM permite preparar el cheque
+    // antes de registrar el egreso bancario.
+    if (
+      !metodo ||
+      metodo === "pendiente" ||
+      metodo === "por definir"
+    ) {
+      return true;
+    }
 
     return metodo.includes("cheque");
   }
@@ -774,10 +783,9 @@ export default function SolicitudesPagoPage() {
   }
 
   function puedeEmitirChequeSolicitud(s: SolicitudPagoOperativa) {
-    if (s.estado_operativo === "Pagada" || s.pagado) return false;
-
     const estadoSolicitud = normalizar(s.estado_solicitud);
     const estadoOperativo = normalizar(s.estado_operativo);
+    const esNomina = esSolicitudNomina(s);
 
     const aprobadaPorTesorero =
       Boolean(s.fecha_revision_tesorero) ||
@@ -785,7 +793,8 @@ export default function SolicitudesPagoPage() {
       estadoSolicitud === "aprobada por tesorero" ||
       estadoOperativo === "pendiente presidente" ||
       estadoOperativo === "aprobada sin gasto" ||
-      estadoOperativo === "lista para pagar";
+      estadoOperativo === "lista para pagar" ||
+      estadoOperativo === "pagada";
 
     const aprobadaPorPresidente =
       Boolean(s.fecha_revision_presidente) ||
@@ -793,8 +802,11 @@ export default function SolicitudesPagoPage() {
       estadoSolicitud === "aprobada por presidente" ||
       estadoSolicitud === "aprobado" ||
       estadoSolicitud === "aprobada" ||
+      estadoSolicitud === "pagado" ||
+      estadoSolicitud === "pagada" ||
       estadoOperativo === "aprobada sin gasto" ||
-      estadoOperativo === "lista para pagar";
+      estadoOperativo === "lista para pagar" ||
+      estadoOperativo === "pagada";
 
     const aprobacionesCompletas =
       aprobadaPorTesorero && aprobadaPorPresidente;
@@ -802,11 +814,46 @@ export default function SolicitudesPagoPage() {
     const cajaChicaLista =
       esSolicitudCajaChica(s) && esCajaChicaAprobadaParaPago(s);
 
-    // Regla VAM:
+    /*
+     * FLUJO NORMAL DE NÓMINA:
+     * RH crea la solicitud con metodo_pago = "Pendiente".
+     * Después de Tesorero + Presidente y cuando queda "Lista para pagar",
+     * Finanzas debe poder:
+     *   1) Emitir / imprimir el cheque.
+     *   2) Firmarlo.
+     *   3) Procesar el pago.
+     *   4) Registrar el egreso bancario.
+     */
+    if (
+      esNomina &&
+      estadoOperativo === "lista para pagar" &&
+      aprobacionesCompletas
+    ) {
+      return solicitudUsaCheque(s);
+    }
+
+    /*
+     * RECUPERACIÓN CONTROLADA:
+     * Si una nómina histórica ya quedó Pagada pero nunca generó un cheque
+     * (caso solicitud #175), permitimos emitir únicamente el documento
+     * faltante. La pantalla de impresión NO crea otro pago ni otro
+     * movimiento bancario.
+     */
+    if (
+      esNomina &&
+      (estadoOperativo === "pagada" || s.pagado) &&
+      aprobacionesCompletas &&
+      !tieneChequeImpreso(s) &&
+      !s.numero_cheque_emitido
+    ) {
+      return true;
+    }
+
+    // Para solicitudes no nómina ya pagadas, no se permite crear otro cheque.
+    if (estadoOperativo === "pagada" || s.pagado) return false;
+
     // Cuando la solicitud queda "Aprobada sin gasto", ya terminó el circuito
-    // Tesorero + Presidente y se puede emitir el cheque ANTES de generar el gasto.
-    // Aquí no bloqueamos por metodo_pago porque la emisión del cheque define
-    // precisamente que esta operación se manejará por cheque.
+    // Tesorero + Presidente y se puede emitir el cheque antes de generar el gasto.
     if (
       estadoOperativo === "aprobada sin gasto" &&
       (aprobacionesCompletas || estadoSolicitud.includes("presidente"))
@@ -814,8 +861,7 @@ export default function SolicitudesPagoPage() {
       return true;
     }
 
-    // Para solicitudes que ya están listas para pagar conservamos la regla
-    // de método Cheque (o método todavía no definido).
+    // Solicitudes listas para pagar: cheque o método aún no definido.
     if (estadoOperativo === "lista para pagar") {
       return solicitudUsaCheque(s);
     }
@@ -823,23 +869,27 @@ export default function SolicitudesPagoPage() {
     return cajaChicaLista && solicitudUsaCheque(s);
   }
 
+  // El proveedor contable de nómina puede ser un código interno (ej. LOTE-001).
+  // Nunca debe sustituir al nombre de la persona que recibirá el cheque.
   function beneficiarioSugeridoCheque(s: SolicitudPagoOperativa) {
-    const proveedor = String(s.proveedor_nombre || "").trim();
-    if (proveedor) return proveedor;
-
     if (esSolicitudNomina(s)) {
-      const texto = `${s.detalle || ""} ${s.concepto || ""}`;
-
+      const texto = `${s.detalle || ""}\n${s.concepto || ""}`;
       const matchEmpleado = texto.match(
-        /Empleado:\s*([^\\n]+?)(?=\s+(?:No\.?\s*empleado|Cargo|Departamento|Tipo nómina|Tipo nomina|Período|Periodo|Quincena|Segunda|Primera|Total|$))/i,
+        /(?:^|\n|[;,])\s*(?:Empleado|Colaborador|Beneficiario|Nombre del empleado)\s*:\s*([^\n;,]+?)(?=\s+(?:No\.?\s*empleado|Cargo|Departamento|Tipo n[oó]mina|Per[ií]odo|Quincena|Primera|Segunda|Total)\b|$|[;,])/im,
       );
+      const nombreEmpleado = String(matchEmpleado?.[1] || "").trim();
+      if (nombreEmpleado) return nombreEmpleado;
 
-      if (matchEmpleado?.[1]) {
-        return matchEmpleado[1].trim();
-      }
+      // Solo reutilizar un beneficiario de cheque previamente registrado si
+      // no coincide con el proveedor contable ni con un código de lote.
+      const previo = String(s.beneficiario_cheque || "").trim();
+      const proveedor = String(s.proveedor_nombre || "").trim();
+      if (previo && normalizar(previo) !== normalizar(proveedor) &&
+          !/^LOTE[-\s]?\d+$/i.test(previo)) return previo;
+      return "";
     }
 
-    return "";
+    return String(s.proveedor_nombre || "").trim();
   }
 
   function abrirModalEmisionCheque(s: SolicitudPagoOperativa) {
@@ -855,7 +905,10 @@ export default function SolicitudesPagoPage() {
 
     setChequeEmisionForm({
       fecha_emision:
-        s.fecha_emision_cheque || hoyISO(),
+        s.fecha_emision_cheque ||
+        ((s.estado_operativo === "Pagada" || s.pagado) && s.fecha_pago
+          ? String(s.fecha_pago).split("T")[0]
+          : hoyISO()),
       cuenta_bancaria_id:
         s.cuenta_bancaria_cheque_id
           ? String(s.cuenta_bancaria_cheque_id)
@@ -865,6 +918,7 @@ export default function SolicitudesPagoPage() {
       numero_cheque: s.numero_cheque_emitido || "",
     });
 
+    setBeneficiarioNominaCheque(beneficiarioSugeridoCheque(s));
     setModalCheque(s);
   }
 
@@ -904,10 +958,19 @@ export default function SolicitudesPagoPage() {
       return;
     }
 
-    const beneficiario = beneficiarioSugeridoCheque(modalCheque);
+    const beneficiario = esSolicitudNomina(modalCheque)
+      ? beneficiarioNominaCheque.trim()
+      : beneficiarioSugeridoCheque(modalCheque);
+
+    if (esSolicitudNomina(modalCheque) && /^LOTE[-\s]?\d+$/i.test(beneficiario)) {
+      alert("El beneficiario de nómina debe ser el nombre del empleado, no un código de lote.");
+      return;
+    }
 
     if (!beneficiario) {
-      alert("La solicitud no tiene un proveedor/beneficiario identificado.");
+      alert(esSolicitudNomina(modalCheque)
+        ? "Indique el nombre completo del empleado beneficiario antes de imprimir el cheque."
+        : "La solicitud no tiene un proveedor/beneficiario identificado.");
       return;
     }
 
@@ -963,10 +1026,18 @@ export default function SolicitudesPagoPage() {
     const cuentaDefault =
       s.cuenta_bancaria_id || (cuentas.length === 1 ? cuentas[0].id : null);
 
+    const metodoActual = normalizar(s.metodo_pago);
+    const metodoPagoInicial =
+      !metodoActual ||
+      metodoActual === "pendiente" ||
+      metodoActual === "por definir"
+        ? "Cheque"
+        : String(s.metodo_pago);
+
     setPagoForm({
       fecha_pago: s.fecha_pago || s.fecha_solicitud || hoyISO(),
       cuenta_bancaria_id: cuentaDefault ? String(cuentaDefault) : "",
-      metodo_pago: s.metodo_pago || "Cheque",
+      metodo_pago: metodoPagoInicial,
       numero_documento: "",
       referencia_banco: "",
     });
@@ -1578,7 +1649,7 @@ export default function SolicitudesPagoPage() {
       </SectionCard>
 
       <div className="mt-3 text-right text-[10px] text-slate-400">
-        Solicitudes y Pagos · v1.1.0
+        Solicitudes y Pagos · v1.1.1 · Nómina → Cheque → Pago
       </div>
 
       {modalCheque && (
@@ -1611,9 +1682,26 @@ export default function SolicitudesPagoPage() {
                 Beneficiario
               </div>
               <div className="mt-1 text-base font-black text-slate-900">
-                {beneficiarioSugeridoCheque(modalCheque) ||
-                  "Beneficiario no identificado"}
+                {esSolicitudNomina(modalCheque)
+                  ? beneficiarioNominaCheque || "Empleado pendiente de identificar"
+                  : beneficiarioSugeridoCheque(modalCheque) || "Beneficiario no identificado"}
               </div>
+
+              {esSolicitudNomina(modalCheque) && (
+                <label className="mt-3 block text-sm font-semibold text-slate-700">
+                  Nombre completo del empleado beneficiario
+                  <input
+                    type="text"
+                    value={beneficiarioNominaCheque}
+                    onChange={(e) => setBeneficiarioNominaCheque(e.target.value)}
+                    placeholder="Nombre y apellidos del empleado"
+                    className="mt-1 w-full rounded-xl border border-blue-300 bg-white px-4 py-3 text-slate-900"
+                  />
+                  <span className="mt-1 block text-xs font-normal text-slate-600">
+                    Verifique el nombre antes de imprimir. No se usará el código del proveedor contable.
+                  </span>
+                </label>
+              )}
 
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="rounded-xl bg-white p-3">
@@ -1700,9 +1788,19 @@ export default function SolicitudesPagoPage() {
             </div>
 
             <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-800">
-              Emitir o imprimir el cheque no registra ningún pago ni movimiento
-              bancario. El cheque debe ser firmado por Tesorero y Presidente.
-              Después de firmado se procesa el pago y se adjunta el cheque al sistema.
+              {modalCheque.estado_operativo === "Pagada" || modalCheque.pagado ? (
+                <>
+                  Esta solicitud ya está pagada. Esta impresión regulariza únicamente
+                  el documento de cheque faltante y no registra otro pago ni otro
+                  movimiento bancario.
+                </>
+              ) : (
+                <>
+                  Emitir o imprimir el cheque no registra ningún pago ni movimiento
+                  bancario. El cheque debe ser firmado por Tesorero y Presidente.
+                  Después de firmado se procesa el pago y se adjunta el cheque al sistema.
+                </>
+              )}
             </div>
 
             <div className="mt-6 flex flex-wrap justify-end gap-2">

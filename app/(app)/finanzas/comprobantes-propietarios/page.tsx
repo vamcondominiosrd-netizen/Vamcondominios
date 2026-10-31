@@ -202,27 +202,64 @@ export default function ComprobantesPropietariosPage() {
     .reduce((s, p) => s + Number(p.monto || 0), 0);
 
   async function abrirComprobante(pago: PagoMovil) {
-    let url = String(pago.comprobante_url || "").trim();
-
-    if (!url && pago.comprobante_path) {
-      const { data, error } = await supabase.storage
-        .from("comprobantes-pagos-propietarios")
-        .createSignedUrl(pago.comprobante_path, 60 * 10);
-
-      if (error) {
-        alert("No fue posible abrir el comprobante: " + error.message);
-        return;
-      }
-
-      url = data?.signedUrl || "";
-    }
-
-    if (!url) {
-      alert("Este envío no tiene un comprobante disponible.");
+    if (!pago?.id) {
+      alert("No se encontró el comprobante solicitado.");
       return;
     }
 
-    window.open(url, "_blank", "noopener,noreferrer");
+    const ventana = window.open("", "_blank");
+
+    try {
+      const { data: sesionData, error: sesionError } =
+        await supabase.auth.getSession();
+
+      const accessToken = sesionData.session?.access_token || "";
+
+      if (sesionError || !accessToken) {
+        if (ventana) ventana.close();
+        alert("La sesión administrativa no está disponible. Inicie sesión nuevamente.");
+        return;
+      }
+
+      const response = await fetch(
+        `/api/finanzas/comprobantes-propietarios/archivo?pago_movil_id=${pago.id}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          cache: "no-store",
+        },
+      );
+
+      const resultado = await response.json().catch(() => ({}));
+
+      if (!response.ok || resultado?.ok !== true || !resultado?.url) {
+        if (ventana) ventana.close();
+        throw new Error(
+          resultado?.mensaje || "No fue posible abrir el comprobante.",
+        );
+      }
+
+      if (ventana) {
+        ventana.opener = null;
+        ventana.location.href = resultado.url;
+      } else {
+        window.location.href = resultado.url;
+      }
+    } catch (error: any) {
+      if (ventana) ventana.close();
+
+      console.error(
+        "[Comprobantes Propietarios] Error abriendo comprobante:",
+        error?.message || error,
+      );
+
+      alert(
+        "No fue posible abrir el comprobante: " +
+          (error?.message || "Error desconocido."),
+      );
+    }
   }
 
   async function validarPago(pago: PagoMovil) {
@@ -805,7 +842,7 @@ export default function ComprobantesPropietariosPage() {
         </div>
 
         <p className="text-right text-[10px] font-semibold text-slate-400">
-          Comprobantes de pagos · v1.1 · 03/10/2026
+          Comprobantes de pagos · v1.2 · 27/10/2026
         </p>
       </div>
     </main>

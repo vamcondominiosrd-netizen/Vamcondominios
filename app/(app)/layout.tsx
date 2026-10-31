@@ -166,6 +166,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   });
 
   const [menuMovil, setMenuMovil] = useState(false);
+  const [cerrandoSesion, setCerrandoSesion] = useState(false);
   const [modulosHabilitados, setModulosHabilitados] = useState<string[]>([]);
   const [cargandoModulos, setCargandoModulos] = useState(true);
 
@@ -410,9 +411,35 @@ function esRutaResidencial(path: string) {
   }, [centroActivo, modulosHabilitados]);
 
   async function cerrarSesion() {
-    localStorage.clear();
-    await supabase.auth.signOut();
-    router.push("/login");
+    if (cerrandoSesion) return;
+    setCerrandoSesion(true);
+
+    try {
+      // Cierra la sesión en este dispositivo sin esperar una revocación remota.
+      // Supabase elimina la sesión almacenada en el cliente.
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      if (error) throw error;
+
+      // Limpiar únicamente los datos de sesión de VAM; no borrar otras preferencias.
+      const clavesSesionVam = [
+        "condominio_id",
+        "condominio_nombre",
+        "condominio_logo_url",
+        "empresa_nombre",
+        "usuario_nombre",
+        "usuario_rol",
+        "rol_condominio",
+        "modulos_habilitados",
+      ];
+      clavesSesionVam.forEach((clave) => localStorage.removeItem(clave));
+
+      // Navegación completa: desmonta el layout y AuthGuard sin esperar al router.
+      window.location.replace("/login");
+    } catch (error) {
+      console.error("Error cerrando sesión:", error);
+      alert("No se pudo cerrar la sesión. Comprueba tu conexión e inténtalo nuevamente.");
+      setCerrandoSesion(false);
+    }
   }
 
   function cambiarCondominio() {
@@ -531,6 +558,9 @@ function esRutaResidencial(path: string) {
 
             <button
               onClick={cerrarSesion}
+              disabled={cerrandoSesion}
+              aria-label={cerrandoSesion ? "Cerrando sesión" : "Cerrar sesión"}
+              title={cerrandoSesion ? "Cerrando sesión" : "Cerrar sesión"}
               className="bg-red-600 hover:bg-red-700 text-white rounded-xl px-3 py-2 font-bold"
             >
               <LogOut size={17} />
@@ -624,9 +654,10 @@ function esRutaResidencial(path: string) {
 
             <button
               onClick={cerrarSesion}
+              disabled={cerrandoSesion}
               className="w-full bg-red-600 rounded-xl py-3 font-bold"
             >
-              Cerrar sesión
+              {cerrandoSesion ? "Cerrando sesión…" : "Cerrar sesión"}
             </button>
           </div>
         )}

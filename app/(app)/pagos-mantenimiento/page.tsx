@@ -3,8 +3,15 @@
 /*
  * VAM Administración de Condominios
  * Módulo: Pagos de Mantenimiento
- * Versión: v1.0.7
- * Fecha de versión: 16/10/2026
+ * Versión: v1.0.8
+ * Fecha de versión: 27/10/2026
+ *
+ * CAMBIOS v1.0.8
+ * - Corrige la apertura del comprobante enviado por el propietario desde Pago Mantenimiento.
+ * - El bucket comprobantes-pagos-propietarios es privado; ya no se firma desde el navegador.
+ * - La apertura usa la API segura /api/finanzas/comprobantes-propietarios/archivo.
+ * - La API valida la sesión administrativa y genera la URL temporal en el servidor.
+ * - No modifica el registro, aplicación, conciliación ni generación del recibo.
  *
  * CAMBIOS v1.0.6
  * - Consulta saldos iniciales por condominio y unidad.
@@ -118,8 +125,8 @@ type PagoMovilPreparado = {
 };
 
 const MODULO_NOMBRE = "Pagos de Propietarios – Mantenimiento y Gas";
-const MODULO_VERSION = "v1.0.7";
-const MODULO_FECHA_VERSION = "16/10/2026";
+const MODULO_VERSION = "v1.0.8";
+const MODULO_FECHA_VERSION = "27/10/2026";
 
 function normalizarTexto(valor: string) {
   return valor
@@ -489,38 +496,70 @@ export default function PagosMantenimientoPage() {
   }
 
   async function abrirComprobanteMovilOriginal() {
-    const almacenado = String(comprobanteMovilOriginal || "").trim();
+    const contexto = obtenerContextoPagoMovilQuery();
+    const preparado = obtenerPagoMovilPreparadoActivo();
 
-    if (!almacenado) {
-      alert("Este pago móvil no tiene comprobante asociado.");
+    const pagoMovilId = Number(
+      contexto.pagoMovilId ||
+        preparado?.pago_movil_id ||
+        localStorage.getItem("vam_pago_movil_preparar_id") ||
+        0,
+    );
+
+    if (!pagoMovilId) {
+      alert("No se pudo identificar el comprobante móvil asociado.");
       return;
     }
 
     setAbriendoComprobanteMovil(true);
 
+    const ventana = window.open("", "_blank");
+
     try {
-      if (/^https?:\/\//i.test(almacenado)) {
-        window.open(almacenado, "_blank", "noopener,noreferrer");
-        return;
-      }
+      const { data: sesionData, error: sesionError } =
+        await supabase.auth.getSession();
 
-      const ruta = almacenado
-        .replace(/^\/+/, "")
-        .replace(/^comprobantes-pagos-propietarios\//, "");
+      const accessToken = sesionData.session?.access_token || "";
 
-      const { data, error } = await supabase.storage
-        .from("comprobantes-pagos-propietarios")
-        .createSignedUrl(ruta, 600);
+      if (sesionError || !accessToken) {
+        if (ventana) ventana.close();
 
-      if (error || !data?.signedUrl) {
         throw new Error(
-          error?.message ||
-            "No fue posible generar el acceso temporal al comprobante.",
+          "La sesión administrativa no está disponible. Inicie sesión nuevamente.",
         );
       }
 
-      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+      const response = await fetch(
+        `/api/finanzas/comprobantes-propietarios/archivo?pago_movil_id=${pagoMovilId}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          cache: "no-store",
+        },
+      );
+
+      const resultado = await response.json().catch(() => ({}));
+
+      if (!response.ok || resultado?.ok !== true || !resultado?.url) {
+        if (ventana) ventana.close();
+
+        throw new Error(
+          resultado?.mensaje ||
+            "No fue posible abrir el comprobante del propietario.",
+        );
+      }
+
+      if (ventana) {
+        ventana.opener = null;
+        ventana.location.href = resultado.url;
+      } else {
+        window.location.href = resultado.url;
+      }
     } catch (error: any) {
+      if (ventana) ventana.close();
+
       console.error(
         "[Pagos Mantenimiento] Error abriendo comprobante móvil:",
         error?.message || error,
