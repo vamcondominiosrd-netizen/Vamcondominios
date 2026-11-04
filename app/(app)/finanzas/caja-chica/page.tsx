@@ -485,13 +485,17 @@ export default function CajaChicaPage() {
         .from("facturas-caja-chica")
         .getPublicUrl(rutaArchivo);
 
-      const { error: updateError } = await supabase
-        .from("caja_chica")
-        .update({ factura_url: data.publicUrl })
-        .eq("id", gastoId);
+      const { error: updateError } = await supabase.rpc(
+        "actualizar_factura_caja_chica",
+        {
+          p_gasto_id: gastoId,
+          p_condominio_id: Number(condominioId),
+          p_factura_url: data.publicUrl,
+        },
+      );
 
       if (updateError) {
-        alert("Error actualizando el gasto: " + updateError.message);
+        alert("Error actualizando la factura del gasto: " + updateError.message);
         return;
       }
 
@@ -554,14 +558,14 @@ export default function CajaChicaPage() {
   async function guardarGasto(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!condominio || !fecha || !concepto || !monto) {
+    if (!condominioId || !condominio || !fecha || !concepto.trim() || !monto) {
       alert("Debe completar condominio, fecha, concepto y monto.");
       return;
     }
 
-    const montoNumerico = Number(monto || 0);
+    const montoNumerico = Number(monto);
 
-    if (montoNumerico <= 0) {
+    if (!Number.isFinite(montoNumerico) || montoNumerico <= 0) {
       alert("El monto del gasto debe ser mayor que cero.");
       return;
     }
@@ -590,44 +594,78 @@ export default function CajaChicaPage() {
         facturaUrl = await subirFactura();
       }
 
-      const payload = {
-        condominio,
-        fecha,
-        concepto: concepto.trim(),
-        detalle_gasto: detalleGasto.trim(),
-        monto: montoNumerico,
-        responsable: responsable.trim(),
-        comprobante: comprobante.trim(),
-        factura_url: facturaUrl,
-        estado: "registrado",
-        condominio_id: Number(condominioId),
-      };
-
-      const respuesta = editandoGastoId
-        ? await supabase
-            .from("caja_chica")
-            .update(payload)
-            .eq("id", editandoGastoId)
-        : await supabase
-            .from("caja_chica")
-            .insert([payload]);
-
-      if (respuesta.error) {
-        alert(
-          `${editandoGastoId ? "Error modificando" : "Error guardando"} gasto: ` +
-            respuesta.error.message,
+      if (editandoGastoId) {
+        // La edición también pasa por una RPC segura.
+        // La RPC valida autenticación, acceso al condominio, saldo real
+        // y concurrencia antes de modificar el mismo registro.
+        const { data, error: updateError } = await supabase.rpc(
+          "actualizar_gasto_caja_chica",
+          {
+            p_gasto_id: editandoGastoId,
+            p_condominio_id: Number(condominioId),
+            p_fecha: fecha,
+            p_concepto: concepto.trim(),
+            p_detalle_gasto: detalleGasto.trim() || null,
+            p_monto: montoNumerico,
+            p_responsable: responsable.trim() || null,
+            p_comprobante: comprobante.trim() || null,
+            p_factura_url: facturaUrl || null,
+          },
         );
-        return;
+
+        if (updateError) {
+          alert("Error modificando gasto: " + updateError.message);
+          return;
+        }
+
+        const nuevoDisponible =
+          data?.disponible_actual !== undefined
+            ? Number(data.disponible_actual)
+            : disponibleParaValidar - montoNumerico;
+
+        alert(
+          `Gasto de caja chica modificado correctamente.\n\nMonto: RD$ ${dinero(
+            montoNumerico,
+          )}\nDisponible: RD$ ${dinero(nuevoDisponible)}`,
+        );
+      } else {
+        // Los gastos nuevos se registran por la RPC segura.
+        // La RPC valida autenticación, acceso al condominio, saldo real
+        // y concurrencia antes de insertar el movimiento.
+        const { data, error: rpcError } = await supabase.rpc(
+          "registrar_gasto_caja_chica",
+          {
+            p_condominio_id: Number(condominioId),
+            p_fecha: fecha,
+            p_concepto: concepto.trim(),
+            p_detalle_gasto: detalleGasto.trim() || null,
+            p_monto: montoNumerico,
+            p_responsable: responsable.trim() || null,
+            p_comprobante: comprobante.trim() || null,
+            p_factura_url: facturaUrl || null,
+            p_origen: "WEB",
+          },
+        );
+
+        if (rpcError) {
+          alert("Error guardando gasto: " + rpcError.message);
+          return;
+        }
+
+        const nuevoDisponible =
+          data?.disponible_actual !== undefined
+            ? Number(data.disponible_actual)
+            : disponibleCajaChica - montoNumerico;
+
+        alert(
+          `Gasto de caja chica registrado correctamente.\n\nMonto: RD$ ${dinero(
+            montoNumerico,
+          )}\nDisponible: RD$ ${dinero(nuevoDisponible)}`,
+        );
       }
 
-      alert(
-        editandoGastoId
-          ? "Gasto de caja chica modificado correctamente."
-          : "Gasto de caja chica registrado correctamente.",
-      );
-
       cancelarEdicionGasto();
-      await cargarGastos(condominio);
+      await refrescar();
     } catch (err: any) {
       alert(
         err?.message ||
