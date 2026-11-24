@@ -40,6 +40,8 @@ type Proveedor = {
   id: number;
   nombre_proveedor: string;
   cuenta_banco: string | null;
+  banco_id: number | null;
+  catalogo_bancos: { nombre_banco: string } | null;
 };
 
 type Categoria = {
@@ -542,7 +544,7 @@ export default function NuevaSolicitudPagoPage() {
 
       const { data: proveedoresData, error: proveedoresError } = await supabase
         .from("catalogo_proveedores")
-        .select("id, nombre_proveedor, cuenta_banco")
+        .select("id, nombre_proveedor, cuenta_banco, banco_id, catalogo_bancos(nombre_banco)")
         .eq("estado", "activo")
         .eq("condominio_id", Number(id))
         .order("nombre_proveedor", { ascending: true });
@@ -1596,7 +1598,7 @@ export default function NuevaSolicitudPagoPage() {
                   </select>
                 </div>
 
-                <div className="md:col-span-8">
+                <div className="md:col-span-4">
                   <label className="mb-1 block text-sm font-bold text-slate-700">
                     Cuenta bancaria del proveedor
                   </label>
@@ -1605,8 +1607,18 @@ export default function NuevaSolicitudPagoPage() {
                     value={cuentaBanco}
                     onChange={(e) => setCuentaBanco(e.target.value)}
                     className="w-full rounded-xl border px-3 py-2.5 text-sm"
-                    placeholder="Cuenta bancaria del proveedor"
+                    placeholder="Número de cuenta"
                   />
+                </div>
+
+                <div className="md:col-span-4">
+                  <label className="mb-1 block text-sm font-bold text-slate-700">
+                    Banco del proveedor
+                  </label>
+                  <div className="flex min-h-[42px] items-center rounded-xl border bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+                    {proveedorSeleccionado?.catalogo_bancos?.nombre_banco ||
+                      (proveedorSeleccionado ? "Banco no registrado" : "Seleccione proveedor")}
+                  </div>
                 </div>
               </div>
             </SectionCard>

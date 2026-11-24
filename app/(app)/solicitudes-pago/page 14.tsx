@@ -1,0 +1,2407 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
+import {
+  AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  ClipboardCheck,
+  FileText,
+  Files,
+  Plus,
+  Printer,
+  ShieldCheck,
+  WalletCards,
+  X,
+} from "lucide-react";
+import { supabase } from "@/app/lib/supabaseClient";
+
+import PageContainer from "@/components/vam/enterprise/PageContainer";
+import ModuleMenu from "@/components/vam/enterprise/ModuleMenu";
+import ModuleToolbar from "@/components/vam/enterprise/ModuleToolbar";
+import SectionCard from "@/components/vam/enterprise/SectionCard";
+
+type SolicitudPagoOperativa = {
+  solicitud_id: number;
+  numero_solicitud: number | null;
+  condominio_id: number | null;
+  condominio: string | null;
+  fecha_solicitud: string | null;
+  proveedor_id: number | null;
+  categoria_id: number | null;
+  concepto: string | null;
+  detalle: string | null;
+  monto: number | null;
+  itbis: number | null;
+  total_solicitud: number | null;
+  no_factura: string | null;
+  ncf: string | null;
+  metodo_pago: string | null;
+  cuenta_banco: string | null;
+  soporte_url: string | null;
+  factura_url?: string | null;
+  cheque_url?: string | null;
+  prioridad: string | null;
+  estado_solicitud: string | null;
+  created_by: string | null;
+  created_at: string | null;
+  fecha_revision_tesorero: string | null;
+  comentario_tesorero: string | null;
+  fecha_revision_presidente: string | null;
+  comentario_presidente: string | null;
+  gasto_generado_id: number | null;
+  gasto_generado_at: string | null;
+  gasto_id: number | null;
+  estado_gasto: string | null;
+  pagado: boolean | null;
+  fecha_pago: string | null;
+  cuenta_bancaria_id: number | null;
+  total_gasto: number | null;
+  movimientos_banco: number | null;
+  total_banco: number | null;
+  ultimo_movimiento_banco_id: number | null;
+  ultima_fecha_banco: string | null;
+  estado_operativo: string | null;
+  proveedor_nombre?: string | null;
+  categoria_nombre?: string | null;
+
+  // Control de emisión / impresión del cheque.
+  estado_cheque?: string | null;
+  numero_cheque_emitido?: string | null;
+  fecha_emision_cheque?: string | null;
+  cuenta_bancaria_cheque_id?: number | null;
+  beneficiario_cheque?: string | null;
+  comentario_cheque?: string | null;
+  cheque_impreso_at?: string | null;
+  cheque_impreso_por?: string | null;
+  cheque_impresiones?: number | null;
+};
+
+type CuentaBancaria = {
+  id: number;
+  client_id: number | null;
+  condominio_id: number;
+  nombre_banco: string;
+  numero_cuenta: string;
+  tipo_cuenta: string | null;
+  moneda: string | null;
+  activa: boolean | null;
+  balance_actual: number;
+};
+
+type PagoForm = {
+  fecha_pago: string;
+  cuenta_bancaria_id: string;
+  metodo_pago: string;
+  numero_documento: string;
+  referencia_banco: string;
+};
+
+const ESTADOS_OPERATIVOS = [
+  "Pendiente tesorero",
+  "Pendiente presidente",
+  "Aprobada sin gasto",
+  "Lista para pagar",
+  "Cheque impreso",
+  "Pagada",
+  "Revisar: pagado sin banco",
+  "Revisar: gasto no existe",
+  "Revisar: diferencia banco",
+];
+
+function normalizar(valor: string | null | undefined) {
+  return String(valor || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function dinero(valor: number | string | null | undefined) {
+  return Number(valor || 0).toLocaleString("es-DO", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatoFecha(fecha?: string | null) {
+  if (!fecha) return "-";
+  const limpia = String(fecha).split("T")[0];
+  const partes = limpia.split("-");
+  if (partes.length === 3) {
+    const [year, month, day] = partes;
+    return `${day}/${month}/${year}`;
+  }
+  return fecha;
+}
+
+function estadoColor(estado?: string | null) {
+  const e = estado || "";
+
+  if (e === "Pendiente tesorero") {
+    return "bg-yellow-100 text-yellow-800 border-yellow-200";
+  }
+
+  if (e === "Pendiente presidente") {
+    return "bg-blue-100 text-blue-800 border-blue-200";
+  }
+
+  if (e === "Aprobada sin gasto") {
+    return "bg-indigo-100 text-indigo-800 border-indigo-200";
+  }
+
+  if (e === "Lista para pagar") {
+    return "bg-purple-100 text-purple-800 border-purple-200";
+  }
+
+  if (e === "Cheque impreso") {
+    return "bg-cyan-100 text-cyan-800 border-cyan-200";
+  }
+
+  if (e === "Pagada") {
+    return "bg-emerald-100 text-emerald-800 border-emerald-200";
+  }
+
+  if (e.startsWith("Revisar")) {
+    return "bg-red-100 text-red-800 border-red-200";
+  }
+
+  return "bg-slate-100 text-slate-700 border-slate-200";
+}
+
+function numeroSolicitud(s: SolicitudPagoOperativa) {
+  return s.numero_solicitud
+    ? String(s.numero_solicitud).padStart(5, "0")
+    : String(s.solicitud_id);
+}
+
+function esSolicitudNomina(s: SolicitudPagoOperativa) {
+  const texto = normalizar(
+    `${s.concepto || ""} ${s.detalle || ""} ${s.no_factura || ""}`,
+  );
+
+  return texto.includes("nomina") ||
+    normalizar(s.no_factura).startsWith("nom-");
+}
+
+
+type DatosNominaSoporte = {
+  id?: number | null;
+  nombre_empleado?: string | null;
+  numero_empleado?: string | null;
+  cargo?: string | null;
+  departamento?: string | null;
+  tipo_nomina?: string | null;
+  periodo?: string | null;
+  quincena?: number | null;
+  fecha_inicio_periodo?: string | null;
+  fecha_fin_periodo?: string | null;
+  fecha_pago?: string | null;
+  salario_base?: number | null;
+  monto_horas_extras?: number | null;
+  bonificacion?: number | null;
+  pago_vacaciones?: number | null;
+  afp?: number | null;
+  sfs?: number | null;
+  isr?: number | null;
+  otros_descuentos?: number | null;
+  total_ingresos?: number | null;
+  total_descuentos?: number | null;
+  neto_pagar?: number | null;
+};
+
+function extraerCampoNomina(detalle: string | null | undefined, etiqueta: string) {
+  const texto = String(detalle || "");
+  const escapada = etiqueta.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = texto.match(new RegExp(`(?:^|\\n)${escapada}\\s*:\\s*([^\\n]+)`, "i"));
+  return String(match?.[1] || "").trim();
+}
+
+function nombreSeguroDocumento(valor: string) {
+  return String(valor || "documento")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+}
+
+function generarPdfSoporteNomina(
+  s: SolicitudPagoOperativa,
+  nomina: DatosNominaSoporte | null,
+) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
+  const margen = 18;
+  const ancho = 216 - margen * 2;
+  const numeroDocumento =
+    s.no_factura || `NOM-SOL-${String(s.solicitud_id).padStart(6, "0")}`;
+
+  const empleado =
+    nomina?.nombre_empleado || extraerCampoNomina(s.detalle, "Empleado") || "-";
+  const numeroEmpleado =
+    nomina?.numero_empleado || extraerCampoNomina(s.detalle, "No. empleado") || "-";
+  const cargo = nomina?.cargo || extraerCampoNomina(s.detalle, "Cargo") || "-";
+  const departamento =
+    nomina?.departamento || extraerCampoNomina(s.detalle, "Departamento") || "-";
+  const tipoNomina =
+    nomina?.tipo_nomina || extraerCampoNomina(s.detalle, "Tipo nómina") || "Regular";
+  const periodo = nomina?.periodo || extraerCampoNomina(s.detalle, "Período") || "-";
+  const quincena = nomina?.quincena
+    ? nomina.quincena === 1
+      ? "Primera"
+      : "Segunda"
+    : extraerCampoNomina(s.detalle, "Quincena") || "No aplica";
+
+  const totalIngresos = Number(nomina?.total_ingresos ?? s.monto ?? s.total_solicitud ?? 0);
+  const totalDescuentos = Number(nomina?.total_descuentos ?? 0);
+  const neto = Number(nomina?.neto_pagar ?? s.total_solicitud ?? 0);
+
+  const linea = (y: number) => {
+    doc.setDrawColor(210);
+    doc.line(margen, y, 216 - margen, y);
+  };
+
+  const campo = (etiqueta: string, valor: string, y: number) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.text(etiqueta, margen, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(String(valor || "-"), margen + 43, y);
+  };
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("VAM ADMINISTRADORA DE CONDOMINIOS", margen, 19);
+
+  doc.setFontSize(17);
+  doc.text("COMPROBANTE INTERNO DE NÓMINA", margen, 30);
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`No. ${numeroDocumento}`, margen, 37);
+  doc.setFont("helvetica", "bold");
+  doc.text("DOCUMENTO INTERNO - NO FISCAL", 216 - margen, 37, { align: "right" });
+  linea(42);
+
+  let y = 50;
+  campo("Condominio:", s.condominio || "Condominio", y); y += 7;
+  campo("Empleado:", empleado, y); y += 7;
+  campo("No. empleado:", numeroEmpleado, y); y += 7;
+  campo("Cargo:", cargo, y); y += 7;
+  campo("Departamento:", departamento, y); y += 7;
+  campo("Tipo de nómina:", tipoNomina, y); y += 7;
+  campo("Período:", periodo, y); y += 7;
+  campo("Quincena:", quincena, y); y += 7;
+
+  const rango =
+    nomina?.fecha_inicio_periodo && nomina?.fecha_fin_periodo
+      ? `${formatoFecha(nomina.fecha_inicio_periodo)} al ${formatoFecha(nomina.fecha_fin_periodo)}`
+      : "-";
+  campo("Rango:", rango, y); y += 7;
+  campo("Fecha pago:", formatoFecha(nomina?.fecha_pago || s.fecha_solicitud), y); y += 9;
+  linea(y); y += 9;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("RESUMEN DE NÓMINA", margen, y); y += 8;
+
+  const valores = [
+    ["Salario del período", Number(nomina?.salario_base || 0)],
+    ["Horas extras", Number(nomina?.monto_horas_extras || 0)],
+    ["Bonificación", Number(nomina?.bonificacion || 0)],
+    ["Vacaciones", Number(nomina?.pago_vacaciones || 0)],
+    ["AFP", -Number(nomina?.afp || 0)],
+    ["SFS", -Number(nomina?.sfs || 0)],
+    ["ISR", -Number(nomina?.isr || 0)],
+    ["Otros descuentos", -Number(nomina?.otros_descuentos || 0)],
+  ] as const;
+
+  doc.setFontSize(9.5);
+  for (const [etiqueta, valor] of valores) {
+    doc.setFont("helvetica", "normal");
+    doc.text(etiqueta, margen, y);
+    doc.setFont("helvetica", "bold");
+    doc.text(`RD$ ${dinero(Math.abs(valor))}${valor < 0 ? " (-)" : ""}`, 216 - margen, y, {
+      align: "right",
+    });
+    y += 6.5;
+  }
+
+  y += 2;
+  linea(y); y += 8;
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("Total ingresos", margen, y);
+  doc.text(`RD$ ${dinero(totalIngresos)}`, 216 - margen, y, { align: "right" }); y += 7;
+  doc.text("Total descuentos", margen, y);
+  doc.text(`RD$ ${dinero(totalDescuentos)}`, 216 - margen, y, { align: "right" }); y += 8;
+
+  doc.setFontSize(13);
+  doc.text("NETO A PAGAR", margen, y);
+  doc.text(`RD$ ${dinero(neto)}`, 216 - margen, y, { align: "right" }); y += 10;
+  linea(y); y += 9;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  const nota =
+    "Comprobante generado automáticamente por VAM Administración al convertir la solicitud de nómina en gasto. Este documento sirve como soporte interno del gasto y no sustituye un comprobante fiscal ni la constancia final de pago al empleado.";
+  doc.text(doc.splitTextToSize(nota, ancho), margen, y);
+
+  return {
+    blob: doc.output("blob"),
+    numeroDocumento,
+  };
+}
+
+type TipoOperacionCajaChica = "fondo_inicial" | "reposicion" | null;
+
+function tipoOperacionCajaChica(
+  s: SolicitudPagoOperativa,
+): TipoOperacionCajaChica {
+  const proveedor = normalizar(s.proveedor_nombre);
+  const categoria = normalizar(s.categoria_nombre);
+
+  if (!proveedor.includes("caja chica") || !categoria.includes("caja chica")) {
+    return null;
+  }
+
+  if (categoria.includes("fondo inicial")) {
+    return "fondo_inicial";
+  }
+
+  if (categoria.includes("reposicion")) {
+    return "reposicion";
+  }
+
+  return null;
+}
+
+function esSolicitudCajaChica(s: SolicitudPagoOperativa) {
+  return tipoOperacionCajaChica(s) !== null;
+}
+
+function esCajaChicaAprobadaParaPago(s: SolicitudPagoOperativa) {
+  if (!esSolicitudCajaChica(s)) return false;
+
+  const estadoSolicitud = normalizar(s.estado_solicitud);
+  const estadoOperativo = normalizar(s.estado_operativo);
+
+  return (
+    estadoSolicitud === "aprobado por presidente" ||
+    estadoSolicitud === "aprobada por presidente" ||
+    estadoSolicitud === "aprobado" ||
+    estadoSolicitud === "aprobada" ||
+    estadoOperativo === "aprobada sin gasto"
+  );
+}
+
+function puedeGenerarGastoSolicitud(s: SolicitudPagoOperativa) {
+  if (esSolicitudCajaChica(s)) return false;
+  if (s.gasto_generado_id || s.gasto_id) return false;
+
+  if (s.estado_operativo === "Aprobada sin gasto") return true;
+
+  const estadoSolicitud = normalizar(s.estado_solicitud);
+  const estadoOperativo = normalizar(s.estado_operativo);
+
+  return (
+    esSolicitudNomina(s) &&
+    (estadoSolicitud === "pendiente" ||
+      estadoOperativo === "pendiente tesorero")
+  );
+}
+
+function hoyISO() {
+  // Usar la fecha LOCAL del equipo, no UTC.
+  // new Date().toISOString() puede adelantar el día en RD por la noche.
+  const hoy = new Date();
+  const year = hoy.getFullYear();
+  const month = String(hoy.getMonth() + 1).padStart(2, "0");
+  const day = String(hoy.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+type ChequeEmisionForm = {
+  fecha_emision: string;
+  cuenta_bancaria_id: string;
+  numero_cheque: string;
+};
+
+const DATOS_CHEQUE_STORAGE_KEY = "vam_cheque_impresion_actual";
+
+export default function SolicitudesPagoPage() {
+  const [solicitudes, setSolicitudes] = useState<SolicitudPagoOperativa[]>([]);
+  const [cuentas, setCuentas] = useState<CuentaBancaria[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [procesandoId, setProcesandoId] = useState<number | null>(null);
+  const [buscar, setBuscar] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState("");
+  const [condominioId, setCondominioId] = useState("");
+  const [condominioNombre, setCondominioNombre] = useState("");
+  const [modalPago, setModalPago] = useState<SolicitudPagoOperativa | null>(
+    null,
+  );
+  const [modalCheque, setModalCheque] =
+    useState<SolicitudPagoOperativa | null>(null);
+  const [chequeEmisionForm, setChequeEmisionForm] =
+    useState<ChequeEmisionForm>({
+      fecha_emision: hoyISO(),
+      cuenta_bancaria_id: "",
+      numero_cheque: "",
+    });
+  const [pagoForm, setPagoForm] = useState<PagoForm>({
+    fecha_pago: hoyISO(),
+    cuenta_bancaria_id: "",
+    metodo_pago: "Cheque",
+    numero_documento: "",
+    referencia_banco: "",
+  });
+  const [chequeArchivo, setChequeArchivo] = useState<File | null>(null);
+  const [beneficiarioNominaCheque, setBeneficiarioNominaCheque] = useState("");
+
+  useEffect(() => {
+    const idGuardado = localStorage.getItem("condominio_id") || "";
+    const nombreGuardado = localStorage.getItem("condominio_nombre") || "";
+
+    setCondominioId(idGuardado);
+    setCondominioNombre(nombreGuardado);
+
+    if (idGuardado || nombreGuardado) {
+      cargarSolicitudes(idGuardado, nombreGuardado);
+      cargarCuentasBancarias(idGuardado);
+    }
+  }, []);
+
+  useEffect(() => {
+    function refrescarAlVolver() {
+      const idGuardado = localStorage.getItem("condominio_id") || "";
+      const nombreGuardado =
+        localStorage.getItem("condominio_nombre") || "";
+
+      if (idGuardado || nombreGuardado) {
+        cargarSolicitudes(idGuardado, nombreGuardado);
+      }
+    }
+
+    window.addEventListener("focus", refrescarAlVolver);
+
+    return () => {
+      window.removeEventListener("focus", refrescarAlVolver);
+    };
+  }, []);
+
+  async function cargarCuentasBancarias(idActual = condominioId) {
+    if (!idActual) {
+      setCuentas([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("cuentas_bancarias")
+      .select(
+        "id, client_id, condominio_id, nombre_banco, numero_cuenta, tipo_cuenta, moneda, activa, balance_actual",
+      )
+      .eq("condominio_id", Number(idActual))
+      .eq("activa", true)
+      .order("id", { ascending: true });
+
+    if (error) {
+      alert("Error cargando cuentas bancarias: " + error.message);
+      setCuentas([]);
+      return;
+    }
+
+    setCuentas((data as CuentaBancaria[]) || []);
+  }
+
+  async function cargarSolicitudes(
+    idActual = condominioId,
+    nombreActual = condominioNombre,
+  ) {
+    setLoading(true);
+
+    let query = supabase
+      .from("v_solicitudes_pago_operativas")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (idActual) {
+      query = query.eq("condominio_id", Number(idActual));
+    } else if (nombreActual) {
+      query = query.eq("condominio", nombreActual);
+    }
+
+    const { data, error } = await query;
+
+    setLoading(false);
+
+    if (error) {
+      alert("Error cargando solicitudes: " + error.message);
+      return;
+    }
+
+    const solicitudesBase = (data as SolicitudPagoOperativa[]) || [];
+
+    // La vista operativa no siempre trae proveedor_nombre / categoria_nombre.
+    // Enriquecemos los nombres desde los catálogos antes de usar la solicitud
+    // para Caja Chica, listado e impresión de cheques.
+    const proveedorIds = Array.from(
+      new Set(
+        solicitudesBase
+          .map((item) => Number(item.proveedor_id || 0))
+          .filter((id) => id > 0),
+      ),
+    );
+
+    const categoriaIds = Array.from(
+      new Set(
+        solicitudesBase
+          .map((item) => Number(item.categoria_id || 0))
+          .filter((id) => id > 0),
+      ),
+    );
+
+    const proveedorMap = new Map<number, string>();
+    const categoriaMap = new Map<number, string>();
+
+    const condominioConsulta = Number(
+      idActual || solicitudesBase[0]?.condominio_id || 0,
+    );
+
+    const [proveedoresResponse, categoriasResponse] = await Promise.all([
+      proveedorIds.length > 0
+        ? supabase
+            .from("catalogo_proveedores")
+            .select("id, nombre_proveedor")
+            .eq("condominio_id", condominioConsulta)
+            .in("id", proveedorIds)
+        : Promise.resolve({ data: [], error: null }),
+
+      categoriaIds.length > 0
+        ? supabase
+            .from("catalogo_categoria_gastos")
+            .select("id, nombre_categoria")
+            .eq("condominio_id", condominioConsulta)
+            .in("id", categoriaIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (proveedoresResponse.error) {
+      console.warn(
+        "No se pudieron cargar los nombres de proveedores:",
+        proveedoresResponse.error.message,
+      );
+    } else {
+      (proveedoresResponse.data || []).forEach((item: any) => {
+        proveedorMap.set(
+          Number(item.id),
+          String(item.nombre_proveedor || "").trim(),
+        );
+      });
+    }
+
+    if (categoriasResponse.error) {
+      console.warn(
+        "No se pudieron cargar los nombres de categorías:",
+        categoriasResponse.error.message,
+      );
+    } else {
+      (categoriasResponse.data || []).forEach((item: any) => {
+        categoriaMap.set(
+          Number(item.id),
+          String(item.nombre_categoria || "").trim(),
+        );
+      });
+    }
+
+    const solicitudesCompletas = solicitudesBase.map((solicitud) => ({
+      ...solicitud,
+      proveedor_nombre:
+        solicitud.proveedor_nombre ||
+        (solicitud.proveedor_id
+          ? proveedorMap.get(Number(solicitud.proveedor_id)) || null
+          : null),
+      categoria_nombre:
+        solicitud.categoria_nombre ||
+        (solicitud.categoria_id
+          ? categoriaMap.get(Number(solicitud.categoria_id)) || null
+          : null),
+    }));
+
+    const idsSolicitudes = solicitudesCompletas.map(
+      (item) => item.solicitud_id,
+    );
+
+    let solicitudesConCheque = solicitudesCompletas;
+
+    if (idsSolicitudes.length > 0) {
+      const { data: datosCheque, error: chequeMetaError } = await supabase
+        .from("v_cheques_emitidos_operativos")
+        .select(
+          "cheque_id, solicitud_pago_id, cuenta_bancaria_id, numero_cheque, fecha_emision, beneficiario, comentario, estado, emitido_por, cantidad_impresiones, primera_impresion_at, ultima_impresion_at",
+        )
+        .in("solicitud_pago_id", idsSolicitudes);
+
+      if (chequeMetaError) {
+        console.warn(
+          "No fue posible cargar el control de cheques emitidos:",
+          chequeMetaError.message,
+        );
+      } else {
+        const chequeMap = new Map<number, any>();
+
+        for (const item of datosCheque || []) {
+          chequeMap.set(Number(item.solicitud_pago_id), item);
+        }
+
+        solicitudesConCheque = solicitudesCompletas.map((solicitud) => {
+          const cheque = chequeMap.get(solicitud.solicitud_id);
+
+          return cheque
+            ? {
+                ...solicitud,
+                // Mantenemos estos nombres internos para no alterar el resto
+                // de la pantalla, pero los datos provienen de las tablas
+                // normalizadas cheques_emitidos / cheques_impresiones.
+                estado_cheque: cheque.estado,
+                numero_cheque_emitido: cheque.numero_cheque,
+                fecha_emision_cheque: cheque.fecha_emision,
+                cuenta_bancaria_cheque_id: cheque.cuenta_bancaria_id,
+                beneficiario_cheque: cheque.beneficiario,
+                comentario_cheque: cheque.comentario,
+                cheque_impreso_at: cheque.ultima_impresion_at,
+                cheque_impreso_por: cheque.emitido_por,
+                cheque_impresiones: cheque.cantidad_impresiones,
+              }
+            : solicitud;
+        });
+      }
+    }
+
+    const solicitudesCajaChica =
+      solicitudesConCheque.filter(esSolicitudCajaChica);
+    const idsCajaChica = solicitudesCajaChica.map((s) => s.solicitud_id);
+
+    if (idsCajaChica.length === 0) {
+      setSolicitudes(solicitudesConCheque);
+      return;
+    }
+
+    const { data: fondosCajaChica, error: fondosError } = await supabase
+      .from("caja_chica_fondos")
+      .select(
+        "solicitud_pago_id, movimiento_banco_id, monto, fecha, cheque_url, cuenta_bancaria_id, estado",
+      )
+      .in("solicitud_pago_id", idsCajaChica)
+      .neq("estado", "Anulado");
+
+    if (fondosError) {
+      console.warn(
+        "No fue posible enriquecer solicitudes de Caja Chica:",
+        fondosError.message,
+      );
+      setSolicitudes(solicitudesConCheque);
+      return;
+    }
+
+    const fondoPorSolicitud = new Map<number, any>();
+
+    for (const fondo of fondosCajaChica || []) {
+      const solicitudId = Number(fondo.solicitud_pago_id || 0);
+      if (solicitudId > 0) {
+        fondoPorSolicitud.set(solicitudId, fondo);
+      }
+    }
+
+    const solicitudesFinales = solicitudesConCheque.map((solicitud) => {
+      if (!esSolicitudCajaChica(solicitud)) return solicitud;
+
+      const fondo = fondoPorSolicitud.get(solicitud.solicitud_id);
+      if (!fondo?.movimiento_banco_id) {
+        if (normalizar(solicitud.estado_solicitud) === "pagada") {
+          return {
+            ...solicitud,
+            estado_operativo: "Pagada",
+            pagado: true,
+          };
+        }
+
+        return solicitud;
+      }
+
+      return {
+        ...solicitud,
+        estado_operativo: "Pagada",
+        pagado: true,
+        fecha_pago: fondo.fecha || solicitud.fecha_pago,
+        cuenta_bancaria_id:
+          fondo.cuenta_bancaria_id || solicitud.cuenta_bancaria_id,
+        movimientos_banco: 1,
+        total_banco: Number(fondo.monto || solicitud.total_solicitud || 0),
+        ultimo_movimiento_banco_id: fondo.movimiento_banco_id,
+        ultima_fecha_banco: fondo.fecha || solicitud.ultima_fecha_banco,
+        cheque_url: fondo.cheque_url || solicitud.cheque_url,
+      };
+    });
+
+    setSolicitudes(solicitudesFinales);
+  }
+
+  async function obtenerNominaOrigen(s: SolicitudPagoOperativa) {
+    const { data: solicitudOrigen, error: origenError } = await supabase
+      .from("solicitudes_pago")
+      .select("origen_modulo, origen_id")
+      .eq("id", s.solicitud_id)
+      .maybeSingle();
+
+    if (origenError) {
+      throw new Error("No se pudo validar el origen de la nómina: " + origenError.message);
+    }
+
+    const esOrigenNomina = normalizar(solicitudOrigen?.origen_modulo) === "nomina";
+    const nominaId = Number(solicitudOrigen?.origen_id || 0);
+
+    if (!esOrigenNomina || !nominaId) {
+      return { nominaId: null as number | null, nomina: null as DatosNominaSoporte | null };
+    }
+
+    const { data: nomina, error: nominaError } = await supabase
+      .from("rh_nomina")
+      .select(
+        "id, nombre_empleado, numero_empleado, cargo, departamento, tipo_nomina, periodo, quincena, fecha_inicio_periodo, fecha_fin_periodo, fecha_pago, salario_base, monto_horas_extras, bonificacion, pago_vacaciones, afp, sfs, isr, otros_descuentos, total_ingresos, total_descuentos, neto_pagar",
+      )
+      .eq("id", nominaId)
+      .eq("condominio_id", Number(s.condominio_id || condominioId || 0))
+      .maybeSingle();
+
+    if (nominaError) {
+      throw new Error("No se pudo cargar la nómina para generar el soporte: " + nominaError.message);
+    }
+
+    return {
+      nominaId,
+      nomina: (nomina as DatosNominaSoporte | null) || null,
+    };
+  }
+
+  async function adjuntarSoporteNomina(
+    s: SolicitudPagoOperativa,
+    gastoId: number,
+    condominioGastoId: number,
+    proveedorNombre: string | null,
+  ) {
+    const { nominaId, nomina } = await obtenerNominaOrigen(s);
+    const { blob, numeroDocumento } = generarPdfSoporteNomina(s, nomina);
+    const nombreArchivo = `soporte-nomina-${nombreSeguroDocumento(numeroDocumento)}.pdf`;
+    const rutaArchivo = `condominio-${condominioGastoId}/gasto-${gastoId}/soporte-nomina/${Date.now()}-${nombreArchivo}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("gastos-documentos")
+      .upload(rutaArchivo, blob, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: "application/pdf",
+      });
+
+    if (uploadError) {
+      throw new Error("No se pudo guardar el PDF del soporte de nómina: " + uploadError.message);
+    }
+
+    const registroDocumento = {
+      condominio_id: condominioGastoId,
+      gasto_id: gastoId,
+      proveedor_id: s.proveedor_id || null,
+      proveedor_nombre:
+        nomina?.nombre_empleado ||
+        extraerCampoNomina(s.detalle, "Empleado") ||
+        proveedorNombre ||
+        "Empleado",
+      numero_documento: numeroDocumento,
+      fecha_documento: s.fecha_solicitud || hoyISO(),
+      monto: Number(s.total_solicitud || 0),
+      nombre_archivo: nombreArchivo,
+      archivo_url: rutaArchivo,
+      mime_type: "application/pdf",
+      tamano_bytes: blob.size,
+      observaciones:
+        "Comprobante interno de nómina generado automáticamente desde Recursos Humanos / Nómina.",
+      visible_propietarios: false,
+      es_principal: true,
+      estado: "ACTIVO",
+    };
+
+    // Intentamos guardar el tipo semántico nuevo. Si la base tiene una restricción
+    // histórica de tipos, reutilizamos FACTURA para no requerir cambios de esquema.
+    let { data: documentoCreado, error: documentoError } = await supabase
+      .from("gastos_documentos")
+      .insert({ ...registroDocumento, tipo_documento: "SOPORTE_NOMINA" })
+      .select("id")
+      .single();
+
+    if (documentoError || !documentoCreado) {
+      const respaldo = await supabase
+        .from("gastos_documentos")
+        .insert({ ...registroDocumento, tipo_documento: "FACTURA" })
+        .select("id")
+        .single();
+
+      documentoCreado = respaldo.data;
+      documentoError = respaldo.error;
+    }
+
+    if (documentoError || !documentoCreado) {
+      await supabase.storage.from("gastos-documentos").remove([rutaArchivo]);
+      throw new Error(
+        "No se pudo registrar el soporte de nómina en el expediente del gasto: " +
+          (documentoError?.message || "Documento no creado."),
+      );
+    }
+
+    return {
+      documentoId: Number(documentoCreado.id),
+      rutaArchivo,
+      nominaId,
+    };
+  }
+
+  async function generarGasto(s: SolicitudPagoOperativa) {
+    if (s.gasto_generado_id || s.gasto_id) {
+      alert("Esta solicitud ya tiene un gasto generado.");
+      return;
+    }
+
+    if (!puedeGenerarGastoSolicitud(s)) {
+      alert("Esta solicitud todavía no está lista para generar gasto.");
+      return;
+    }
+
+    const confirmar = confirm(
+      `¿Desea generar el gasto de esta solicitud?\n\nSolicitud: ${numeroSolicitud(
+        s,
+      )}\nConcepto: ${s.concepto || ""}\nTotal: RD$ ${dinero(
+        s.total_solicitud,
+      )}`,
+    );
+
+    if (!confirmar) return;
+
+    const nominaPendienteAprobacion =
+      esSolicitudNomina(s) && s.estado_operativo !== "Aprobada sin gasto";
+
+    try {
+      setProcesandoId(s.solicitud_id);
+
+      // v1.1.0: resolver el proveedor vigente en el momento de crear el gasto.
+      // proveedor_id es el identificador oficial; el nombre se mantiene como
+      // dato de compatibilidad hasta migrar las dependencias históricas.
+      const condominioGastoId = Number(s.condominio_id || condominioId || 0);
+      if (!condominioGastoId) {
+        throw new Error("No se pudo identificar el condominio del gasto.");
+      }
+
+      let nombreProveedorVerificado: string | null = null;
+      if (s.proveedor_id != null) {
+        const { data: proveedorActual, error: proveedorError } = await supabase
+          .from("catalogo_proveedores")
+          .select("id, nombre_proveedor")
+          .eq("id", s.proveedor_id)
+          .eq("condominio_id", condominioGastoId)
+          .maybeSingle();
+
+        if (proveedorError || !proveedorActual?.nombre_proveedor?.trim()) {
+          throw new Error(
+            "No se pudo verificar el proveedor en el catálogo de este condominio. " +
+              "No se generó ningún gasto. " + (proveedorError?.message || "Revise el proveedor seleccionado."),
+          );
+        }
+        nombreProveedorVerificado = proveedorActual.nombre_proveedor.trim();
+      }
+
+      const { data: gastoData, error: gastoError } = await supabase
+        .from("gastos")
+        .insert([
+          {
+            condominio_id: condominioGastoId,
+            condominio: s.condominio || condominioNombre,
+            fecha: s.fecha_solicitud,
+            categoria: s.categoria_nombre || null,
+            descripcion: s.detalle || s.concepto,
+            proveedor: nombreProveedorVerificado,
+            proveedor_id: s.proveedor_id,
+            categoria_id: s.categoria_id,
+            concepto: s.concepto,
+            detalle_gasto: s.detalle,
+            monto: Number(s.monto || 0),
+            itbis: Number(s.itbis || 0),
+            total: Number(s.total_solicitud || 0),
+            no_factura: s.no_factura,
+            ncf: s.ncf,
+            metodo_pago: s.metodo_pago,
+            cuenta_banco: s.cuenta_banco,
+            factura_url: s.soporte_url,
+            estado: nominaPendienteAprobacion
+              ? "Pendiente aprobación tesorero"
+              : "Gasto generado",
+            aprobado_tesorero: nominaPendienteAprobacion ? false : true,
+            aprobado_presidente: nominaPendienteAprobacion ? false : true,
+            fecha_aprobacion_tesorero: nominaPendienteAprobacion
+              ? null
+              : s.fecha_revision_tesorero || null,
+            fecha_aprobacion_presidente: nominaPendienteAprobacion
+              ? null
+              : s.fecha_revision_presidente || null,
+            pagado: false,
+          },
+        ])
+        .select("id")
+        .single();
+
+      if (gastoError) {
+        alert("Error generando gasto: " + gastoError.message);
+        return;
+      }
+
+      let soporteNomina:
+        | { documentoId: number; rutaArchivo: string; nominaId: number | null }
+        | null = null;
+
+      if (esSolicitudNomina(s)) {
+        try {
+          soporteNomina = await adjuntarSoporteNomina(
+            s,
+            Number(gastoData.id),
+            condominioGastoId,
+            nombreProveedorVerificado,
+          );
+
+          if (soporteNomina.nominaId) {
+            const { error: nominaUpdateError } = await supabase
+              .from("rh_nomina")
+              .update({
+                gasto_id: Number(gastoData.id),
+                gasto_generado: true,
+              })
+              .eq("id", soporteNomina.nominaId)
+              .eq("condominio_id", condominioGastoId);
+
+            if (nominaUpdateError) {
+              throw new Error(
+                "El soporte fue generado, pero no se pudo sincronizar la nómina con el gasto: " +
+                  nominaUpdateError.message,
+              );
+            }
+          }
+        } catch (soporteError: any) {
+          if (soporteNomina?.documentoId) {
+            await supabase
+              .from("gastos_documentos")
+              .update({ estado: "ANULADO" })
+              .eq("id", soporteNomina.documentoId);
+          }
+          if (soporteNomina?.rutaArchivo) {
+            await supabase.storage
+              .from("gastos-documentos")
+              .remove([soporteNomina.rutaArchivo]);
+          }
+          await supabase.from("gastos").delete().eq("id", gastoData.id);
+          throw soporteError;
+        }
+      }
+
+      const datosActualizacionSolicitud = nominaPendienteAprobacion
+        ? {
+            estado: "Pendiente aprobación tesorero",
+            gasto_generado_id: gastoData.id,
+            gasto_generado_at: new Date().toISOString(),
+          }
+        : {
+            estado: "Gasto generado",
+            gasto_generado_id: gastoData.id,
+            gasto_generado_at: new Date().toISOString(),
+          };
+
+      const { error: updateError } = await supabase
+        .from("solicitudes_pago")
+        .update(datosActualizacionSolicitud)
+        .eq("id", s.solicitud_id);
+
+      if (updateError) {
+        if (soporteNomina?.nominaId) {
+          await supabase
+            .from("rh_nomina")
+            .update({ gasto_id: null, gasto_generado: false })
+            .eq("id", soporteNomina.nominaId)
+            .eq("condominio_id", condominioGastoId);
+        }
+
+        if (soporteNomina?.documentoId) {
+          await supabase
+            .from("gastos_documentos")
+            .update({ estado: "ANULADO" })
+            .eq("id", soporteNomina.documentoId);
+        }
+
+        if (soporteNomina?.rutaArchivo) {
+          await supabase.storage
+            .from("gastos-documentos")
+            .remove([soporteNomina.rutaArchivo]);
+        }
+
+        const { error: rollbackError } = await supabase
+          .from("gastos")
+          .delete()
+          .eq("id", gastoData.id);
+
+        alert(
+          rollbackError
+            ? "Ocurrió un error actualizando la solicitud y no fue posible revertir el gasto creado. Revise el gasto ID " +
+                gastoData.id +
+                ". Detalle: " +
+                updateError.message
+            : "No se pudo actualizar la solicitud. El gasto creado fue revertido para evitar registros incompletos. Detalle: " +
+                updateError.message,
+        );
+        return;
+      }
+
+      alert(
+        nominaPendienteAprobacion
+          ? "Gasto de nómina generado correctamente con su Soporte de Nómina adjunto y enviado al tesorero para aprobación."
+          : "Gasto generado correctamente.",
+      );
+      cargarSolicitudes();
+    } catch (error: any) {
+      alert(error.message || "Error generando gasto.");
+    } finally {
+      setProcesandoId(null);
+    }
+  }
+
+    function facturaProveedorUrl(s: SolicitudPagoOperativa) {
+     return s.soporte_url || s.factura_url || "";
+  }
+
+  async function subirComprobantePago(archivo: File) {
+    const extension = archivo.name.split(".").pop() || "pdf";
+    const nombreArchivo = `${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(2)}.${extension}`;
+
+    const carpetaCondominio =
+      condominioId || String(modalPago?.condominio_id || "general");
+    const rutaArchivo = `${carpetaCondominio}/cheques-pagos/${nombreArchivo}`;
+
+    const { error } = await supabase.storage
+      .from("soportes-solicitudes-pago")
+      .upload(rutaArchivo, archivo);
+
+    if (error) {
+      throw new Error("Error subiendo cheque/comprobante: " + error.message);
+    }
+
+    const { data } = supabase.storage
+      .from("soportes-solicitudes-pago")
+      .getPublicUrl(rutaArchivo);
+
+    return data.publicUrl;
+  }
+
+  function solicitudUsaCheque(s: SolicitudPagoOperativa) {
+    const metodo = normalizar(s.metodo_pago);
+
+    // Nómina llega desde RH con metodo_pago = "Pendiente".
+    // Mientras el método no se haya definido, VAM permite preparar el cheque
+    // antes de registrar el egreso bancario.
+    if (
+      !metodo ||
+      metodo === "pendiente" ||
+      metodo === "por definir"
+    ) {
+      return true;
+    }
+
+    return metodo.includes("cheque");
+  }
+
+  function tieneChequeImpreso(s: SolicitudPagoOperativa) {
+    return normalizar(s.estado_cheque) === "impreso";
+  }
+
+  function estadoVisibleSolicitud(s: SolicitudPagoOperativa) {
+    if (s.estado_operativo === "Pagada" || s.pagado) return "Pagada";
+    if (tieneChequeImpreso(s)) return "Cheque impreso";
+    return s.estado_operativo || "Revisar";
+  }
+
+  function puedeEmitirChequeSolicitud(s: SolicitudPagoOperativa) {
+    const estadoSolicitud = normalizar(s.estado_solicitud);
+    const estadoOperativo = normalizar(s.estado_operativo);
+    const esNomina = esSolicitudNomina(s);
+
+    const aprobadaPorTesorero =
+      Boolean(s.fecha_revision_tesorero) ||
+      estadoSolicitud === "aprobado por tesorero" ||
+      estadoSolicitud === "aprobada por tesorero" ||
+      estadoOperativo === "pendiente presidente" ||
+      estadoOperativo === "aprobada sin gasto" ||
+      estadoOperativo === "lista para pagar" ||
+      estadoOperativo === "pagada";
+
+    const aprobadaPorPresidente =
+      Boolean(s.fecha_revision_presidente) ||
+      estadoSolicitud === "aprobado por presidente" ||
+      estadoSolicitud === "aprobada por presidente" ||
+      estadoSolicitud === "aprobado" ||
+      estadoSolicitud === "aprobada" ||
+      estadoSolicitud === "pagado" ||
+      estadoSolicitud === "pagada" ||
+      estadoOperativo === "aprobada sin gasto" ||
+      estadoOperativo === "lista para pagar" ||
+      estadoOperativo === "pagada";
+
+    const aprobacionesCompletas =
+      aprobadaPorTesorero && aprobadaPorPresidente;
+
+    const cajaChicaLista =
+      esSolicitudCajaChica(s) && esCajaChicaAprobadaParaPago(s);
+
+    /*
+     * FLUJO NORMAL DE NÓMINA:
+     * RH crea la solicitud con metodo_pago = "Pendiente".
+     * Después de Tesorero + Presidente y cuando queda "Lista para pagar",
+     * Finanzas debe poder:
+     *   1) Emitir / imprimir el cheque.
+     *   2) Firmarlo.
+     *   3) Procesar el pago.
+     *   4) Registrar el egreso bancario.
+     */
+    if (
+      esNomina &&
+      estadoOperativo === "lista para pagar" &&
+      aprobacionesCompletas
+    ) {
+      return solicitudUsaCheque(s);
+    }
+
+    /*
+     * RECUPERACIÓN CONTROLADA:
+     * Si una nómina histórica ya quedó Pagada pero nunca generó un cheque
+     * (caso solicitud #175), permitimos emitir únicamente el documento
+     * faltante. La pantalla de impresión NO crea otro pago ni otro
+     * movimiento bancario.
+     */
+    if (
+      esNomina &&
+      (estadoOperativo === "pagada" || s.pagado) &&
+      aprobacionesCompletas &&
+      !tieneChequeImpreso(s) &&
+      !s.numero_cheque_emitido
+    ) {
+      return true;
+    }
+
+    // Para solicitudes no nómina ya pagadas, no se permite crear otro cheque.
+    if (estadoOperativo === "pagada" || s.pagado) return false;
+
+    // Cuando la solicitud queda "Aprobada sin gasto", ya terminó el circuito
+    // Tesorero + Presidente y se puede emitir el cheque antes de generar el gasto.
+    if (
+      estadoOperativo === "aprobada sin gasto" &&
+      (aprobacionesCompletas || estadoSolicitud.includes("presidente"))
+    ) {
+      return true;
+    }
+
+    // Solicitudes listas para pagar: cheque o método aún no definido.
+    if (estadoOperativo === "lista para pagar") {
+      return solicitudUsaCheque(s);
+    }
+
+    return cajaChicaLista && solicitudUsaCheque(s);
+  }
+
+  // El proveedor contable de nómina puede ser un código interno (ej. LOTE-001).
+  // Nunca debe sustituir al nombre de la persona que recibirá el cheque.
+  function beneficiarioSugeridoCheque(s: SolicitudPagoOperativa) {
+    if (esSolicitudNomina(s)) {
+      const texto = `${s.detalle || ""}\n${s.concepto || ""}`;
+      const matchEmpleado = texto.match(
+        /(?:^|\n|[;,])\s*(?:Empleado|Colaborador|Beneficiario|Nombre del empleado)\s*:\s*([^\n;,]+?)(?=\s+(?:No\.?\s*empleado|Cargo|Departamento|Tipo n[oó]mina|Per[ií]odo|Quincena|Primera|Segunda|Total)\b|$|[;,])/im,
+      );
+      const nombreEmpleado = String(matchEmpleado?.[1] || "").trim();
+      if (nombreEmpleado) return nombreEmpleado;
+
+      // Solo reutilizar un beneficiario de cheque previamente registrado si
+      // no coincide con el proveedor contable ni con un código de lote.
+      const previo = String(s.beneficiario_cheque || "").trim();
+      const proveedor = String(s.proveedor_nombre || "").trim();
+      if (previo && normalizar(previo) !== normalizar(proveedor) &&
+          !/^LOTE[-\s]?\d+$/i.test(previo)) return previo;
+      return "";
+    }
+
+    return String(s.proveedor_nombre || "").trim();
+  }
+
+  function abrirModalEmisionCheque(s: SolicitudPagoOperativa) {
+    if (!puedeEmitirChequeSolicitud(s)) {
+      alert(
+        "El cheque solo puede emitirse después de las aprobaciones de Tesorero y Presidente, y cuando el método de pago sea Cheque.",
+      );
+      return;
+    }
+
+    const cuentaDefault =
+      s.cuenta_bancaria_id || (cuentas.length === 1 ? cuentas[0].id : null);
+
+    setChequeEmisionForm({
+      fecha_emision:
+        s.fecha_emision_cheque ||
+        ((s.estado_operativo === "Pagada" || s.pagado) && s.fecha_pago
+          ? String(s.fecha_pago).split("T")[0]
+          : hoyISO()),
+      cuenta_bancaria_id:
+        s.cuenta_bancaria_cheque_id
+          ? String(s.cuenta_bancaria_cheque_id)
+          : cuentaDefault
+            ? String(cuentaDefault)
+            : "",
+      numero_cheque: s.numero_cheque_emitido || "",
+    });
+
+    setBeneficiarioNominaCheque(beneficiarioSugeridoCheque(s));
+    setModalCheque(s);
+  }
+
+  function imprimirChequeSolicitud() {
+    if (!modalCheque) return;
+
+    if (!chequeEmisionForm.fecha_emision) {
+      alert("Debe indicar la fecha de emisión del cheque.");
+      return;
+    }
+
+    if (!chequeEmisionForm.cuenta_bancaria_id) {
+      alert("Debe seleccionar la cuenta bancaria del cheque.");
+      return;
+    }
+
+    if (!chequeEmisionForm.numero_cheque.trim()) {
+      alert("Debe indicar el número de cheque.");
+      return;
+    }
+
+    const cuenta =
+      cuentas.find(
+        (item) =>
+          String(item.id) === String(chequeEmisionForm.cuenta_bancaria_id),
+      ) || null;
+
+    if (!cuenta) {
+      alert("No fue posible identificar la cuenta bancaria seleccionada.");
+      return;
+    }
+
+    if (!normalizar(cuenta.nombre_banco).includes("popular")) {
+      alert(
+        `La plantilla calibrada actualmente corresponde a Banco Popular.\n\nCuenta seleccionada: ${cuenta.nombre_banco}`,
+      );
+      return;
+    }
+
+    const beneficiario = esSolicitudNomina(modalCheque)
+      ? beneficiarioNominaCheque.trim()
+      : beneficiarioSugeridoCheque(modalCheque);
+
+    if (esSolicitudNomina(modalCheque) && /^LOTE[-\s]?\d+$/i.test(beneficiario)) {
+      alert("El beneficiario de nómina debe ser el nombre del empleado, no un código de lote.");
+      return;
+    }
+
+    if (!beneficiario) {
+      alert(esSolicitudNomina(modalCheque)
+        ? "Indique el nombre completo del empleado beneficiario antes de imprimir el cheque."
+        : "La solicitud no tiene un proveedor/beneficiario identificado.");
+      return;
+    }
+
+    const monto = Number(modalCheque.total_solicitud || 0);
+
+    if (!(monto > 0)) {
+      alert("El monto del cheque debe ser mayor que cero.");
+      return;
+    }
+
+    const datosCheque = {
+      solicitud_id: modalCheque.solicitud_id,
+      numero_solicitud: numeroSolicitud(modalCheque),
+      beneficiario,
+      beneficiario_manual:
+        modalCheque.beneficiario_cheque &&
+        normalizar(modalCheque.beneficiario_cheque) !== normalizar(beneficiario)
+          ? modalCheque.beneficiario_cheque
+          : "",
+      comentario: modalCheque.comentario_cheque || "",
+      monto,
+      fecha: chequeEmisionForm.fecha_emision,
+      numero_cheque: chequeEmisionForm.numero_cheque.trim(),
+      concepto: modalCheque.concepto || "",
+      es_reimpresion: tieneChequeImpreso(modalCheque),
+      banco: cuenta.nombre_banco,
+      cuenta_bancaria_id: cuenta.id,
+      numero_cuenta: cuenta.numero_cuenta,
+      condominio: modalCheque.condominio || condominioNombre,
+    };
+
+    localStorage.setItem(
+      DATOS_CHEQUE_STORAGE_KEY,
+      JSON.stringify(datosCheque),
+    );
+
+    window.open(
+      "/administracion/cheques/imprimir",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
+  function abrirModalPago(s: SolicitudPagoOperativa) {
+    const cajaChicaLista =
+      esSolicitudCajaChica(s) && esCajaChicaAprobadaParaPago(s);
+
+    if (s.estado_operativo !== "Lista para pagar" && !cajaChicaLista) {
+      alert("Esta solicitud no está lista para pagar.");
+      return;
+    }
+
+    const cuentaDefault =
+      s.cuenta_bancaria_id || (cuentas.length === 1 ? cuentas[0].id : null);
+
+    const metodoActual = normalizar(s.metodo_pago);
+    const metodoPagoInicial =
+      !metodoActual ||
+      metodoActual === "pendiente" ||
+      metodoActual === "por definir"
+        ? "Cheque"
+        : String(s.metodo_pago);
+
+    setPagoForm({
+      fecha_pago: s.fecha_pago || s.fecha_solicitud || hoyISO(),
+      cuenta_bancaria_id: cuentaDefault ? String(cuentaDefault) : "",
+      metodo_pago: metodoPagoInicial,
+      numero_documento: "",
+      referencia_banco: "",
+    });
+    setChequeArchivo(null);
+    setModalPago(s);
+  }
+
+  async function completarPago() {
+    if (!modalPago) return;
+
+    const esCajaChica = esSolicitudCajaChica(modalPago);
+    const cajaChicaLista =
+      esCajaChica && esCajaChicaAprobadaParaPago(modalPago);
+
+    if (
+      !esCajaChica &&
+      !modalPago.gasto_generado_id &&
+      !modalPago.gasto_id
+    ) {
+      alert("Primero debe generar el gasto.");
+      return;
+    }
+
+    if (
+      modalPago.estado_operativo !== "Lista para pagar" &&
+      !cajaChicaLista
+    ) {
+      alert("Esta solicitud no está lista para pagar.");
+      return;
+    }
+
+    if (!pagoForm.fecha_pago) {
+      alert("Debe indicar la fecha real del pago.");
+      return;
+    }
+
+    if (!pagoForm.cuenta_bancaria_id) {
+      alert("Debe seleccionar la cuenta bancaria del condominio.");
+      return;
+    }
+
+    if (!pagoForm.metodo_pago) {
+      alert("Debe indicar el método de pago.");
+      return;
+    }
+
+    if (!pagoForm.numero_documento) {
+      alert("Debe indicar el número de cheque, transferencia o documento.");
+      return;
+    }
+
+    if (
+      esCajaChica &&
+      normalizar(pagoForm.metodo_pago).includes("cheque") &&
+      !chequeArchivo &&
+      !modalPago.cheque_url
+    ) {
+      alert("Para Caja Chica debe adjuntar el archivo del cheque emitido.");
+      return;
+    }
+
+    const referenciaBanco =
+      pagoForm.referencia_banco || pagoForm.numero_documento;
+
+    const tipoCajaChica = tipoOperacionCajaChica(modalPago);
+    const nombreOperacionCajaChica =
+      tipoCajaChica === "fondo_inicial"
+        ? "Fondo Inicial de Caja Chica"
+        : "Reposición de Caja Chica";
+
+    const confirmar = confirm(
+      esCajaChica
+        ? `¿Desea ejecutar ${nombreOperacionCajaChica} y registrar el EGRESO bancario?\n\nSolicitud: ${numeroSolicitud(
+            modalPago,
+          )}\nTotal: RD$ ${dinero(
+            modalPago.total_solicitud,
+          )}\n\nEfecto: Banco disminuye y Caja Chica aumenta. No se crea gasto operativo.`
+        : `¿Desea procesar este pago y registrar el EGRESO bancario?\n\nSolicitud: ${numeroSolicitud(
+            modalPago,
+          )}\nConcepto: ${modalPago.concepto || ""}\nTotal: RD$ ${dinero(
+            modalPago.total_solicitud,
+          )}`,
+    );
+
+    if (!confirmar) return;
+
+    try {
+      setProcesandoId(modalPago.solicitud_id);
+
+      let chequeUrl: string | null = null;
+
+      if (chequeArchivo) {
+        chequeUrl = await subirComprobantePago(chequeArchivo);
+      }
+
+      const { data, error } = await supabase.rpc(
+        "pagar_solicitud_pago_bancaria",
+        {
+          p_solicitud_id: modalPago.solicitud_id,
+          p_cuenta_bancaria_id: Number(pagoForm.cuenta_bancaria_id),
+          p_fecha_pago: pagoForm.fecha_pago,
+          p_metodo_pago: pagoForm.metodo_pago,
+          p_numero_documento: pagoForm.numero_documento,
+          p_referencia_banco: referenciaBanco,
+          p_cheque_url: chequeUrl,
+        },
+      );
+
+      if (error) {
+        alert("Error completando el pago: " + error.message);
+        return;
+      }
+
+      alert(data?.mensaje || "Pago completado correctamente.");
+      setModalPago(null);
+      setChequeArchivo(null);
+      cargarSolicitudes();
+    } catch (error: any) {
+      alert(error.message || "Error completando el pago.");
+    } finally {
+      setProcesandoId(null);
+    }
+  }
+
+  const solicitudesFiltradas = useMemo(() => {
+    const busqueda = normalizar(buscar);
+
+    return solicitudes.filter((s) => {
+      const estadoOperativo = estadoVisibleSolicitud(s);
+      const cumpleEstado =
+        filtroEstado === "" || estadoOperativo === filtroEstado;
+
+      const texto = normalizar(
+        `${s.solicitud_id} ${s.numero_solicitud || ""} ${
+          s.concepto || ""
+        } ${s.detalle || ""} ${s.proveedor_nombre || ""} ${
+          s.categoria_nombre || ""
+        } ${s.estado_solicitud || ""} ${s.estado_operativo || ""}`,
+      );
+
+      return cumpleEstado && texto.includes(busqueda);
+    });
+  }, [solicitudes, filtroEstado, buscar]);
+
+  const totalSolicitado = solicitudesFiltradas.reduce(
+    (sum, s) => sum + Number(s.total_solicitud || 0),
+    0,
+  );
+
+  const resumenEstados = useMemo(() => {
+    const base = new Map<string, { cantidad: number; total: number }>();
+
+    for (const s of solicitudes) {
+      const estado = s.estado_operativo || "Sin estado";
+      const actual = base.get(estado) || { cantidad: 0, total: 0 };
+      actual.cantidad += 1;
+      actual.total += Number(s.total_solicitud || 0);
+      base.set(estado, actual);
+    }
+
+    return Array.from(base.entries()).map(([estado, valores]) => ({
+      estado,
+      ...valores,
+    }));
+  }, [solicitudes]);
+
+  function exportarExcel() {
+    const dataExcel = solicitudesFiltradas.map((s) => ({
+      ID: s.solicitud_id,
+      "No. Solicitud": s.numero_solicitud || "",
+      Condominio: s.condominio || "",
+      Fecha: s.fecha_solicitud || "",
+      Proveedor:
+        s.proveedor_nombre || (s.proveedor_id ? `ID ${s.proveedor_id}` : ""),
+      Categoría:
+        s.categoria_nombre || (s.categoria_id ? `ID ${s.categoria_id}` : ""),
+      Concepto: s.concepto || "",
+      Monto: Number(s.monto || 0),
+      ITBIS: Number(s.itbis || 0),
+      Total: Number(s.total_solicitud || 0),
+      "Estado solicitud": s.estado_solicitud || "",
+      "Estado operativo": s.estado_operativo || "",
+      "No. Factura": s.no_factura || "",
+      NCF: s.ncf || "",
+      "Factura proveedor": facturaProveedorUrl(s),
+      "Cheque / comprobante": s.cheque_url || "",
+      "Gasto ID": s.gasto_id || s.gasto_generado_id || "",
+      "Movimientos banco": Number(s.movimientos_banco || 0),
+      "Total banco": Number(s.total_banco || 0),
+    }));
+
+    const hoja = XLSX.utils.json_to_sheet(dataExcel);
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, "Solicitudes");
+    XLSX.writeFile(
+      libro,
+      `Solicitudes_${condominioNombre || condominioId}.xlsx`,
+    );
+  }
+
+  return (
+    <PageContainer>
+      <ModuleMenu
+        title="Solicitudes de Pago"
+        subtitle="Nueva solicitud, aprobaciones, gastos generados, pagos y control bancario."
+        tone="green"
+        items={[
+          { href: "/solicitudes-pago", label: "Listado", icon: ClipboardCheck },
+          {
+            href: "/solicitudes-pago/nueva",
+            label: "Nueva Solicitud",
+            icon: Plus,
+          },
+           {
+              href: "/solicitudes-pago/agrupada",
+              label: "Solicitud Agrupada",
+              icon: Files,
+            },
+          {
+            href: "/solicitudes-pago/tesorero",
+            label: "Tesorero",
+            icon: ShieldCheck,
+          },
+          {
+            href: "/solicitudes-pago/presidente",
+            label: "Presidente",
+            icon: ShieldCheck,
+          },
+          {
+            href: "/solicitudes-pago/resumen",
+            label: "Resumen",
+            icon: BarChart3,
+          },
+          { href: "/gastos", label: "Gastos", icon: WalletCards },
+        ]}
+      />
+
+      <ModuleToolbar
+        title="Solicitudes y Pagos"
+        subtitle={`Condominio activo: ${condominioNombre || "No seleccionado"}`}
+        icon={FileText}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/solicitudes-pago/nueva"
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800"
+            >
+              <Plus className="h-4 w-4" />
+              Nueva solicitud
+            </Link>
+
+            <button
+              type="button"
+              onClick={exportarExcel}
+              className="rounded-xl bg-green-700 px-4 py-2 text-sm font-bold text-white hover:bg-green-800"
+            >
+              Exportar
+            </button>
+          </div>
+        }
+      />
+
+      <SectionCard
+        title="Resumen operativo"
+        subtitle="Estado real calculado desde solicitud, gasto y banco."
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-5">
+          {resumenEstados.map((item) => (
+            <div
+              key={item.estado}
+              className="rounded-2xl border bg-white p-4 shadow-sm"
+            >
+              <div
+                className={`mb-2 inline-flex rounded-full border px-3 py-1 text-xs font-black ${estadoColor(
+                  item.estado,
+                )}`}
+              >
+                {item.estado}
+              </div>
+              <div className="text-2xl font-black text-slate-900">
+                {item.cantidad}
+              </div>
+              <div className="text-xs font-semibold text-slate-500">
+                RD$ {dinero(item.total)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Filtros"
+        subtitle="Busque solicitudes por estado operativo, proveedor, concepto o número."
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div>
+            <label className="mb-1 block text-sm font-semibold">
+              Estado operativo
+            </label>
+            <select
+              value={filtroEstado}
+              onChange={(e) => setFiltroEstado(e.target.value)}
+              className="w-full rounded-xl border bg-white px-4 py-3"
+            >
+              <option value="">Todos</option>
+              {ESTADOS_OPERATIVOS.map((estado) => (
+                <option key={estado} value={estado}>
+                  {estado}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-semibold">Buscar</label>
+            <input
+              type="text"
+              value={buscar}
+              onChange={(e) => setBuscar(e.target.value)}
+              className="w-full rounded-xl border px-4 py-3"
+              placeholder="Buscar por concepto, proveedor, ID, número o estado..."
+            />
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Listado de solicitudes"
+        subtitle={`${solicitudesFiltradas.length} solicitud(es). Total filtrado: RD$ ${dinero(
+          totalSolicitado,
+        )}`}
+      >
+        {loading ? (
+          <p className="rounded-xl border bg-slate-50 p-4 text-sm font-semibold text-slate-600">
+            Cargando solicitudes...
+          </p>
+        ) : (
+          <div className="overflow-auto rounded-2xl border">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-100 text-slate-700">
+                <tr>
+                  <th className="border p-2 text-left">No.</th>
+                  <th className="border p-2 text-left">Fecha</th>
+                  <th className="border p-2 text-left">Proveedor</th>
+                  <th className="border p-2 text-left">Concepto</th>
+                  <th className="border p-2 text-right">Total</th>
+                  <th className="border p-2 text-center">Estado operativo</th>
+                  <th className="border p-2 text-center">Banco</th>
+                  <th className="border p-2 text-center">Factura proveedor</th>
+                  <th className="border p-2 text-center">Cheque / pago</th>
+                  <th className="border p-2 text-center">Acciones</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {solicitudesFiltradas.map((s) => {
+                  const estadoOperativoReal =
+                    s.estado_operativo || "Revisar";
+                  const estadoOperativo = estadoVisibleSolicitud(s);
+                  const chequeImpreso = tieneChequeImpreso(s);
+                  const esCajaChica = esSolicitudCajaChica(s);
+                  const puedeGenerarGasto =
+                    puedeGenerarGastoSolicitud(s);
+                  const puedePagar =
+                    estadoOperativoReal === "Lista para pagar" ||
+                    (esCajaChica && esCajaChicaAprobadaParaPago(s));
+                  const puedeEmitirCheque =
+                    puedeEmitirChequeSolicitud(s);
+                  const esPagada = estadoOperativoReal === "Pagada";
+                  const requiereRevision =
+                    estadoOperativoReal.startsWith("Revisar");
+
+                  return (
+                    <tr key={s.solicitud_id} className="hover:bg-slate-50">
+                      <td className="border p-2 align-top">
+                        <div className="font-black text-slate-900">
+                          {numeroSolicitud(s)}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          ID {s.solicitud_id}
+                        </div>
+                      </td>
+
+                      <td className="border p-2 align-top">
+                        {formatoFecha(s.fecha_solicitud)}
+                      </td>
+
+                      <td className="border p-2 align-top">
+                        {s.proveedor_nombre ||
+                          (s.proveedor_id
+                            ? `Proveedor ID ${s.proveedor_id}`
+                            : "-")}
+                      </td>
+
+                      <td className="border p-2 align-top">
+                        <div className="font-semibold text-slate-900">
+                          {s.concepto || "-"}
+                        </div>
+                        {s.detalle && (
+                          <div className="mt-1 max-w-lg text-xs text-slate-500">
+                            {s.detalle}
+                          </div>
+                        )}
+                        {(s.gasto_id || s.gasto_generado_id) && (
+                          <div className="mt-1 text-xs font-bold text-purple-700">
+                            Gasto ID: {s.gasto_id || s.gasto_generado_id}
+                          </div>
+                        )}
+                        {s.estado_solicitud && (
+                          <div className="mt-1 text-xs text-slate-400">
+                            Estado guardado: {s.estado_solicitud}
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="border p-2 text-right align-top font-black text-green-700">
+                        RD$ {dinero(s.total_solicitud)}
+                      </td>
+
+                      <td className="border p-2 text-center align-top">
+                        <span
+                          className={`inline-flex rounded-full border px-3 py-1 text-xs font-black ${estadoColor(
+                            estadoOperativo,
+                          )}`}
+                        >
+                          {estadoOperativo}
+                        </span>
+                      </td>
+
+                      <td className="border p-2 text-center align-top">
+                        {Number(s.movimientos_banco || 0) > 0 ? (
+                          <div className="text-xs">
+                            <div className="font-black text-emerald-700">
+                              Banco OK
+                            </div>
+                            <div className="text-slate-500">
+                              RD$ {dinero(s.total_banco)}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-xs font-semibold text-slate-400">
+                            Sin banco
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="border p-2 text-center align-top">
+                        {facturaProveedorUrl(s) ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <a
+                              href={facturaProveedorUrl(s)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex rounded-lg bg-slate-900 px-3 py-1 text-xs font-bold text-white hover:bg-slate-800"
+                            >
+                              Ver factura
+                            </a>
+                            {s.no_factura && (
+                              <span className="text-[11px] text-slate-500">
+                                Fact. {s.no_factura}
+                              </span>
+                            )}
+                            {s.ncf && (
+                              <span className="text-[11px] text-slate-500">
+                                NCF {s.ncf}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">
+                            Sin factura
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="border p-2 text-center align-top">
+                        {s.cheque_url ? (
+                          <a
+                            href={s.cheque_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex rounded-lg bg-emerald-700 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-800"
+                          >
+                            Ver cheque
+                          </a>
+                        ) : chequeImpreso ? (
+                          <div className="text-xs">
+                            <div className="font-black text-cyan-700">
+                              Cheque impreso
+                            </div>
+                            {s.numero_cheque_emitido && (
+                              <div className="mt-1 text-slate-500">
+                                No. {s.numero_cheque_emitido}
+                              </div>
+                            )}
+                            <div className="mt-1 text-[11px] text-slate-400">
+                              {Number(s.cheque_impresiones || 0)} impresión(es)
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">
+                            Sin cheque
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="border p-2 align-top">
+                        <div className="flex flex-col items-center gap-2">
+                          <Link
+                            href={`/solicitudes-pago/reporte/${s.solicitud_id}`}
+                            className="w-full rounded-lg border bg-white px-3 py-2 text-center text-xs font-bold text-slate-700 hover:bg-slate-50"
+                          >
+                            <span className="inline-flex items-center justify-center gap-1">
+                              <Printer className="h-3 w-3" />
+                              Imprimir solicitud
+                            </span>
+                          </Link>
+
+                          {puedeGenerarGasto && (
+                            <button
+                              type="button"
+                              disabled={procesandoId === s.solicitud_id}
+                              onClick={() => generarGasto(s)}
+                              className="w-full rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+                            >
+                              {procesandoId === s.solicitud_id
+                                ? "Procesando..."
+                                : "Generar gasto"}
+                            </button>
+                          )}
+
+                          {puedeEmitirCheque && (
+                            <button
+                              type="button"
+                              disabled={procesandoId === s.solicitud_id}
+                              onClick={() => abrirModalEmisionCheque(s)}
+                              className={`w-full rounded-lg px-3 py-2 text-xs font-bold text-white disabled:opacity-50 ${
+                                chequeImpreso
+                                  ? "bg-amber-600 hover:bg-amber-700"
+                                  : "bg-blue-700 hover:bg-blue-800"
+                              }`}
+                            >
+                              <span className="inline-flex items-center justify-center gap-1">
+                                <Printer className="h-3 w-3" />
+                                {chequeImpreso
+                                  ? "Reimprimir cheque"
+                                  : "Emitir cheque"}
+                              </span>
+                            </button>
+                          )}
+
+                          {puedePagar && (
+                            <button
+                              type="button"
+                              disabled={procesandoId === s.solicitud_id}
+                              onClick={() => abrirModalPago(s)}
+                              className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+                            >
+                              {esCajaChica
+                                ? tipoOperacionCajaChica(s) === "fondo_inicial"
+                                  ? "Procesar fondo inicial"
+                                  : "Procesar reposición"
+                                : "Procesar pago"}
+                            </button>
+                          )}
+
+                          {esPagada && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
+                              <CheckCircle2 className="h-3 w-3" />
+                              Pagada
+                            </span>
+                          )}
+
+                          {requiereRevision && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-center text-xs font-black text-red-700">
+                              <AlertTriangle className="h-3 w-3" />
+                              Revisar
+                            </span>
+                          )}
+
+                          {!puedeGenerarGasto &&
+                            !puedePagar &&
+                            !esPagada &&
+                            !requiereRevision && (
+                              <span className="text-center text-xs font-semibold text-slate-400">
+                                Pendiente de aprobación
+                              </span>
+                            )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {solicitudesFiltradas.length === 0 && (
+                  <tr>
+                    <td
+                      className="border p-6 text-center text-slate-500"
+                      colSpan={10}
+                    >
+                      No hay solicitudes registradas.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      <div className="mt-3 text-right text-[10px] text-slate-400">
+        Solicitudes y Pagos · v1.1.1 · Nómina → Cheque → Pago
+      </div>
+
+      {modalCheque && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">
+                  {tieneChequeImpreso(modalCheque)
+                    ? "Reimpresión de cheque"
+                    : "Emitir cheque"}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Solicitud {numeroSolicitud(modalCheque)} · RD${" "}
+                  {dinero(modalCheque.total_solicitud)}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setModalCheque(null)}
+                className="rounded-full bg-slate-100 p-2 text-slate-600 hover:bg-slate-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+              <div className="text-xs font-black uppercase tracking-wide text-blue-700">
+                Beneficiario
+              </div>
+              <div className="mt-1 text-base font-black text-slate-900">
+                {esSolicitudNomina(modalCheque)
+                  ? beneficiarioNominaCheque || "Empleado pendiente de identificar"
+                  : beneficiarioSugeridoCheque(modalCheque) || "Beneficiario no identificado"}
+              </div>
+
+              {esSolicitudNomina(modalCheque) && (
+                <label className="mt-3 block text-sm font-semibold text-slate-700">
+                  Nombre completo del empleado beneficiario
+                  <input
+                    type="text"
+                    value={beneficiarioNominaCheque}
+                    onChange={(e) => setBeneficiarioNominaCheque(e.target.value)}
+                    placeholder="Nombre y apellidos del empleado"
+                    className="mt-1 w-full rounded-xl border border-blue-300 bg-white px-4 py-3 text-slate-900"
+                  />
+                  <span className="mt-1 block text-xs font-normal text-slate-600">
+                    Verifique el nombre antes de imprimir. No se usará el código del proveedor contable.
+                  </span>
+                </label>
+              )}
+
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-white p-3">
+                  <div className="text-xs font-semibold text-slate-500">
+                    Concepto
+                  </div>
+                  <div className="mt-1 text-sm font-bold text-slate-800">
+                    {modalCheque.concepto || "-"}
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-white p-3">
+                  <div className="text-xs font-semibold text-slate-500">
+                    Monto del cheque
+                  </div>
+                  <div className="mt-1 text-lg font-black text-emerald-700">
+                    RD$ {dinero(modalCheque.total_solicitud)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Cuenta bancaria
+                </label>
+                <select
+                  value={chequeEmisionForm.cuenta_bancaria_id}
+                  onChange={(e) =>
+                    setChequeEmisionForm((prev) => ({
+                      ...prev,
+                      cuenta_bancaria_id: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                >
+                  <option value="">Seleccione cuenta</option>
+                  {cuentas.map((cuenta) => (
+                    <option key={cuenta.id} value={cuenta.id}>
+                      {cuenta.nombre_banco} · {cuenta.numero_cuenta} · RD${" "}
+                      {dinero(cuenta.balance_actual)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Fecha del cheque
+                  </label>
+                  <input
+                    type="date"
+                    value={chequeEmisionForm.fecha_emision}
+                    onChange={(e) =>
+                      setChequeEmisionForm((prev) => ({
+                        ...prev,
+                        fecha_emision: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border px-4 py-3"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-semibold">
+                    Número de cheque
+                  </label>
+                  <input
+                    type="text"
+                    value={chequeEmisionForm.numero_cheque}
+                    onChange={(e) =>
+                      setChequeEmisionForm((prev) => ({
+                        ...prev,
+                        numero_cheque: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border px-4 py-3"
+                    placeholder="Ej.: 000386"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-800">
+              {modalCheque.estado_operativo === "Pagada" || modalCheque.pagado ? (
+                <>
+                  Esta solicitud ya está pagada. Esta impresión regulariza únicamente
+                  el documento de cheque faltante y no registra otro pago ni otro
+                  movimiento bancario.
+                </>
+              ) : (
+                <>
+                  Emitir o imprimir el cheque no registra ningún pago ni movimiento
+                  bancario. El cheque debe ser firmado por Tesorero y Presidente.
+                  Después de firmado se procesa el pago y se adjunta el cheque al sistema.
+                </>
+              )}
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setModalCheque(null)}
+                className="rounded-xl border px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={imprimirChequeSolicitud}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800"
+              >
+                <Printer className="h-4 w-4" />
+                Vista previa / Imprimir cheque
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalPago && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">
+                  {esSolicitudCajaChica(modalPago)
+                    ? tipoOperacionCajaChica(modalPago) === "fondo_inicial"
+                      ? "Procesar Fondo Inicial de Caja Chica"
+                      : "Procesar Reposición de Caja Chica"
+                    : "Procesar pago"}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Solicitud {numeroSolicitud(modalPago)} · RD${" "}
+                  {dinero(modalPago.total_solicitud)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setModalPago(null);
+                  setChequeArchivo(null);
+                }}
+                className="rounded-full bg-slate-100 p-2 text-slate-600 hover:bg-slate-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mb-4 rounded-2xl border bg-slate-50 p-4">
+              <div className="text-sm font-black text-slate-900">
+                {modalPago.concepto || "Solicitud sin concepto"}
+              </div>
+              {modalPago.detalle && (
+                <div className="mt-1 text-sm text-slate-600">
+                  {modalPago.detalle}
+                </div>
+              )}
+
+              <div className="mt-3 grid grid-cols-1 gap-2 text-xs md:grid-cols-3">
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="font-black text-slate-700">No. factura</div>
+                  <div className="text-slate-600">{modalPago.no_factura || "-"}</div>
+                </div>
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="font-black text-slate-700">NCF</div>
+                  <div className="text-slate-600">{modalPago.ncf || "-"}</div>
+                </div>
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="font-black text-slate-700">Factura proveedor</div>
+                  {facturaProveedorUrl(modalPago) ? (
+                    <a
+                      href={facturaProveedorUrl(modalPago)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-bold text-blue-700 underline"
+                    >
+                      Ver factura / soporte
+                    </a>
+                  ) : (
+                    <div className="text-slate-500">Sin factura</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Fecha real de pago
+                </label>
+                <input
+                  type="date"
+                  value={pagoForm.fecha_pago}
+                  onChange={(e) =>
+                    setPagoForm((prev) => ({
+                      ...prev,
+                      fecha_pago: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border px-4 py-3"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Cuenta bancaria del condominio
+                </label>
+                <select
+                  value={pagoForm.cuenta_bancaria_id}
+                  onChange={(e) =>
+                    setPagoForm((prev) => ({
+                      ...prev,
+                      cuenta_bancaria_id: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                >
+                  <option value="">Seleccione cuenta</option>
+                  {cuentas.map((cuenta) => (
+                    <option key={cuenta.id} value={cuenta.id}>
+                      {cuenta.nombre_banco} · {cuenta.numero_cuenta} · RD${" "}
+                      {dinero(cuenta.balance_actual)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Método de pago
+                </label>
+                <select
+                  value={pagoForm.metodo_pago}
+                  onChange={(e) =>
+                    setPagoForm((prev) => ({
+                      ...prev,
+                      metodo_pago: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                >
+                  <option value="Cheque">Cheque</option>
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="Pago electrónico">Pago electrónico</option>
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Otro">Otro</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-semibold">
+                  Número documento
+                </label>
+                <input
+                  type="text"
+                  value={pagoForm.numero_documento}
+                  onChange={(e) =>
+                    setPagoForm((prev) => ({
+                      ...prev,
+                      numero_documento: e.target.value,
+                      referencia_banco:
+                        prev.referencia_banco || e.target.value || "",
+                    }))
+                  }
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Cheque, transferencia o documento"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-semibold">
+                  Referencia bancaria
+                </label>
+                <input
+                  type="text"
+                  value={pagoForm.referencia_banco}
+                  onChange={(e) =>
+                    setPagoForm((prev) => ({
+                      ...prev,
+                      referencia_banco: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border px-4 py-3"
+                  placeholder="Si está vacío usa el número de documento"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-semibold">
+                  {normalizar(pagoForm.metodo_pago).includes("cheque")
+                    ? "Cheque firmado / comprobante de pago"
+                    : "Comprobante de pago"}
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) =>
+                    setChequeArchivo(e.target.files?.[0] || null)
+                  }
+                  className="w-full rounded-xl border bg-white px-4 py-3"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  {esSolicitudCajaChica(modalPago)
+                    ? "Adjunte aquí el cheque firmado. Este comprobante quedará vinculado a la operación de Caja Chica y a la solicitud."
+                    : normalizar(pagoForm.metodo_pago).includes("cheque")
+                      ? "Adjunte aquí el cheque ya firmado por Tesorero y Presidente. Luego se registrará el egreso bancario."
+                      : "Este archivo se guardará en el gasto como cheque_url y quedará disponible para consulta."}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setModalPago(null);
+                  setChequeArchivo(null);
+                }}
+                className="rounded-xl border px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={procesandoId === modalPago.solicitud_id}
+                onClick={completarPago}
+                className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                {procesandoId === modalPago.solicitud_id
+                  ? "Procesando..."
+                  : esSolicitudCajaChica(modalPago)
+                    ? tipoOperacionCajaChica(modalPago) === "fondo_inicial"
+                      ? "Registrar fondo inicial"
+                      : "Registrar reposición"
+                    : "Registrar egreso bancario"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </PageContainer>
+  );
+}

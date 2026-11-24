@@ -39,9 +39,12 @@ type Proveedor = {
   correo: string | null;
   direccion: string | null;
   cuenta_banco: string | null;
+  banco_id: number | null;
   estado: string | null;
   created_at: string | null;
 };
+
+type Banco = { id: number; nombre_banco: string; codigo_banco: string | null; activo: boolean | null };
 
 function normalizarTexto(valor: string | null | undefined) {
   return String(valor || "")
@@ -58,6 +61,8 @@ function fechaCorta(valor?: string | null) {
 
 export default function ProveedoresPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [bancos, setBancos] = useState<Banco[]>([]);
+  const [errorBancos, setErrorBancos] = useState("");
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [editandoId, setEditandoId] = useState<number | null>(null);
@@ -72,6 +77,7 @@ export default function ProveedoresPage() {
   const [correo, setCorreo] = useState("");
   const [direccion, setDireccion] = useState("");
   const [cuentaBanco, setCuentaBanco] = useState("");
+  const [bancoId, setBancoId] = useState("");
   const [buscar, setBuscar] = useState("");
 
   useEffect(() => {
@@ -89,8 +95,27 @@ export default function ProveedoresPage() {
     setCondominioId(idGuardado);
     setCondominio(nombreGuardado || `Condominio ID ${idGuardado}`);
 
-    cargarProveedores(idGuardado);
+    void cargarBancos();
+    void cargarProveedores(idGuardado);
   }, []);
+
+  async function cargarBancos() {
+    const { data, error } = await supabase
+      .from("catalogo_bancos")
+      .select("id, nombre_banco, codigo_banco, activo")
+      .order("nombre_banco", { ascending: true });
+    if (error) {
+      setErrorBancos("No se pudo consultar el catálogo de bancos: " + error.message);
+      return;
+    }
+    setErrorBancos("");
+    setBancos((data as Banco[]) || []);
+  }
+
+  function nombreBanco(id: number | null) {
+    if (id == null) return "Banco pendiente de asignar";
+    return bancos.find((b) => b.id === id)?.nombre_banco || `Banco ID ${id}`;
+  }
 
   async function cargarProveedores(id = condominioId) {
     if (!id) return;
@@ -100,7 +125,7 @@ export default function ProveedoresPage() {
     const { data, error } = await supabase
       .from("catalogo_proveedores")
       .select(
-        "id, condominio_id, condominio, nombre_proveedor, rnc_cedula, telefono, correo, direccion, cuenta_banco, estado, created_at",
+        "id, condominio_id, condominio, nombre_proveedor, rnc_cedula, telefono, correo, direccion, cuenta_banco, banco_id, estado, created_at",
       )
       .eq("condominio_id", Number(id))
       .order("nombre_proveedor", { ascending: true });
@@ -123,6 +148,7 @@ export default function ProveedoresPage() {
     setCorreo("");
     setDireccion("");
     setCuentaBanco("");
+    setBancoId("");
     setEstado("activo");
   }
 
@@ -140,6 +166,7 @@ export default function ProveedoresPage() {
     setCorreo(proveedor.correo || "");
     setDireccion(proveedor.direccion || "");
     setCuentaBanco(proveedor.cuenta_banco || "");
+    setBancoId(proveedor.banco_id == null ? "" : String(proveedor.banco_id));
     setEstado(proveedor.estado || "activo");
 
     // El formulario se encuentra antes del listado, también en la vista móvil.
@@ -163,6 +190,15 @@ export default function ProveedoresPage() {
       return;
     }
 
+    if (cuentaBanco.trim() && !bancoId) {
+      alert("Seleccione el banco correspondiente a la cuenta. Si es un proveedor antiguo, puede completar este dato al editarlo.");
+      return;
+    }
+    if (bancoId && !bancos.some((b) => String(b.id) === bancoId && b.activo !== false)) {
+      alert("Seleccione un banco activo del catálogo.");
+      return;
+    }
+
     const datos = {
       nombre_proveedor: nombreProveedor.trim(),
       rnc_cedula: rncCedula.trim(),
@@ -170,6 +206,7 @@ export default function ProveedoresPage() {
       correo: correo.trim(),
       direccion: direccion.trim(),
       cuenta_banco: cuentaBanco.trim(),
+      banco_id: bancoId ? Number(bancoId) : null,
       estado,
     };
 
@@ -222,12 +259,12 @@ export default function ProveedoresPage() {
       const texto = normalizarTexto(
         `${p.nombre_proveedor || ""} ${p.rnc_cedula || ""} ${
           p.telefono || ""
-        } ${p.correo || ""} ${p.cuenta_banco || ""} ${p.direccion || ""}`,
+        } ${p.correo || ""} ${p.cuenta_banco || ""} ${nombreBanco(p.banco_id)} ${p.direccion || ""}`,
       );
 
       return !filtro || texto.includes(filtro);
     });
-  }, [proveedores, buscar]);
+  }, [proveedores, buscar, bancos]);
 
   const activos = useMemo(
     () =>
@@ -251,6 +288,7 @@ export default function ProveedoresPage() {
       Teléfono: p.telefono || "",
       Correo: p.correo || "",
       Dirección: p.direccion || "",
+      Banco: p.banco_id == null ? "" : nombreBanco(p.banco_id),
       "Cuenta Banco": p.cuenta_banco || "",
       Estado: p.estado || "",
       "Fecha registro": fechaCorta(p.created_at),
@@ -265,6 +303,7 @@ export default function ProveedoresPage() {
       { wch: 18 },
       { wch: 30 },
       { wch: 45 },
+      { wch: 30 },
       { wch: 25 },
       { wch: 15 },
       { wch: 18 },
@@ -335,7 +374,7 @@ export default function ProveedoresPage() {
         icon={Building2}
         actions={
           <ModuleActions
-            onRefresh={() => cargarProveedores(condominioId)}
+            onRefresh={() => { void cargarBancos(); void cargarProveedores(condominioId); }}
             extra={
               <div className="flex flex-wrap items-center gap-2">
                 <Link
@@ -458,6 +497,24 @@ export default function ProveedoresPage() {
                   className="w-full rounded-xl border px-4 py-3 text-sm"
                   placeholder="correo@proveedor.com"
                 />
+              </div>
+
+              <div>
+                <label htmlFor="banco-proveedor" className="mb-1 block text-sm font-semibold">
+                  Banco de la cuenta
+                </label>
+                <select
+                  id="banco-proveedor"
+                  value={bancoId}
+                  onChange={(e) => setBancoId(e.target.value)}
+                  className="w-full rounded-xl border bg-white px-4 py-3 text-sm"
+                >
+                  <option value="">Seleccione un banco</option>
+                  {bancos.filter((b) => b.activo !== false || String(b.id) === bancoId).map((b) => (
+                    <option key={b.id} value={b.id}>{b.nombre_banco}</option>
+                  ))}
+                </select>
+                {errorBancos && <p className="mt-1 text-xs text-red-700">{errorBancos}</p>}
               </div>
 
               <div>
@@ -588,7 +645,7 @@ export default function ProveedoresPage() {
                     <th className="px-4 py-3 text-left">RNC / Cédula</th>
                     <th className="px-4 py-3 text-left">Teléfono</th>
                     <th className="px-4 py-3 text-left">Correo</th>
-                    <th className="px-4 py-3 text-left">Cuenta Banco</th>
+                    <th className="px-4 py-3 text-left">Banco / Cuenta</th>
                     <th className="px-4 py-3 text-center">Estado</th>
                     <th className="px-4 py-3 text-center">Acciones</th>
                   </tr>
@@ -611,7 +668,10 @@ export default function ProveedoresPage() {
                       <td className="px-4 py-3">{p.rnc_cedula || "-"}</td>
                       <td className="px-4 py-3">{p.telefono || "-"}</td>
                       <td className="px-4 py-3">{p.correo || "-"}</td>
-                      <td className="px-4 py-3">{p.cuenta_banco || "-"}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-semibold">{nombreBanco(p.banco_id)}</p>
+                        <p className="text-xs text-slate-600">{p.cuenta_banco || "Sin cuenta"}</p>
+                      </td>
 
                       <td className="px-4 py-3 text-center">
                         <span
@@ -676,7 +736,7 @@ export default function ProveedoresPage() {
         </div>
       </SectionCard>
       <p className="pb-2 text-right text-xs text-slate-400">
-        Catálogo de Proveedores · v1.1.0
+        Catálogo de Proveedores · v1.2.0
       </p>
     </PageContainer>
   );

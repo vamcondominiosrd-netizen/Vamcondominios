@@ -3,8 +3,18 @@
 /*
  * VAM Administración de Condominios
  * Módulo: Gastos / Expediente documental
- * Versión: v1.0.1
- * Fecha de versión: 30/09/2026
+ * Versión: v1.2.0
+ * Fecha de versión: 07/11/2026
+ *
+ * CAMBIOS v1.2.0
+ * - Permite generar retroactivamente el Soporte de Nómina para gastos ya existentes.
+ * - El botón aparece solo en gastos de nómina que todavía no tienen soporte.
+ * - El PDF se guarda en gastos-documentos y queda registrado en gastos_documentos.
+ *
+ * CAMBIOS v1.1.0
+ * - Los gastos de nómina reconocen SOPORTE_NOMINA como documento principal.
+ * - En nómina se muestra "Soporte nómina" en lugar de "Sin factura".
+ * - Se conserva el flujo normal de factura para los demás gastos.
  *
  * CAMBIOS v1.0.1
  * - Factura y cheque consultan primero gastos_documentos.
@@ -15,6 +25,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { jsPDF } from "jspdf";
 import {
   AlertTriangle,
   BarChart3,
@@ -85,6 +96,7 @@ type Gasto = {
   cantidad_constancias_pago?: number;
   estado_documentacion?: EstadoDocumentacion;
   factura_documento?: DocumentoGasto | null;
+  soporte_nomina_documento?: DocumentoGasto | null;
   cheque_documento?: DocumentoGasto | null;
   recibo_documento?: DocumentoGasto | null;
   catalogo_proveedores?: { nombre_proveedor: string | null } | null;
@@ -122,6 +134,32 @@ type DocumentoForm = {
   fecha_documento: string;
   monto: string;
   observaciones: string;
+};
+
+
+type DatosNominaSoporte = {
+  id?: number | null;
+  nombre_empleado?: string | null;
+  numero_empleado?: string | null;
+  cargo?: string | null;
+  departamento?: string | null;
+  tipo_nomina?: string | null;
+  periodo?: string | null;
+  quincena?: number | null;
+  fecha_inicio_periodo?: string | null;
+  fecha_fin_periodo?: string | null;
+  fecha_pago?: string | null;
+  salario_base?: number | null;
+  monto_horas_extras?: number | null;
+  bonificacion?: number | null;
+  pago_vacaciones?: number | null;
+  afp?: number | null;
+  sfs?: number | null;
+  isr?: number | null;
+  otros_descuentos?: number | null;
+  total_ingresos?: number | null;
+  total_descuentos?: number | null;
+  neto_pagar?: number | null;
 };
 
 const TIPOS_CONSTANCIA = [
@@ -252,10 +290,164 @@ function idUnico() {
 }
 
 function etiquetaTipoDocumento(tipo: string) {
+  if (String(tipo || "").toUpperCase() === "SOPORTE_NOMINA") {
+    return "Soporte de Nómina";
+  }
+
   return (
     TIPOS_CONSTANCIA.find((item) => item.value === tipo)?.label ||
     tipo.replaceAll("_", " ")
   );
+}
+
+function esGastoNomina(g: Gasto) {
+  const texto = `${g.concepto || ""} ${g.detalle_gasto || ""} ${
+    g.no_factura || ""
+  } ${g.catalogo_categoria_gastos?.nombre_categoria || ""}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return texto.includes("nomina") || String(g.no_factura || "").toUpperCase().startsWith("NOM-");
+}
+
+
+function extraerCampoNominaDetalle(detalle: string | null | undefined, etiqueta: string) {
+  const texto = String(detalle || "");
+  const escapada = etiqueta.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = texto.match(new RegExp(`(?:^|\n)${escapada}\s*:\s*([^\n]+)`, "i"));
+  return String(match?.[1] || "").trim();
+}
+
+function extraerMontoNominaDetalle(detalle: string | null | undefined, etiqueta: string) {
+  const valor = extraerCampoNominaDetalle(detalle, etiqueta)
+    .replace(/RD\$/gi, "")
+    .replace(/,/g, "")
+    .trim();
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
+function generarPdfSoporteNominaExistente(g: Gasto, nomina: DatosNominaSoporte | null) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
+  const margen = 18;
+  const ancho = 216 - margen * 2;
+  const numeroDocumento = g.no_factura || `NOM-GASTO-${String(g.id).padStart(6, "0")}`;
+
+  const empleado =
+    nomina?.nombre_empleado ||
+    extraerCampoNominaDetalle(g.detalle_gasto, "Empleado") ||
+    nombreProveedor(g) ||
+    "-";
+  const numeroEmpleado =
+    nomina?.numero_empleado || extraerCampoNominaDetalle(g.detalle_gasto, "No. empleado") || "-";
+  const cargo = nomina?.cargo || extraerCampoNominaDetalle(g.detalle_gasto, "Cargo") || "-";
+  const departamento =
+    nomina?.departamento || extraerCampoNominaDetalle(g.detalle_gasto, "Departamento") || "-";
+  const tipoNomina =
+    nomina?.tipo_nomina || extraerCampoNominaDetalle(g.detalle_gasto, "Tipo nómina") || "Regular";
+  const periodo = nomina?.periodo || extraerCampoNominaDetalle(g.detalle_gasto, "Período") || "-";
+  const quincena = nomina?.quincena
+    ? nomina.quincena === 1
+      ? "Primera"
+      : "Segunda"
+    : extraerCampoNominaDetalle(g.detalle_gasto, "Quincena") || "No aplica";
+
+  const totalIngresos = Number(
+    nomina?.total_ingresos ?? extraerMontoNominaDetalle(g.detalle_gasto, "Total ingresos") ?? g.total ?? 0,
+  );
+  const totalDescuentos = Number(
+    nomina?.total_descuentos ?? extraerMontoNominaDetalle(g.detalle_gasto, "Total descuentos") ?? 0,
+  );
+  const neto = Number(nomina?.neto_pagar ?? g.total ?? g.monto ?? 0);
+
+  const linea = (y: number) => {
+    doc.setDrawColor(210);
+    doc.line(margen, y, 216 - margen, y);
+  };
+
+  const campo = (etiqueta: string, valor: string, y: number) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.text(etiqueta, margen, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(String(valor || "-"), margen + 43, y);
+  };
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("VAM ADMINISTRADORA DE CONDOMINIOS", margen, 19);
+  doc.setFontSize(17);
+  doc.text("COMPROBANTE INTERNO DE NÓMINA", margen, 30);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`No. ${numeroDocumento}`, margen, 37);
+  doc.setFont("helvetica", "bold");
+  doc.text("DOCUMENTO INTERNO - NO FISCAL", 216 - margen, 37, { align: "right" });
+  linea(42);
+
+  let y = 50;
+  campo("Condominio:", g.condominio || "Condominio", y); y += 7;
+  campo("Empleado:", empleado, y); y += 7;
+  campo("No. empleado:", numeroEmpleado, y); y += 7;
+  campo("Cargo:", cargo, y); y += 7;
+  campo("Departamento:", departamento, y); y += 7;
+  campo("Tipo de nómina:", tipoNomina, y); y += 7;
+  campo("Período:", periodo, y); y += 7;
+  campo("Quincena:", quincena, y); y += 7;
+
+  const rango =
+    nomina?.fecha_inicio_periodo && nomina?.fecha_fin_periodo
+      ? `${formatoFecha(nomina.fecha_inicio_periodo)} al ${formatoFecha(nomina.fecha_fin_periodo)}`
+      : "-";
+  campo("Rango:", rango, y); y += 7;
+  campo("Fecha pago:", formatoFecha(nomina?.fecha_pago || g.fecha_pago || g.fecha), y); y += 9;
+  linea(y); y += 9;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("RESUMEN DE NÓMINA", margen, y); y += 8;
+
+  const valores = [
+    ["Salario del período", Number(nomina?.salario_base || 0)],
+    ["Horas extras", Number(nomina?.monto_horas_extras || 0)],
+    ["Bonificación", Number(nomina?.bonificacion || 0)],
+    ["Vacaciones", Number(nomina?.pago_vacaciones || 0)],
+    ["AFP", -Number(nomina?.afp || 0)],
+    ["SFS", -Number(nomina?.sfs || 0)],
+    ["ISR", -Number(nomina?.isr || 0)],
+    ["Otros descuentos", -Number(nomina?.otros_descuentos || 0)],
+  ] as const;
+
+  doc.setFontSize(9.5);
+  for (const [etiqueta, valor] of valores) {
+    doc.setFont("helvetica", "normal");
+    doc.text(etiqueta, margen, y);
+    doc.setFont("helvetica", "bold");
+    doc.text(`RD$ ${dinero(Math.abs(valor))}${valor < 0 ? " (-)" : ""}`, 216 - margen, y, { align: "right" });
+    y += 6.5;
+  }
+
+  y += 2;
+  linea(y); y += 8;
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("Total ingresos", margen, y);
+  doc.text(`RD$ ${dinero(totalIngresos)}`, 216 - margen, y, { align: "right" }); y += 7;
+  doc.text("Total descuentos", margen, y);
+  doc.text(`RD$ ${dinero(totalDescuentos)}`, 216 - margen, y, { align: "right" }); y += 8;
+  doc.setFontSize(13);
+  doc.text("NETO A PAGAR", margen, y);
+  doc.text(`RD$ ${dinero(neto)}`, 216 - margen, y, { align: "right" }); y += 10;
+  linea(y); y += 9;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  const nota =
+    "Comprobante generado por VAM Administración para completar el expediente documental de una nómina cuyo gasto ya había sido creado. Este documento sirve como soporte interno del gasto y no sustituye un comprobante fiscal ni la constancia final de pago al empleado.";
+  doc.text(doc.splitTextToSize(nota, ancho), margen, y);
+
+  return { blob: doc.output("blob"), numeroDocumento };
 }
 
 export default function GastosPage() {
@@ -272,6 +464,7 @@ export default function GastosPage() {
   const [documentos, setDocumentos] = useState<DocumentoGasto[]>([]);
   const [loadingDocumentos, setLoadingDocumentos] = useState(false);
   const [procesandoDocumento, setProcesandoDocumento] = useState(false);
+  const [generandoSoporteNominaId, setGenerandoSoporteNominaId] = useState<number | null>(null);
   const [archivoDocumento, setArchivoDocumento] = useState<File | null>(null);
   const [documentoForm, setDocumentoForm] = useState<DocumentoForm>({
     tipo_documento: "RECIBO_SUPLIDOR",
@@ -362,6 +555,7 @@ export default function GastosPage() {
         .eq("estado", "ACTIVO")
         .in("tipo_documento", [
           "FACTURA",
+          "SOPORTE_NOMINA",
           "CHEQUE",
           "RECIBO_SUPLIDOR",
           "RECIBO",
@@ -401,6 +595,7 @@ export default function GastosPage() {
     }
 
     const facturaPorGasto = new Map<number, DocumentoGasto>();
+    const soporteNominaPorGasto = new Map<number, DocumentoGasto>();
     const chequePorGasto = new Map<number, DocumentoGasto>();
     const reciboPorGasto = new Map<number, DocumentoGasto>();
 
@@ -419,6 +614,11 @@ export default function GastosPage() {
 
       if (tipo === "FACTURA" && !facturaPorGasto.has(gastoId)) {
         facturaPorGasto.set(gastoId, documento);
+        continue;
+      }
+
+      if (tipo === "SOPORTE_NOMINA" && !soporteNominaPorGasto.has(gastoId)) {
+        soporteNominaPorGasto.set(gastoId, documento);
         continue;
       }
 
@@ -454,6 +654,9 @@ export default function GastosPage() {
             control?.estado_documentacion ||
             (gasto.pagado ? "NO_REQUERIDO" : "NO_APLICA"),
           factura_documento: facturaPorGasto.get(gasto.id) || null,
+          soporte_nomina_documento:
+            soporteNominaPorGasto.get(gasto.id) ||
+            (esGastoNomina(gasto) ? facturaPorGasto.get(gasto.id) || null : null),
           cheque_documento: chequePorGasto.get(gasto.id) || null,
           recibo_documento: reciboPorGasto.get(gasto.id) || null,
         };
@@ -461,6 +664,198 @@ export default function GastosPage() {
     );
 
     setGastos(gastosCompletos);
+  }
+
+  async function buscarNominaParaGasto(gasto: Gasto): Promise<DatosNominaSoporte | null> {
+    if (!gasto.condominio_id) return null;
+
+    const campos =
+      "id, nombre_empleado, numero_empleado, cargo, departamento, tipo_nomina, periodo, quincena, fecha_inicio_periodo, fecha_fin_periodo, fecha_pago, salario_base, monto_horas_extras, bonificacion, pago_vacaciones, afp, sfs, isr, otros_descuentos, total_ingresos, total_descuentos, neto_pagar";
+
+    const porGasto = await supabase
+      .from("rh_nomina")
+      .select(campos)
+      .eq("condominio_id", gasto.condominio_id)
+      .eq("gasto_id", gasto.id)
+      .limit(1)
+      .maybeSingle();
+
+    if (!porGasto.error && porGasto.data) {
+      return porGasto.data as DatosNominaSoporte;
+    }
+
+    const matchId = String(gasto.no_factura || "").match(/-(\d{1,})$/);
+    const nominaIdFactura = Number(matchId?.[1] || 0);
+
+    if (nominaIdFactura > 0) {
+      const porNumero = await supabase
+        .from("rh_nomina")
+        .select(campos)
+        .eq("condominio_id", gasto.condominio_id)
+        .eq("id", nominaIdFactura)
+        .maybeSingle();
+
+      if (!porNumero.error && porNumero.data) {
+        return porNumero.data as DatosNominaSoporte;
+      }
+    }
+
+    const solicitud = await supabase
+      .from("solicitudes_pago")
+      .select("origen_modulo, origen_id")
+      .eq("condominio_id", gasto.condominio_id)
+      .eq("gasto_generado_id", gasto.id)
+      .limit(1)
+      .maybeSingle();
+
+    const origenNomina = String(solicitud.data?.origen_modulo || "")
+      .trim()
+      .toLowerCase() === "nomina";
+    const origenId = Number(solicitud.data?.origen_id || 0);
+
+    if (origenNomina && origenId > 0) {
+      const porOrigen = await supabase
+        .from("rh_nomina")
+        .select(campos)
+        .eq("condominio_id", gasto.condominio_id)
+        .eq("id", origenId)
+        .maybeSingle();
+
+      if (!porOrigen.error && porOrigen.data) {
+        return porOrigen.data as DatosNominaSoporte;
+      }
+    }
+
+    return null;
+  }
+
+  async function generarSoporteNominaExistente(gasto: Gasto) {
+    if (!esGastoNomina(gasto)) return;
+
+    if (gasto.soporte_nomina_documento) {
+      alert("Este gasto ya tiene un Soporte de Nómina registrado.");
+      return;
+    }
+
+    if (!gasto.condominio_id) {
+      alert("El gasto no tiene un condominio válido.");
+      return;
+    }
+
+    const confirmar = confirm(
+      `¿Desea generar el Soporte de Nómina para este gasto?\n\nGasto ID: ${gasto.id}\nEmpleado: ${nombreProveedor(gasto)}\nTotal: RD$ ${dinero(gasto.total)}`,
+    );
+
+    if (!confirmar) return;
+
+    setGenerandoSoporteNominaId(gasto.id);
+
+    let rutaArchivo = "";
+    let documentoId: number | null = null;
+
+    try {
+      const existente = await supabase
+        .from("gastos_documentos")
+        .select("id, tipo_documento")
+        .eq("gasto_id", gasto.id)
+        .eq("estado", "ACTIVO")
+        .in("tipo_documento", ["SOPORTE_NOMINA", "FACTURA"]);
+
+      if (!existente.error && (existente.data || []).length > 0) {
+        alert("Este gasto ya tiene un soporte principal registrado. Actualice la pantalla para visualizarlo.");
+        await cargarGastos(condominioId, condominioNombre);
+        return;
+      }
+
+      const nomina = await buscarNominaParaGasto(gasto);
+      const { blob, numeroDocumento } = generarPdfSoporteNominaExistente(gasto, nomina);
+      const nombreSeguro = limpiarNombreArchivo(numeroDocumento) || `gasto-${gasto.id}`;
+      const nombreArchivo = `soporte-nomina-${nombreSeguro}.pdf`;
+      rutaArchivo = `condominio-${gasto.condominio_id}/gasto-${gasto.id}/otro/${Date.now()}-${nombreArchivo}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("gastos-documentos")
+        .upload(rutaArchivo, blob, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: "application/pdf",
+        });
+
+      if (uploadError) {
+        throw new Error("No se pudo guardar el PDF del soporte de nómina: " + uploadError.message);
+      }
+
+      const registro = {
+        condominio_id: gasto.condominio_id,
+        gasto_id: gasto.id,
+        proveedor_id: gasto.proveedor_id || null,
+        proveedor_nombre: nomina?.nombre_empleado || nombreProveedor(gasto) || "Empleado",
+        numero_documento: numeroDocumento,
+        fecha_documento: gasto.fecha || hoyISO(),
+        monto: Number(gasto.total || gasto.monto || 0),
+        nombre_archivo: nombreArchivo,
+        archivo_url: rutaArchivo,
+        mime_type: "application/pdf",
+        tamano_bytes: blob.size,
+        observaciones:
+          "Comprobante interno de nómina generado retroactivamente por VAM para completar el expediente del gasto.",
+        visible_propietarios: false,
+        es_principal: true,
+        estado: "ACTIVO",
+      };
+
+      let resultado = await supabase
+        .from("gastos_documentos")
+        .insert({ ...registro, tipo_documento: "SOPORTE_NOMINA" })
+        .select("id")
+        .single();
+
+      if (resultado.error || !resultado.data) {
+        resultado = await supabase
+          .from("gastos_documentos")
+          .insert({ ...registro, tipo_documento: "FACTURA" })
+          .select("id")
+          .single();
+      }
+
+      if (resultado.error || !resultado.data) {
+        await supabase.storage.from("gastos-documentos").remove([rutaArchivo]);
+        throw new Error(
+          "No se pudo registrar el soporte de nómina: " +
+            (resultado.error?.message || "Documento no creado."),
+        );
+      }
+
+      documentoId = Number(resultado.data.id);
+
+      if (nomina?.id) {
+        const { error: nominaError } = await supabase
+          .from("rh_nomina")
+          .update({ gasto_id: gasto.id, gasto_generado: true })
+          .eq("id", nomina.id)
+          .eq("condominio_id", gasto.condominio_id);
+
+        if (nominaError) {
+          console.warn("El soporte se creó, pero no se pudo sincronizar rh_nomina:", nominaError.message);
+        }
+      }
+
+      await cargarGastos(condominioId, condominioNombre);
+      alert("Soporte de Nómina generado y adjuntado al gasto correctamente.");
+    } catch (error: any) {
+      if (documentoId) {
+        await supabase
+          .from("gastos_documentos")
+          .update({ estado: "ANULADO" })
+          .eq("id", documentoId);
+      }
+      if (rutaArchivo && !documentoId) {
+        await supabase.storage.from("gastos-documentos").remove([rutaArchivo]);
+      }
+      alert(error?.message || "No fue posible generar el Soporte de Nómina.");
+    } finally {
+      setGenerandoSoporteNominaId(null);
+    }
   }
 
   async function abrirExpediente(gasto: Gasto) {
@@ -948,10 +1343,10 @@ export default function GastosPage() {
 
       <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
         Los gastos se generan y pagan desde <strong>Solicitudes de Pago</strong>.
-        En este módulo se consulta el gasto y se completa su expediente con factura,
-        cheque, recibo o constancia emitida por el suplidor.
+        En este módulo se consulta el gasto y se completa su expediente con factura o soporte interno,
+        cheque, recibo o constancia de pago.
         <span className="ml-2 text-[10px] font-bold text-blue-500">
-          Gastos / Expediente documental v1.0.1 · 30/09/2026
+          Gastos / Expediente documental v1.2.0 · 07/11/2026
         </span>
       </div>
 
@@ -1033,7 +1428,7 @@ export default function GastosPage() {
                 value={buscar}
                 onChange={(e) => setBuscar(e.target.value)}
                 className="w-full bg-transparent outline-none"
-                placeholder="Proveedor, concepto, factura, NCF, cheque o documentación..."
+                placeholder="Proveedor, concepto, factura, soporte, NCF, cheque o documentación..."
               />
             </div>
           </div>
@@ -1099,7 +1494,9 @@ export default function GastosPage() {
 
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
                         <span>ID {g.id}</span>
-                        {g.no_factura && <span>Factura {g.no_factura}</span>}
+                        {g.no_factura && (
+                          <span>{esGastoNomina(g) ? "Soporte" : "Factura"} {g.no_factura}</span>
+                        )}
                         {g.ncf && <span>NCF {g.ncf}</span>}
                       </div>
                     </div>
@@ -1137,7 +1534,38 @@ export default function GastosPage() {
 
                   <td className="px-3 py-3">
                     <div className="grid grid-cols-3 gap-1.5">
-                      {g.factura_documento || g.factura_url ? (
+                      {esGastoNomina(g) ? (
+                        g.soporte_nomina_documento ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              abrirSoporteGasto(
+                                g.soporte_nomina_documento,
+                                null,
+                                "Soporte de Nómina",
+                              )
+                            }
+                            className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-violet-200 bg-violet-700 px-2 text-[11px] font-bold text-white hover:bg-violet-800"
+                            title="Abrir Soporte de Nómina del expediente documental"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            Soporte nómina
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => generarSoporteNominaExistente(g)}
+                            disabled={generandoSoporteNominaId === g.id}
+                            className="inline-flex min-h-10 items-center justify-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 text-[10px] font-bold text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            title="Generar y adjuntar el Soporte de Nómina a este gasto existente"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            {generandoSoporteNominaId === g.id
+                              ? "Generando..."
+                              : "Generar soporte nómina"}
+                          </button>
+                        )
+                      ) : g.factura_documento || g.factura_url ? (
                         <button
                           type="button"
                           onClick={() =>
@@ -1528,7 +1956,12 @@ export default function GastosPage() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="font-black text-slate-900">
-                              {etiquetaTipoDocumento(documento.tipo_documento)}
+                              {esGastoNomina(gastoDocumentos) &&
+                                (String(documento.tipo_documento).toUpperCase() === "SOPORTE_NOMINA" ||
+                                  (String(documento.tipo_documento).toUpperCase() === "FACTURA" &&
+                                    String(documento.numero_documento || "").toUpperCase().startsWith("NOM-")))
+                                ? "Soporte de Nómina"
+                                : etiquetaTipoDocumento(documento.tipo_documento)}
                             </p>
                             <p className="mt-1 truncate text-xs text-slate-500">
                               {documento.nombre_archivo || "Documento sin nombre"}

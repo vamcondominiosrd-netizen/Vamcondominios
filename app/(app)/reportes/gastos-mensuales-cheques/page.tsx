@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  BarChart3,
   CalendarDays,
   FileText,
   Loader2,
@@ -33,6 +34,11 @@ type GastoDB = {
   descripcion?: string | null;
   detalle_gasto?: string | null;
   categoria?: string | null;
+  categoria_id?: number | null;
+  catalogo_categoria_gastos?:
+    | { nombre_categoria?: string | null }
+    | { nombre_categoria?: string | null }[]
+    | null;
   total?: number | string | null;
   monto?: number | string | null;
   itbis?: number | string | null;
@@ -45,41 +51,39 @@ type GastoDB = {
   created_at?: string | null;
 };
 
-type MovimientoBanco = {
+type CajaChicaDB = {
   id: number;
-  condominio_id: number | null;
-  cuenta_bancaria_id: number | null;
-  fecha_movimiento?: string | null;
-  fecha_banco?: string | null;
-  periodo?: string | null;
-  tipo_movimiento?: string | null;
-  origen?: string | null;
-  referencia_id?: number | null;
-  descripcion?: string | null;
+  condominio_id?: number | null;
+  condominio?: string | null;
+  fecha?: string | null;
+  fecha_gasto?: string | null;
   monto?: number | string | null;
-  numero_documento?: string | null;
-  referencia_banco?: string | null;
+  concepto?: string | null;
+  descripcion?: string | null;
+  detalle?: string | null;
+  categoria?: string | null;
+  proveedor?: string | null;
   beneficiario?: string | null;
-  estado_banco?: string | null;
+  numero_documento?: string | null;
+  numero_recibo?: string | null;
+  no_factura?: string | null;
+  ncf?: string | null;
+  metodo_pago?: string | null;
   created_at?: string | null;
-};
-
-type DirectivaCondominio = {
-  id: number;
-  condominio_id: number;
-  nombre: string;
-  cargo: string;
-  estado: string | null;
 };
 
 type DetalleGasto = {
   id: string;
+  fuente: "GASTO" | "CAJA_CHICA";
   fechaISO: string;
   fechaTexto: string;
-  numeroCheque: string;
+  numeroDocumento: string;
   numeroOrden: number | null;
   concepto: string;
   proveedor: string;
+  categoria: string;
+  factura: string;
+  ncf: string;
   metodoPago: string;
   monto: number;
 };
@@ -113,27 +117,24 @@ function formatMoney(value: unknown): string {
   return moneda.format(toNumber(value));
 }
 
-function normalizarTexto(value: unknown): string {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ");
-}
-
 function limpiarTexto(value: unknown, fallback = "-"): string {
   if (value === null || value === undefined) return fallback;
   const texto = String(value).trim();
   return texto || fallback;
 }
 
+function normalizarTexto(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function periodoActual(): string {
   const hoy = new Date();
-
-  return `${hoy.getFullYear()}-${String(
-    hoy.getMonth() + 1
-  ).padStart(2, "0")}`;
+  return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function nombrePeriodo(periodo: string): string {
@@ -144,26 +145,51 @@ function nombrePeriodo(periodo: string): string {
   if (!anio || !mes || mes < 1 || mes > 12) return periodo;
 
   const fecha = new Date(anio, mes - 1, 1);
-  const nombreMes = fecha.toLocaleDateString("es-DO", {
-    month: "long",
-  });
+  const nombreMes = fecha.toLocaleDateString("es-DO", { month: "long" });
 
   return `${nombreMes.charAt(0).toUpperCase()}${nombreMes.slice(1)} ${anio}`;
 }
 
-function rangoPeriodo(periodo: string) {
-  const [anioTexto, mesTexto] = periodo.split("-");
-  const anio = Number(anioTexto);
-  const mes = Number(mesTexto);
+function normalizarRangoPeriodos(periodoDesde: string, periodoHasta: string) {
+  return periodoDesde <= periodoHasta
+    ? { periodoInicial: periodoDesde, periodoFinal: periodoHasta }
+    : { periodoInicial: periodoHasta, periodoFinal: periodoDesde };
+}
 
-  const desde = `${anio}-${String(mes).padStart(2, "0")}-01`;
-  const siguiente = new Date(anio, mes, 1);
+function rangoPeriodos(periodoDesde: string, periodoHasta: string) {
+  const { periodoInicial, periodoFinal } = normalizarRangoPeriodos(
+    periodoDesde,
+    periodoHasta
+  );
 
+  const [anioDesdeTexto, mesDesdeTexto] = periodoInicial.split("-");
+  const [anioHastaTexto, mesHastaTexto] = periodoFinal.split("-");
+
+  const anioDesde = Number(anioDesdeTexto);
+  const mesDesde = Number(mesDesdeTexto);
+  const anioHasta = Number(anioHastaTexto);
+  const mesHasta = Number(mesHastaTexto);
+
+  const desde = `${anioDesde}-${String(mesDesde).padStart(2, "0")}-01`;
+  const siguiente = new Date(anioHasta, mesHasta, 1);
   const hasta = `${siguiente.getFullYear()}-${String(
     siguiente.getMonth() + 1
   ).padStart(2, "0")}-01`;
 
-  return { desde, hasta };
+  return { desde, hasta, periodoInicial, periodoFinal };
+}
+
+function nombreRangoPeriodos(periodoDesde: string, periodoHasta: string): string {
+  const { periodoInicial, periodoFinal } = normalizarRangoPeriodos(
+    periodoDesde,
+    periodoHasta
+  );
+
+  if (periodoInicial === periodoFinal) {
+    return nombrePeriodo(periodoInicial);
+  }
+
+  return `${nombrePeriodo(periodoInicial)} - ${nombrePeriodo(periodoFinal)}`;
 }
 
 function formatDate(value: unknown): string {
@@ -182,67 +208,28 @@ function formatDate(value: unknown): string {
   });
 }
 
-function extraerNumeroCheque(value: unknown): number | null {
+function extraerNumeroDocumento(value: unknown): number | null {
   const texto = String(value || "").trim();
-
   if (!texto) return null;
 
   const coincidencia = texto.match(/\d+/);
-
   if (!coincidencia) return null;
 
   const numero = Number(coincidencia[0]);
-
   return Number.isFinite(numero) ? numero : null;
 }
 
-function tieneNumeroCheque(value: unknown): boolean {
-  const texto = String(value || "").trim();
+function ordenarPorFechaYDocumento(a: DetalleGasto, b: DetalleGasto): number {
+  const fecha = a.fechaISO.localeCompare(b.fechaISO);
+  if (fecha !== 0) return fecha;
 
-  if (!texto) return false;
-
-  const normalizado = texto.toLowerCase();
-
-  return ![
-    "-",
-    "n/a",
-    "na",
-    "ninguno",
-    "sin cheque",
-    "sin numero",
-    "sin número",
-  ].includes(normalizado);
-}
-
-function ordenarPorCheque(
-  a: DetalleGasto,
-  b: DetalleGasto
-): number {
-  if (
-    a.numeroOrden !== null &&
-    b.numeroOrden !== null &&
-    a.numeroOrden !== b.numeroOrden
-  ) {
-    return a.numeroOrden - b.numeroOrden;
-  }
-
-  if (a.numeroOrden !== null && b.numeroOrden === null) return -1;
-  if (a.numeroOrden === null && b.numeroOrden !== null) return 1;
-
-  const cheque = a.numeroCheque.localeCompare(
-    b.numeroCheque,
+  const documento = a.numeroDocumento.localeCompare(
+    b.numeroDocumento,
     "es",
-    {
-      numeric: true,
-      sensitivity: "base",
-    }
+    { numeric: true, sensitivity: "base" }
   );
 
-  if (cheque !== 0) return cheque;
-
-  const fecha = a.fechaISO.localeCompare(b.fechaISO);
-
-  if (fecha !== 0) return fecha;
+  if (documento !== 0) return documento;
 
   return a.id.localeCompare(b.id);
 }
@@ -252,62 +239,80 @@ function generarPeriodos(cantidad = 36): string[] {
   const resultado: string[] = [];
 
   for (let i = 0; i < cantidad; i += 1) {
-    const fecha = new Date(
-      hoy.getFullYear(),
-      hoy.getMonth() - i,
-      1
-    );
-
+    const fecha = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
     resultado.push(
-      `${fecha.getFullYear()}-${String(
-        fecha.getMonth() + 1
-      ).padStart(2, "0")}`
+      `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, "0")}`
     );
   }
 
   return resultado;
 }
 
-export default function ReporteGastosMensualesChequesPage() {
+export default function ReporteGastosMensualesPage() {
   const [loading, setLoading] = useState(true);
   const [consultando, setConsultando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [perfil, setPerfil] =
-    useState<PerfilUsuario | null>(null);
-
-  const [periodo, setPeriodo] = useState(periodoActual());
-
+  const [perfil, setPerfil] = useState<PerfilUsuario | null>(null);
+  const [periodoDesde, setPeriodoDesde] = useState(periodoActual());
+  const [periodoHasta, setPeriodoHasta] = useState(periodoActual());
   const [gastos, setGastos] = useState<DetalleGasto[]>([]);
-  const [totalEgresosBanco, setTotalEgresosBanco] = useState(0);
 
-  const [presidente, setPresidente] =
-    useState<DirectivaCondominio | null>(null);
-  const [tesorero, setTesorero] =
-    useState<DirectivaCondominio | null>(null);
-
-  const totalMes = useMemo(
+  const totalGastosGenerales = useMemo(
     () =>
-      gastos.reduce(
-        (sum, item) => sum + item.monto,
-        0
-      ),
+      gastos
+        .filter((item) => item.fuente === "GASTO")
+        .reduce((sum, item) => sum + item.monto, 0),
     [gastos]
   );
 
-  const diferenciaControlBancario = totalEgresosBanco - totalMes;
-
-  const promedioCheque = useMemo(
-    () => (gastos.length > 0 ? totalMes / gastos.length : 0),
-    [gastos.length, totalMes]
+  const totalCajaChica = useMemo(
+    () =>
+      gastos
+        .filter((item) => item.fuente === "CAJA_CHICA")
+        .reduce((sum, item) => sum + item.monto, 0),
+    [gastos]
   );
 
-  const chequeMayor = useMemo(() => {
-    if (gastos.length === 0) return null;
+  const totalPeriodo = totalGastosGenerales + totalCajaChica;
 
-    return [...gastos].sort(
-      (a, b) => b.monto - a.monto
-    )[0];
+  const periodoTexto = useMemo(
+    () => nombreRangoPeriodos(periodoDesde, periodoHasta),
+    [periodoDesde, periodoHasta]
+  );
+
+  const resumenCategorias = useMemo(() => {
+    const mapa = new Map<
+      string,
+      { categoria: string; total: number }
+    >();
+
+    gastos.forEach((item) => {
+      const categoria = limpiarTexto(item.categoria, "Sin categoría");
+      const clave = normalizarTexto(categoria) || "sin categoria";
+      const actual = mapa.get(clave);
+
+      if (actual) {
+        actual.total += item.monto;
+      } else {
+        mapa.set(clave, {
+          categoria,
+          total: item.monto,
+        });
+      }
+    });
+
+    return Array.from(mapa.values())
+      .map((item) => ({
+        ...item,
+        porcentaje: totalPeriodo > 0 ? (item.total / totalPeriodo) * 100 : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [gastos, totalPeriodo]);
+
+  const gastoMayor = useMemo(() => {
+    if (gastos.length === 0) return null;
+    return [...gastos].sort((a, b) => b.monto - a.monto)[0];
   }, [gastos]);
 
   useEffect(() => {
@@ -317,10 +322,15 @@ export default function ReporteGastosMensualesChequesPage() {
 
   useEffect(() => {
     if (perfil?.condominio_id) {
-      cargarReporte(perfil.condominio_id, periodo);
+      cargarReporte(
+        perfil.condominio_id,
+        perfil.condominio || "",
+        periodoDesde,
+        periodoHasta
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodo, perfil?.condominio_id]);
+  }, [periodoDesde, periodoHasta, perfil?.condominio_id]);
 
   async function inicializar() {
     setLoading(true);
@@ -336,18 +346,14 @@ export default function ReporteGastosMensualesChequesPage() {
       }
 
       setPerfil(contexto);
-
-      await Promise.all([
-        cargarReporte(
-          contexto.condominio_id,
-          periodo
-        ),
-        cargarDirectiva(contexto.condominio_id),
-      ]);
-    } catch (err: any) {
-      setError(
-        err?.message || "No se pudo cargar el reporte."
+      await cargarReporte(
+        contexto.condominio_id,
+        contexto.condominio || "",
+        periodoDesde,
+        periodoHasta
       );
+    } catch (err: any) {
+      setError(err?.message || "No se pudo cargar el reporte.");
     } finally {
       setLoading(false);
     }
@@ -362,10 +368,7 @@ export default function ReporteGastosMensualesChequesPage() {
     if (userError) throw userError;
     if (!user) throw new Error("No hay usuario logueado.");
 
-    async function buscarPerfil(
-      campo: string,
-      valor: string
-    ) {
+    async function buscarPerfil(campo: string, valor: string) {
       try {
         const { data, error } = await supabase
           .from("profiles")
@@ -384,26 +387,14 @@ export default function ReporteGastosMensualesChequesPage() {
     let perfilEncontrado: any = null;
 
     perfilEncontrado = await buscarPerfil("id", user.id);
-
     if (!perfilEncontrado) {
-      perfilEncontrado = await buscarPerfil(
-        "user_id",
-        user.id
-      );
+      perfilEncontrado = await buscarPerfil("user_id", user.id);
     }
-
     if (!perfilEncontrado) {
-      perfilEncontrado = await buscarPerfil(
-        "auth_id",
-        user.id
-      );
+      perfilEncontrado = await buscarPerfil("auth_id", user.id);
     }
-
     if (!perfilEncontrado && user.email) {
-      perfilEncontrado = await buscarPerfil(
-        "email",
-        user.email
-      );
+      perfilEncontrado = await buscarPerfil("email", user.email);
     }
 
     let condominioId =
@@ -433,12 +424,10 @@ export default function ReporteGastosMensualesChequesPage() {
 
       for (const llave of llaves) {
         const raw = localStorage.getItem(llave);
-
         if (!raw) continue;
 
         try {
           const parsed = JSON.parse(raw);
-
           const posibleId =
             parsed?.id ??
             parsed?.condominio_id ??
@@ -448,28 +437,20 @@ export default function ReporteGastosMensualesChequesPage() {
 
           const numeroId = Number(posibleId);
 
-          if (
-            Number.isFinite(numeroId) &&
-            numeroId > 0
-          ) {
+          if (Number.isFinite(numeroId) && numeroId > 0) {
             condominioId = numeroId;
-
             condominioNombre =
               parsed?.nombre ??
               parsed?.condominio ??
               parsed?.nombre_condominio ??
               parsed?.condominio_nombre ??
               condominioNombre;
-
             break;
           }
         } catch {
           const numeroId = Number(raw);
 
-          if (
-            Number.isFinite(numeroId) &&
-            numeroId > 0
-          ) {
+          if (Number.isFinite(numeroId) && numeroId > 0) {
             condominioId = numeroId;
             break;
           }
@@ -478,10 +459,7 @@ export default function ReporteGastosMensualesChequesPage() {
     }
 
     if (!condominioId) {
-      return {
-        condominio_id: null,
-        condominio: null,
-      };
+      return { condominio_id: null, condominio: null };
     }
 
     try {
@@ -495,7 +473,7 @@ export default function ReporteGastosMensualesChequesPage() {
         condominioNombre = condominioData.nombre;
       }
     } catch {
-      // Conserva el nombre obtenido del perfil.
+      // Se mantiene el nombre obtenido del perfil o localStorage.
     }
 
     return {
@@ -506,225 +484,51 @@ export default function ReporteGastosMensualesChequesPage() {
         perfilEncontrado?.full_name ??
         perfilEncontrado?.name ??
         null,
-      rol:
-        perfilEncontrado?.rol ??
-        perfilEncontrado?.role ??
-        null,
+      rol: perfilEncontrado?.rol ?? perfilEncontrado?.role ?? null,
     };
   }
 
-  async function cargarDirectiva(condominioId: number) {
-    try {
-      const { data, error } = await supabase
-        .from("directiva_condominio")
-        .select("id, condominio_id, nombre, cargo, estado")
-        .eq("condominio_id", condominioId);
-
-      if (error) {
-        console.warn(
-          "No se pudo cargar la directiva del condominio:",
-          error.message
-        );
-        setPresidente(null);
-        setTesorero(null);
-        return;
-      }
-
-      const miembros = (data || []) as DirectivaCondominio[];
-
-      const miembrosActivos = miembros.filter((miembro) => {
-        const estado = normalizarTexto(miembro.estado);
-        return !estado || estado === "activo";
-      });
-
-      const presidenteEncontrado =
-        miembrosActivos.find(
-          (miembro) =>
-            normalizarTexto(miembro.cargo) === "presidente"
-        ) ||
-        miembrosActivos.find((miembro) =>
-          normalizarTexto(miembro.cargo).includes("president")
-        );
-
-      const tesoreroEncontrado =
-        miembrosActivos.find(
-          (miembro) =>
-            normalizarTexto(miembro.cargo) === "tesorero"
-        ) ||
-        miembrosActivos.find((miembro) =>
-          normalizarTexto(miembro.cargo).includes("tesorer")
-        );
-
-      setPresidente(presidenteEncontrado || null);
-      setTesorero(tesoreroEncontrado || null);
-    } catch (error) {
-      console.warn("Error cargando la directiva:", error);
-      setPresidente(null);
-      setTesorero(null);
-    }
-  }
-
-  function esMovimientoActivo(row: MovimientoBanco): boolean {
-    return String(row.estado_banco || "").toUpperCase() !== "ANULADO";
-  }
-
-  function esEgreso(row: MovimientoBanco): boolean {
-    return String(row.tipo_movimiento || "").toUpperCase() === "EGRESO";
-  }
-
-  function perteneceAlPeriodo(
-    row: MovimientoBanco,
-    periodoSeleccionado: string
-  ): boolean {
-    if (String(row.periodo || "").slice(0, 7) === periodoSeleccionado) {
-      return true;
-    }
-
-    const fecha = String(
-      row.fecha_movimiento ||
-        row.fecha_banco ||
-        row.created_at ||
-        ""
-    ).slice(0, 7);
-
-    return fecha === periodoSeleccionado;
-  }
-
-  function esCargoBancario(row: MovimientoBanco): boolean {
-    const texto = [
-      row.origen,
-      row.descripcion,
-      row.beneficiario,
-      row.numero_documento,
-      row.referencia_banco,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-
-    return (
-      texto.includes("impuesto") ||
-      texto.includes("cargo bancario") ||
-      texto.includes("cargos bancarios") ||
-      texto.includes("comision") ||
-      texto.includes("itbis banco") ||
-      texto.includes("ajuste bancario") ||
-      texto.includes("ajuste_bancario")
-    );
-  }
-
-  async function obtenerCuentaBancariaActiva(
-    condominioId: number
-  ): Promise<number | null> {
-    try {
-      const { data, error } = await supabase
-        .from("cuentas_bancarias")
-        .select("id")
-        .eq("condominio_id", condominioId)
-        .eq("activa", true)
-        .order("id", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        console.warn(
-          "No se pudo cargar la cuenta bancaria activa:",
-          error.message
-        );
-        return null;
-      }
-
-      const id = Number(data?.id || 0);
-      return Number.isFinite(id) && id > 0 ? id : null;
-    } catch (error) {
-      console.warn("Error buscando cuenta bancaria activa:", error);
-      return null;
-    }
-  }
-
-  async function cargarMovimientosBancarios(
+  async function cargarReporte(
     condominioId: number,
-    periodoSeleccionado: string,
-    cuentaBancariaId: number | null
-  ): Promise<MovimientoBanco[]> {
-    const { desde, hasta } = rangoPeriodo(periodoSeleccionado);
+    condominioNombre: string,
+    periodoDesdeSeleccionado: string,
+    periodoHastaSeleccionado: string
+  ) {
+    setConsultando(true);
+    setError(null);
 
-    async function ejecutar(query: any) {
-      const { data, error } = await query
-        .order("fecha_movimiento", { ascending: true })
-        .order("id", { ascending: true })
-        .limit(5000);
-
-      if (error) {
-        console.warn(
-          "No se pudieron cargar movimientos bancarios:",
-          error.message
-        );
-        return [];
-      }
-
-      return (data || []) as MovimientoBanco[];
-    }
-
-    let movimientos: MovimientoBanco[] = [];
-
-    if (cuentaBancariaId) {
-      movimientos = await ejecutar(
-        supabase
-          .from("banco_movimientos")
-          .select("*")
-          .eq("condominio_id", condominioId)
-          .eq("cuenta_bancaria_id", cuentaBancariaId)
-          .eq("periodo", periodoSeleccionado)
+    try {
+      const { desde, hasta } = rangoPeriodos(
+        periodoDesdeSeleccionado,
+        periodoHastaSeleccionado
       );
-    }
 
-    if (movimientos.length === 0) {
-      movimientos = await ejecutar(
-        supabase
-          .from("banco_movimientos")
-          .select("*")
-          .eq("condominio_id", condominioId)
-          .eq("periodo", periodoSeleccionado)
-      );
-    }
+      const [gastosData, cajaData] = await Promise.all([
+        cargarGastosGenerales(condominioId, desde, hasta),
+        cargarCajaChica(condominioId, condominioNombre, desde, hasta),
+      ]);
 
-    if (movimientos.length === 0 && cuentaBancariaId) {
-      movimientos = await ejecutar(
-        supabase
-          .from("banco_movimientos")
-          .select("*")
-          .eq("condominio_id", condominioId)
-          .eq("cuenta_bancaria_id", cuentaBancariaId)
-          .gte("fecha_movimiento", desde)
-          .lt("fecha_movimiento", hasta)
-      );
-    }
+      const detalle: DetalleGasto[] = [
+        ...gastosData.map(mapearGastoGeneral),
+        ...cajaData.map(mapearCajaChica),
+      ]
+        .filter((item) => item.monto > 0)
+        .sort(ordenarPorFechaYDocumento);
 
-    return movimientos.filter(
-      (row) =>
-        esMovimientoActivo(row) &&
-        perteneceAlPeriodo(row, periodoSeleccionado)
-    );
+      setGastos(detalle);
+    } catch (err: any) {
+      setError(err?.message || "No se pudo consultar el reporte.");
+      setGastos([]);
+    } finally {
+      setConsultando(false);
+    }
   }
 
-  async function cargarGastosRelacionados(
-    movimientos: MovimientoBanco[]
-  ): Promise<Map<number, GastoDB>> {
-    const ids = Array.from(
-      new Set(
-        movimientos
-          .map((row) => Number(row.referencia_id || 0))
-          .filter((id) => Number.isFinite(id) && id > 0)
-      )
-    );
-
-    const mapa = new Map<number, GastoDB>();
-
-    if (ids.length === 0) return mapa;
-
+  async function cargarGastosGenerales(
+    condominioId: number,
+    desde: string,
+    hasta: string
+  ): Promise<GastoDB[]> {
     const { data, error } = await supabase
       .from("gastos")
       .select(`
@@ -736,209 +540,184 @@ export default function ReporteGastosMensualesChequesPage() {
         concepto,
         descripcion,
         detalle_gasto,
+        categoria,
+        categoria_id,
+        catalogo_categoria_gastos(nombre_categoria),
         total,
         monto,
+        itbis,
+        no_factura,
+        ncf,
         metodo_pago,
         numero_cheque,
         fecha,
         fecha_pago,
         created_at
       `)
-      .in("id", ids);
+      .eq("condominio_id", condominioId)
+      .gte("fecha_pago", desde)
+      .lt("fecha_pago", hasta)
+      .order("fecha_pago", { ascending: true })
+      .order("id", { ascending: true });
 
     if (error) {
-      console.warn(
-        "No se pudieron cargar los gastos relacionados:",
-        error.message
-      );
-      return mapa;
+      throw new Error("Error cargando gastos: " + error.message);
     }
 
-    ((data || []) as GastoDB[]).forEach((row) => {
-      mapa.set(Number(row.id), row);
-    });
-
-    return mapa;
+    return (data || []) as GastoDB[];
   }
 
-  function obtenerNombreProveedor(
-    gasto: GastoDB | null,
-    movimiento: MovimientoBanco
-  ): string {
-    const relacion = gasto?.catalogo_proveedores;
+  async function cargarCajaChica(
+    condominioId: number,
+    condominioNombre: string,
+    desde: string,
+    hasta: string
+  ): Promise<CajaChicaDB[]> {
+    const resultados: CajaChicaDB[] = [];
+    const vistos = new Set<number>();
 
-    const nombreRelacionado = Array.isArray(relacion)
+    async function agregar(data: any[] | null) {
+      (data || []).forEach((row) => {
+        const id = Number(row.id);
+        if (!Number.isFinite(id) || vistos.has(id)) return;
+        vistos.add(id);
+        resultados.push(row as CajaChicaDB);
+      });
+    }
+
+    try {
+      const porId = await supabase
+        .from("caja_chica")
+        .select("*")
+        .eq("condominio_id", condominioId)
+        .gte("fecha", desde)
+        .lt("fecha", hasta)
+        .order("fecha", { ascending: true })
+        .order("id", { ascending: true });
+
+      if (!porId.error) {
+        await agregar(porId.data);
+      }
+    } catch {
+      // La tabla histórica puede no tener condominio_id.
+    }
+
+    if (condominioNombre) {
+      try {
+        const porNombre = await supabase
+          .from("caja_chica")
+          .select("*")
+          .ilike("condominio", `%${condominioNombre}%`)
+          .gte("fecha", desde)
+          .lt("fecha", hasta)
+          .order("fecha", { ascending: true })
+          .order("id", { ascending: true });
+
+        if (!porNombre.error) {
+          await agregar(porNombre.data);
+        }
+      } catch {
+        // Se conserva cualquier resultado obtenido por condominio_id.
+      }
+    }
+
+    return resultados;
+  }
+
+  function obtenerCategoriaGasto(row: GastoDB): string {
+    const relacion = row.catalogo_categoria_gastos;
+
+    const nombreCatalogo = Array.isArray(relacion)
+      ? relacion[0]?.nombre_categoria
+      : relacion?.nombre_categoria;
+
+    return limpiarTexto(
+      nombreCatalogo || row.categoria,
+      "Sin categoría"
+    );
+  }
+
+  function obtenerProveedorGasto(row: GastoDB): string {
+    const relacion = row.catalogo_proveedores;
+
+    const nombreCatalogo = Array.isArray(relacion)
       ? relacion[0]?.nombre_proveedor
       : relacion?.nombre_proveedor;
 
     return limpiarTexto(
-      nombreRelacionado ||
-        gasto?.proveedor ||
-        movimiento.beneficiario,
+      nombreCatalogo || row.proveedor,
       "Proveedor / beneficiario"
     );
   }
 
-  function obtenerNumeroCheque(
-    gasto: GastoDB | null,
-    movimiento: MovimientoBanco
-  ): string {
-    const numeroGasto = limpiarTexto(
-      gasto?.numero_cheque,
-      ""
-    );
-
-    if (tieneNumeroCheque(numeroGasto)) {
-      return numeroGasto;
-    }
-
-    const numeroDocumento = limpiarTexto(
-      movimiento.numero_documento,
-      ""
-    );
-
-    if (tieneNumeroCheque(numeroDocumento)) {
-      return numeroDocumento;
-    }
-
-    const referenciaBanco = limpiarTexto(
-      movimiento.referencia_banco,
-      ""
-    );
-
-    if (tieneNumeroCheque(referenciaBanco)) {
-      return referenciaBanco;
-    }
-
-    return "";
-  }
-
-  function mapearMovimiento(
-    movimiento: MovimientoBanco,
-    gasto: GastoDB | null
-  ): DetalleGasto | null {
-    const numeroCheque = obtenerNumeroCheque(
-      gasto,
-      movimiento
-    );
-
-    if (!tieneNumeroCheque(numeroCheque)) {
-      return null;
-    }
-
+  function mapearGastoGeneral(row: GastoDB): DetalleGasto {
+    const numeroDocumento = limpiarTexto(row.numero_cheque, "-");
     const fechaISO = String(
-      movimiento.fecha_movimiento ||
-        movimiento.fecha_banco ||
-        gasto?.fecha_pago ||
-        gasto?.fecha ||
-        movimiento.created_at ||
-        ""
+      row.fecha_pago || row.fecha || row.created_at || ""
     ).slice(0, 10);
 
     return {
-      id: `banco-${movimiento.id}`,
+      id: `gasto-${row.id}`,
+      fuente: "GASTO",
       fechaISO,
       fechaTexto: formatDate(fechaISO),
-      numeroCheque,
-      numeroOrden: extraerNumeroCheque(numeroCheque),
+      numeroDocumento,
+      numeroOrden: extraerNumeroDocumento(numeroDocumento),
       concepto: limpiarTexto(
-        gasto?.concepto ||
-          gasto?.descripcion ||
-          gasto?.detalle_gasto ||
-          movimiento.descripcion,
+        row.concepto || row.descripcion || row.detalle_gasto,
         "Gasto operativo"
       ),
-      proveedor: obtenerNombreProveedor(
-        gasto,
-        movimiento
-      ),
-      metodoPago: limpiarTexto(
-        gasto?.metodo_pago || movimiento.origen,
-        "Cheque"
-      ),
-      monto: toNumber(movimiento.monto),
+      proveedor: obtenerProveedorGasto(row),
+      categoria: obtenerCategoriaGasto(row),
+      factura: limpiarTexto(row.no_factura, "-"),
+      ncf: limpiarTexto(row.ncf, "-"),
+      metodoPago: limpiarTexto(row.metodo_pago, "-"),
+      monto: toNumber(row.total || row.monto),
     };
   }
 
-  async function cargarReporte(
-    condominioId: number,
-    periodoSeleccionado: string
-  ) {
-    setConsultando(true);
-    setError(null);
+  function mapearCajaChica(row: CajaChicaDB): DetalleGasto {
+    const fechaISO = String(
+      row.fecha || row.fecha_gasto || row.created_at || ""
+    ).slice(0, 10);
 
-    try {
-      const cuentaBancariaId =
-        await obtenerCuentaBancariaActiva(condominioId);
+    const numeroDocumento = limpiarTexto(
+      row.numero_documento || row.numero_recibo,
+      "-"
+    );
 
-      const movimientos =
-        await cargarMovimientosBancarios(
-          condominioId,
-          periodoSeleccionado,
-          cuentaBancariaId
-        );
-
-      const egresos = movimientos.filter(
-        (row) => esEgreso(row)
-      );
-
-      setTotalEgresosBanco(
-        egresos.reduce(
-          (sum, row) => sum + toNumber(row.monto),
-          0
-        )
-      );
-
-      const gastosRelacionados =
-        await cargarGastosRelacionados(egresos);
-
-      const detalle = egresos
-        .filter((row) => !esCargoBancario(row))
-        .map((movimiento) => {
-          const gastoId = Number(
-            movimiento.referencia_id || 0
-          );
-
-          const gasto =
-            gastoId > 0
-              ? gastosRelacionados.get(gastoId) || null
-              : null;
-
-          return mapearMovimiento(
-            movimiento,
-            gasto
-          );
-        })
-        .filter(
-          (item): item is DetalleGasto =>
-            item !== null && item.monto > 0
-        )
-        .sort(ordenarPorCheque);
-
-      setGastos(detalle);
-    } catch (err: any) {
-      setError(
-        err?.message ||
-          "No se pudo consultar el reporte."
-      );
-
-      setGastos([]);
-      setTotalEgresosBanco(0);
-    } finally {
-      setConsultando(false);
-    }
+    return {
+      id: `caja-${row.id}`,
+      fuente: "CAJA_CHICA",
+      fechaISO,
+      fechaTexto: formatDate(fechaISO),
+      numeroDocumento,
+      numeroOrden: extraerNumeroDocumento(numeroDocumento),
+      concepto: limpiarTexto(
+        row.concepto || row.descripcion || row.detalle,
+        "Gasto de Caja Chica"
+      ),
+      proveedor: limpiarTexto(
+        row.proveedor || row.beneficiario,
+        "Caja Chica"
+      ),
+      categoria: limpiarTexto(row.categoria, "Caja Chica"),
+      factura: limpiarTexto(row.no_factura, "-"),
+      ncf: limpiarTexto(row.ncf, "-"),
+      metodoPago: limpiarTexto(row.metodo_pago, "Caja Chica"),
+      monto: toNumber(row.monto),
+    };
   }
 
   function recargar() {
     if (!perfil?.condominio_id) return;
 
-    void Promise.all([
-      cargarReporte(
-        perfil.condominio_id,
-        periodo
-      ),
-      cargarDirectiva(perfil.condominio_id),
-    ]);
+    cargarReporte(
+      perfil.condominio_id,
+      perfil.condominio || "",
+      periodoDesde,
+      periodoHasta
+    );
   }
 
   function imprimirReporte() {
@@ -951,7 +730,7 @@ export default function ReporteGastosMensualesChequesPage() {
         <div className="mx-auto max-w-6xl rounded-2xl bg-white p-8 shadow-sm">
           <div className="flex items-center gap-3 text-slate-600">
             <Loader2 className="h-5 w-5 animate-spin" />
-            Cargando reporte de gastos por cheque...
+            Cargando reporte de gastos...
           </div>
         </div>
       </div>
@@ -960,14 +739,14 @@ export default function ReporteGastosMensualesChequesPage() {
 
   return (
     <div
-      id="reporte-gastos-cheques"
+      id="reporte-gastos-mes-meses"
       className="min-h-screen bg-slate-100 px-4 py-6 print:bg-white print:px-0 print:py-0"
     >
       <style jsx global>{`
         @media print {
           @page {
             size: letter portrait;
-            margin: 0.22in;
+            margin: 0.35in;
           }
 
           body {
@@ -980,12 +759,12 @@ export default function ReporteGastosMensualesChequesPage() {
             visibility: hidden !important;
           }
 
-          #reporte-gastos-cheques,
-          #reporte-gastos-cheques * {
+          #reporte-gastos-mes-meses,
+          #reporte-gastos-mes-meses * {
             visibility: visible !important;
           }
 
-          #reporte-gastos-cheques {
+          #reporte-gastos-mes-meses {
             position: absolute !important;
             inset: 0 !important;
             width: 100% !important;
@@ -1006,21 +785,16 @@ export default function ReporteGastosMensualesChequesPage() {
             border-radius: 0 !important;
             box-shadow: none !important;
             padding: 0 !important;
-            font-size: 8.5px !important;
-            line-height: 1.12 !important;
           }
 
           .print-summary {
-            grid-template-columns: repeat(
-              4,
-              minmax(0, 1fr)
-            ) !important;
+            grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
             gap: 5px !important;
           }
 
           .print-summary > div {
-            padding: 5px !important;
-            border-radius: 7px !important;
+            padding: 7px !important;
+            border-radius: 9px !important;
           }
 
           .print-summary p:first-child {
@@ -1028,18 +802,22 @@ export default function ReporteGastosMensualesChequesPage() {
           }
 
           .print-summary p:last-child {
-            font-size: 9.5px !important;
-            margin-top: 2px !important;
+            font-size: 11px !important;
+            margin-top: 3px !important;
+          }
+
+          .print-chart {
+            display: none !important;
           }
 
           .print-table {
-            font-size: 7.4px !important;
-            line-height: 1.08 !important;
+            font-size: 8.5px !important;
+            line-height: 1.15 !important;
           }
 
           .print-table th,
           .print-table td {
-            padding: 2px 3px !important;
+            padding: 3px 4px !important;
           }
 
           .print-table thead {
@@ -1052,13 +830,13 @@ export default function ReporteGastosMensualesChequesPage() {
           }
 
           .print-header {
-            padding-bottom: 5px !important;
-            margin-bottom: 5px !important;
+            padding-bottom: 8px !important;
+            margin-bottom: 8px !important;
           }
 
           .print-header h1 {
-            font-size: 14px !important;
-            line-height: 1 !important;
+            font-size: 18px !important;
+            line-height: 1.05 !important;
           }
 
           .print-header p {
@@ -1075,45 +853,44 @@ export default function ReporteGastosMensualesChequesPage() {
             margin-top: 10px !important;
             font-size: 8px !important;
           }
-
-          .print-signatures {
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-            margin-top: 8px !important;
-            padding-top: 5px !important;
-          }
-
-          .print-signature-space {
-            height: 20px !important;
-          }
         }
       `}</style>
 
-      <div className="no-print mx-auto mb-3 flex max-w-6xl flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm md:flex-row md:items-end md:justify-between">
+      <div className="no-print mx-auto mb-5 flex max-w-6xl flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-700">
             VAM Administración
           </p>
-
           <h1 className="mt-1 text-2xl font-black text-slate-900">
-            Reporte de Gastos por Cheque
+            Reporte de Gastos por Mes o Meses
           </h1>
-
           <p className="mt-1 text-sm text-slate-500">
-            Reporte mensual de los gastos que tienen
-            número de cheque registrado.
+            Seleccione un mes o un rango de meses para consultar e imprimir los gastos del condominio.
           </p>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <label className="text-sm font-bold text-slate-700">
-            Mes
+            Desde
             <select
-              value={periodo}
-              onChange={(event) =>
-                setPeriodo(event.target.value)
-              }
-              className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 sm:w-56"
+              value={periodoDesde}
+              onChange={(event) => setPeriodoDesde(event.target.value)}
+              className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 sm:w-48"
+            >
+              {generarPeriodos(36).map((item) => (
+                <option key={item} value={item}>
+                  {nombrePeriodo(item)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm font-bold text-slate-700">
+            Hasta
+            <select
+              value={periodoHasta}
+              onChange={(event) => setPeriodoHasta(event.target.value)}
+              className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 sm:w-48"
             >
               {generarPeriodos(36).map((item) => (
                 <option key={item} value={item}>
@@ -1154,187 +931,222 @@ export default function ReporteGastosMensualesChequesPage() {
         </div>
       )}
 
-      <main className="print-card mx-auto max-w-6xl rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <header className="print-header mb-4 border-b-3 border-blue-900 pb-3">
+      <main className="print-card mx-auto max-w-6xl rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
+        <header className="print-header mb-6 border-b-4 border-blue-900 pb-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-800">
                 VAM Administradora de Condominios
               </p>
-
-              <h1 className="mt-1 text-2xl font-black uppercase leading-tight text-slate-950">
-                Reporte de Gastos por Cheque
+              <h1 className="mt-2 text-3xl font-black uppercase text-slate-950">
+                Reporte de Gastos por Mes o Meses
               </h1>
-
-              <p className="mt-1 text-xs text-slate-600">
-                Detalle mensual de gastos pagados mediante cheque.
+              <p className="mt-2 text-sm text-slate-600">
+                Detalle de gastos operativos y Caja Chica.
               </p>
             </div>
 
-            <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-700 md:min-w-72">
-              <div className="flex justify-between gap-3">
-                <span className="font-bold">
-                  Condominio:
-                </span>
-
+            <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700 md:min-w-80">
+              <div className="flex justify-between gap-4">
+                <span className="font-bold">Condominio:</span>
                 <span className="text-right">
                   {perfil?.condominio || "Condominio"}
                 </span>
               </div>
-
-              <div className="mt-1 flex justify-between gap-3">
-                <span className="font-bold">
-                  Periodo:
-                </span>
-
-                <span>{nombrePeriodo(periodo)}</span>
+              <div className="mt-2 flex justify-between gap-4">
+                <span className="font-bold">Periodo:</span>
+                <span>{periodoTexto}</span>
               </div>
-
-              <div className="mt-1 flex justify-between gap-3">
-                <span className="font-bold">
-                  Fecha de emisión:
-                </span>
-
-                <span>
-                  {formatDate(
-                    new Date().toISOString()
-                  )}
-                </span>
+              <div className="mt-2 flex justify-between gap-4">
+                <span className="font-bold">Fecha de emisión:</span>
+                <span>{formatDate(new Date().toISOString())}</span>
               </div>
-
-              <div className="mt-1 flex justify-between gap-3">
-                <span className="font-bold">
-                  Cheques:
-                </span>
-
+              <div className="mt-2 flex justify-between gap-4">
+                <span className="font-bold">Registros:</span>
                 <span>{gastos.length}</span>
               </div>
             </div>
           </div>
         </header>
 
-        <section className="print-summary grid grid-cols-2 gap-2 xl:grid-cols-4">
+        <section className="print-summary grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <ResumenCard
-            label="Total pagado"
-            valor={formatMoney(totalMes)}
+            label="Total del período"
+            valor={formatMoney(totalPeriodo)}
             icon={<WalletCards className="h-5 w-5" />}
             clase="border-blue-200 bg-blue-50 text-blue-900"
           />
-
           <ResumenCard
-            label="Cantidad de cheques"
-            valor={String(gastos.length)}
+            label="Gastos generales"
+            valor={formatMoney(totalGastosGenerales)}
             icon={<ReceiptText className="h-5 w-5" />}
-            clase="border-emerald-200 bg-emerald-50 text-emerald-800"
+            clase="border-red-200 bg-red-50 text-red-800"
           />
-
           <ResumenCard
-            label="Promedio por cheque"
-            valor={formatMoney(promedioCheque)}
-            icon={<CalendarDays className="h-5 w-5" />}
+            label="Caja Chica"
+            valor={formatMoney(totalCajaChica)}
+            icon={<FileText className="h-5 w-5" />}
             clase="border-amber-200 bg-amber-50 text-amber-800"
           />
-
           <ResumenCard
-            label="Cheque de mayor monto"
-            valor={
-              chequeMayor
-                ? formatMoney(chequeMayor.monto)
-                : formatMoney(0)
-            }
-            icon={<FileText className="h-5 w-5" />}
-            clase="border-red-200 bg-red-50 text-red-800"
+            label="Cantidad de gastos"
+            valor={String(gastos.length)}
+            icon={<CalendarDays className="h-5 w-5" />}
+            clase="border-emerald-200 bg-emerald-50 text-emerald-800"
           />
         </section>
 
-        <section>
-          <div className="print-section-title mb-2 mt-4 flex items-end justify-between gap-3">
-            <h2 className="text-lg font-black uppercase tracking-wide text-slate-900">
-              Detalle de gastos con cheque
-            </h2>
+        <section className="print-chart mt-7 grid gap-5 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-blue-700" />
+              <h2 className="font-black text-slate-900">
+                Distribución por categoría
+              </h2>
+            </div>
 
+            {resumenCategorias.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                No hay gastos registrados para el período seleccionado.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {resumenCategorias.slice(0, 8).map((item) => (
+                  <div key={item.categoria}>
+                    <div className="mb-1 flex items-center justify-between gap-4 text-sm">
+                      <span className="font-semibold text-slate-700">
+                        {item.categoria}
+                      </span>
+                      <span className="font-black text-slate-900">
+                        {formatMoney(item.total)}
+                      </span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full bg-blue-700"
+                        style={{
+                          width: `${Math.max(2, Math.min(100, item.porcentaje))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 p-5">
+            <h2 className="font-black text-slate-900">Lectura rápida</h2>
+
+            <div className="mt-4 space-y-3 text-sm text-slate-700">
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="font-bold text-slate-900">Mayor gasto del período</p>
+                <p className="mt-1">
+                  {gastoMayor
+                    ? `${gastoMayor.concepto} — ${formatMoney(gastoMayor.monto)}`
+                    : "No hay gastos registrados."}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="font-bold text-slate-900">
+                  Participación de Caja Chica
+                </p>
+                <p className="mt-1">
+                  {totalPeriodo > 0
+                    ? `${((totalCajaChica / totalPeriodo) * 100).toFixed(1)}% del total del período`
+                    : "0.0% del total del período"}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="font-bold text-slate-900">Orden del reporte</p>
+                <p className="mt-1">
+                  Los gastos se muestran en orden cronológico. El documento o referencia
+                  se presenta cuando exista, sin depender del método de pago.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="print-section-title mb-3 mt-8 flex items-end justify-between gap-4">
+            <h2 className="text-lg font-black uppercase tracking-wide text-slate-900">
+              Detalle de gastos
+            </h2>
             <p className="text-sm font-black text-red-700">
-              Total: {formatMoney(totalMes)}
+              Total: {formatMoney(totalPeriodo)}
             </p>
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <table className="print-table w-full min-w-[760px] text-left text-xs md:text-sm">
+            <table className="print-table w-full min-w-[1050px] text-left text-xs md:text-sm">
               <thead className="bg-slate-100 text-slate-700">
                 <tr>
-                  <th className="px-2 py-2">
-                    No. cheque
-                  </th>
-
-                  <th className="px-2 py-2">
-                    Fecha
-                  </th>
-
-                  <th className="px-2 py-2">
-                    Concepto
-                  </th>
-
-                  <th className="px-2 py-2">
-                    Proveedor / Beneficiario
-                  </th>
-
-                  <th className="px-3 py-3 text-right">
-                    Monto
-                  </th>
+                  <th className="px-3 py-3">Documento / referencia</th>
+                  <th className="px-3 py-3">Fecha</th>
+                  <th className="px-3 py-3">Concepto</th>
+                  <th className="px-3 py-3">Proveedor / Beneficiario</th>
+                  <th className="px-3 py-3">Categoría</th>
+                  <th className="px-3 py-3">Factura / NCF</th>
+                  <th className="px-3 py-3">Origen</th>
+                  <th className="px-3 py-3 text-right">Monto</th>
                 </tr>
               </thead>
 
               <tbody>
                 {consultando ? (
                   <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-8 text-center text-slate-500"
-                    >
+                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                       Consultando gastos...
                     </td>
                   </tr>
                 ) : gastos.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-8 text-center text-slate-500"
-                    >
-                      No hay gastos con número de cheque
-                      para {nombrePeriodo(periodo)}.
+                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                      No hay gastos registrados para {periodoTexto}.
                     </td>
                   </tr>
                 ) : (
                   gastos.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="border-t border-slate-100 align-top"
-                    >
-                      <td className="px-2 py-2 font-black text-slate-800">
-                        {item.numeroCheque}
+                    <tr key={item.id} className="border-t border-slate-100 align-top">
+                      <td className="px-3 py-3 font-black text-slate-800">
+                        {item.numeroDocumento}
                       </td>
-
-                      <td className="whitespace-nowrap px-2 py-2">
+                      <td className="whitespace-nowrap px-3 py-3">
                         {item.fechaTexto}
                       </td>
-
-                      <td className="px-2 py-2">
+                      <td className="px-3 py-3">
                         <div className="font-semibold text-slate-900">
                           {item.concepto}
                         </div>
-
                         {item.metodoPago !== "-" && (
                           <div className="mt-1 text-[11px] text-slate-500">
                             Método: {item.metodoPago}
                           </div>
                         )}
                       </td>
-
-                      <td className="px-2 py-2">
-                        {item.proveedor}
+                      <td className="px-3 py-3">{item.proveedor}</td>
+                      <td className="px-3 py-3">{item.categoria}</td>
+                      <td className="px-3 py-3 text-xs">
+                        <div>Factura: {item.factura}</div>
+                        <div className="mt-1">NCF: {item.ncf}</div>
                       </td>
-
-                      <td className="whitespace-nowrap px-2 py-2 text-right font-black text-red-700">
+                      <td className="px-3 py-3">
+                        <span
+                          className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black ${
+                            item.fuente === "CAJA_CHICA"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-blue-100 text-blue-800"
+                          }`}
+                        >
+                          {item.fuente === "CAJA_CHICA"
+                            ? "Caja Chica"
+                            : "Gasto"}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right font-black text-red-700">
                         {formatMoney(item.monto)}
                       </td>
                     </tr>
@@ -1345,15 +1157,11 @@ export default function ReporteGastosMensualesChequesPage() {
               {gastos.length > 0 && (
                 <tfoot className="bg-slate-900 text-white">
                   <tr>
-                    <td
-                      colSpan={4}
-                      className="px-2 py-2 text-right font-black"
-                    >
-                      TOTAL PAGADO POR CHEQUE
+                    <td colSpan={7} className="px-3 py-3 text-right font-black">
+                      TOTAL DEL PERÍODO
                     </td>
-
-                    <td className="whitespace-nowrap px-2 py-2 text-right text-sm font-black">
-                      {formatMoney(totalMes)}
+                    <td className="whitespace-nowrap px-3 py-3 text-right text-base font-black">
+                      {formatMoney(totalPeriodo)}
                     </td>
                   </tr>
                 </tfoot>
@@ -1362,48 +1170,9 @@ export default function ReporteGastosMensualesChequesPage() {
           </div>
         </section>
 
-        <section className="print-signatures mt-5 border-t border-slate-300 pt-4">
-          <p className="text-center text-sm font-black uppercase tracking-wide text-slate-900">
-            Reporte realizado por VAM Condominios
-          </p>
-
-          <p className="mx-auto mt-1 max-w-3xl text-center text-[10px] leading-snug text-slate-600">
-            Los miembros de la directiva abajo firmantes dejan constancia de
-            que revisaron el presente reporte de gastos correspondiente a{" "}
-            {nombrePeriodo(periodo)} para fines de control y archivo del
-            condominio.
-          </p>
-
-          <div className="mt-4 grid grid-cols-2 gap-8">
-            <div className="text-center">
-              <div className="print-signature-space h-10" />
-              <div className="border-t border-slate-500 pt-2">
-                <p className="font-black text-slate-900">
-                  {presidente?.nombre || "Presidente no registrado"}
-                </p>
-                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Presidente
-                </p>
-              </div>
-            </div>
-
-            <div className="text-center">
-              <div className="print-signature-space h-10" />
-              <div className="border-t border-slate-500 pt-2">
-                <p className="font-black text-slate-900">
-                  {tesorero?.nombre || "Tesorero no registrado"}
-                </p>
-                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Tesorero
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <footer className="print-footer mt-4 border-t border-slate-200 pt-2 text-center text-[10px] text-slate-500">
-          Reporte realizado por VAM Condominios. Documento preparado para
-          revisión, firma y archivo de la directiva.
+        <footer className="print-footer mt-7 border-t border-slate-200 pt-4 text-center text-xs text-slate-500">
+          Reporte generado por VAM Administradora de Condominios. Este documento
+          resume los gastos registrados para el período seleccionado.
         </footer>
       </main>
     </div>
@@ -1422,20 +1191,14 @@ function ResumenCard({
   clase: string;
 }) {
   return (
-    <div
-      className={`rounded-xl border p-3 ${clase}`}
-    >
+    <div className={`rounded-2xl border p-5 ${clase}`}>
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs font-black uppercase tracking-wide opacity-80">
           {label}
         </p>
-
         {icon}
       </div>
-
-      <p className="mt-1 text-xl font-black leading-tight">
-        {valor}
-      </p>
+      <p className="mt-3 text-2xl font-black">{valor}</p>
     </div>
   );
 }

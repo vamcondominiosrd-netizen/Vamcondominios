@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
 import {
   AlertTriangle,
   BarChart3,
@@ -184,6 +185,176 @@ function esSolicitudNomina(s: SolicitudPagoOperativa) {
 
   return texto.includes("nomina") ||
     normalizar(s.no_factura).startsWith("nom-");
+}
+
+
+type DatosNominaSoporte = {
+  id?: number | null;
+  nombre_empleado?: string | null;
+  numero_empleado?: string | null;
+  cargo?: string | null;
+  departamento?: string | null;
+  tipo_nomina?: string | null;
+  periodo?: string | null;
+  quincena?: number | null;
+  fecha_inicio_periodo?: string | null;
+  fecha_fin_periodo?: string | null;
+  fecha_pago?: string | null;
+  salario_base?: number | null;
+  monto_horas_extras?: number | null;
+  bonificacion?: number | null;
+  pago_vacaciones?: number | null;
+  afp?: number | null;
+  sfs?: number | null;
+  isr?: number | null;
+  otros_descuentos?: number | null;
+  total_ingresos?: number | null;
+  total_descuentos?: number | null;
+  neto_pagar?: number | null;
+};
+
+function extraerCampoNomina(detalle: string | null | undefined, etiqueta: string) {
+  const texto = String(detalle || "");
+  const escapada = etiqueta.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = texto.match(new RegExp(`(?:^|\\n)${escapada}\\s*:\\s*([^\\n]+)`, "i"));
+  return String(match?.[1] || "").trim();
+}
+
+function nombreSeguroDocumento(valor: string) {
+  return String(valor || "documento")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+}
+
+function generarPdfSoporteNomina(
+  s: SolicitudPagoOperativa,
+  nomina: DatosNominaSoporte | null,
+) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
+  const margen = 18;
+  const ancho = 216 - margen * 2;
+  const numeroDocumento =
+    s.no_factura || `NOM-SOL-${String(s.solicitud_id).padStart(6, "0")}`;
+
+  const empleado =
+    nomina?.nombre_empleado || extraerCampoNomina(s.detalle, "Empleado") || "-";
+  const numeroEmpleado =
+    nomina?.numero_empleado || extraerCampoNomina(s.detalle, "No. empleado") || "-";
+  const cargo = nomina?.cargo || extraerCampoNomina(s.detalle, "Cargo") || "-";
+  const departamento =
+    nomina?.departamento || extraerCampoNomina(s.detalle, "Departamento") || "-";
+  const tipoNomina =
+    nomina?.tipo_nomina || extraerCampoNomina(s.detalle, "Tipo nómina") || "Regular";
+  const periodo = nomina?.periodo || extraerCampoNomina(s.detalle, "Período") || "-";
+  const quincena = nomina?.quincena
+    ? nomina.quincena === 1
+      ? "Primera"
+      : "Segunda"
+    : extraerCampoNomina(s.detalle, "Quincena") || "No aplica";
+
+  const totalIngresos = Number(nomina?.total_ingresos ?? s.monto ?? s.total_solicitud ?? 0);
+  const totalDescuentos = Number(nomina?.total_descuentos ?? 0);
+  const neto = Number(nomina?.neto_pagar ?? s.total_solicitud ?? 0);
+
+  const linea = (y: number) => {
+    doc.setDrawColor(210);
+    doc.line(margen, y, 216 - margen, y);
+  };
+
+  const campo = (etiqueta: string, valor: string, y: number) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.text(etiqueta, margen, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(String(valor || "-"), margen + 43, y);
+  };
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("VAM ADMINISTRADORA DE CONDOMINIOS", margen, 19);
+
+  doc.setFontSize(17);
+  doc.text("COMPROBANTE INTERNO DE NÓMINA", margen, 30);
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`No. ${numeroDocumento}`, margen, 37);
+  doc.setFont("helvetica", "bold");
+  doc.text("DOCUMENTO INTERNO - NO FISCAL", 216 - margen, 37, { align: "right" });
+  linea(42);
+
+  let y = 50;
+  campo("Condominio:", s.condominio || "Condominio", y); y += 7;
+  campo("Empleado:", empleado, y); y += 7;
+  campo("No. empleado:", numeroEmpleado, y); y += 7;
+  campo("Cargo:", cargo, y); y += 7;
+  campo("Departamento:", departamento, y); y += 7;
+  campo("Tipo de nómina:", tipoNomina, y); y += 7;
+  campo("Período:", periodo, y); y += 7;
+  campo("Quincena:", quincena, y); y += 7;
+
+  const rango =
+    nomina?.fecha_inicio_periodo && nomina?.fecha_fin_periodo
+      ? `${formatoFecha(nomina.fecha_inicio_periodo)} al ${formatoFecha(nomina.fecha_fin_periodo)}`
+      : "-";
+  campo("Rango:", rango, y); y += 7;
+  campo("Fecha pago:", formatoFecha(nomina?.fecha_pago || s.fecha_solicitud), y); y += 9;
+  linea(y); y += 9;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("RESUMEN DE NÓMINA", margen, y); y += 8;
+
+  const valores = [
+    ["Salario del período", Number(nomina?.salario_base || 0)],
+    ["Horas extras", Number(nomina?.monto_horas_extras || 0)],
+    ["Bonificación", Number(nomina?.bonificacion || 0)],
+    ["Vacaciones", Number(nomina?.pago_vacaciones || 0)],
+    ["AFP", -Number(nomina?.afp || 0)],
+    ["SFS", -Number(nomina?.sfs || 0)],
+    ["ISR", -Number(nomina?.isr || 0)],
+    ["Otros descuentos", -Number(nomina?.otros_descuentos || 0)],
+  ] as const;
+
+  doc.setFontSize(9.5);
+  for (const [etiqueta, valor] of valores) {
+    doc.setFont("helvetica", "normal");
+    doc.text(etiqueta, margen, y);
+    doc.setFont("helvetica", "bold");
+    doc.text(`RD$ ${dinero(Math.abs(valor))}${valor < 0 ? " (-)" : ""}`, 216 - margen, y, {
+      align: "right",
+    });
+    y += 6.5;
+  }
+
+  y += 2;
+  linea(y); y += 8;
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("Total ingresos", margen, y);
+  doc.text(`RD$ ${dinero(totalIngresos)}`, 216 - margen, y, { align: "right" }); y += 7;
+  doc.text("Total descuentos", margen, y);
+  doc.text(`RD$ ${dinero(totalDescuentos)}`, 216 - margen, y, { align: "right" }); y += 8;
+
+  doc.setFontSize(13);
+  doc.text("NETO A PAGAR", margen, y);
+  doc.text(`RD$ ${dinero(neto)}`, 216 - margen, y, { align: "right" }); y += 10;
+  linea(y); y += 9;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  const nota =
+    "Comprobante generado automáticamente por VAM Administración al convertir la solicitud de nómina en gasto. Este documento sirve como soporte interno del gasto y no sustituye un comprobante fiscal ni la constancia final de pago al empleado.";
+  doc.text(doc.splitTextToSize(nota, ancho), margen, y);
+
+  return {
+    blob: doc.output("blob"),
+    numeroDocumento,
+  };
 }
 
 type TipoOperacionCajaChica = "fondo_inicial" | "reposicion" | null;
@@ -581,6 +752,123 @@ export default function SolicitudesPagoPage() {
     setSolicitudes(solicitudesFinales);
   }
 
+  async function obtenerNominaOrigen(s: SolicitudPagoOperativa) {
+    const { data: solicitudOrigen, error: origenError } = await supabase
+      .from("solicitudes_pago")
+      .select("origen_modulo, origen_id")
+      .eq("id", s.solicitud_id)
+      .maybeSingle();
+
+    if (origenError) {
+      throw new Error("No se pudo validar el origen de la nómina: " + origenError.message);
+    }
+
+    const esOrigenNomina = normalizar(solicitudOrigen?.origen_modulo) === "nomina";
+    const nominaId = Number(solicitudOrigen?.origen_id || 0);
+
+    if (!esOrigenNomina || !nominaId) {
+      return { nominaId: null as number | null, nomina: null as DatosNominaSoporte | null };
+    }
+
+    const { data: nomina, error: nominaError } = await supabase
+      .from("rh_nomina")
+      .select(
+        "id, nombre_empleado, numero_empleado, cargo, departamento, tipo_nomina, periodo, quincena, fecha_inicio_periodo, fecha_fin_periodo, fecha_pago, salario_base, monto_horas_extras, bonificacion, pago_vacaciones, afp, sfs, isr, otros_descuentos, total_ingresos, total_descuentos, neto_pagar",
+      )
+      .eq("id", nominaId)
+      .eq("condominio_id", Number(s.condominio_id || condominioId || 0))
+      .maybeSingle();
+
+    if (nominaError) {
+      throw new Error("No se pudo cargar la nómina para generar el soporte: " + nominaError.message);
+    }
+
+    return {
+      nominaId,
+      nomina: (nomina as DatosNominaSoporte | null) || null,
+    };
+  }
+
+  async function adjuntarSoporteNomina(
+    s: SolicitudPagoOperativa,
+    gastoId: number,
+    condominioGastoId: number,
+    proveedorNombre: string | null,
+  ) {
+    const { nominaId, nomina } = await obtenerNominaOrigen(s);
+    const { blob, numeroDocumento } = generarPdfSoporteNomina(s, nomina);
+    const nombreArchivo = `soporte-nomina-${nombreSeguroDocumento(numeroDocumento)}.pdf`;
+    const rutaArchivo = `condominio-${condominioGastoId}/gasto-${gastoId}/otro/${Date.now()}-${nombreArchivo}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("gastos-documentos")
+      .upload(rutaArchivo, blob, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: "application/pdf",
+      });
+
+    if (uploadError) {
+      throw new Error("No se pudo guardar el PDF del soporte de nómina: " + uploadError.message);
+    }
+
+    const registroDocumento = {
+      condominio_id: condominioGastoId,
+      gasto_id: gastoId,
+      proveedor_id: s.proveedor_id || null,
+      proveedor_nombre:
+        nomina?.nombre_empleado ||
+        extraerCampoNomina(s.detalle, "Empleado") ||
+        proveedorNombre ||
+        "Empleado",
+      numero_documento: numeroDocumento,
+      fecha_documento: s.fecha_solicitud || hoyISO(),
+      monto: Number(s.total_solicitud || 0),
+      nombre_archivo: nombreArchivo,
+      archivo_url: rutaArchivo,
+      mime_type: "application/pdf",
+      tamano_bytes: blob.size,
+      observaciones:
+        "Comprobante interno de nómina generado automáticamente desde Recursos Humanos / Nómina.",
+      visible_propietarios: false,
+      es_principal: true,
+      estado: "ACTIVO",
+    };
+
+    // Intentamos guardar el tipo semántico nuevo. Si la base tiene una restricción
+    // histórica de tipos, reutilizamos FACTURA para no requerir cambios de esquema.
+    let { data: documentoCreado, error: documentoError } = await supabase
+      .from("gastos_documentos")
+      .insert({ ...registroDocumento, tipo_documento: "SOPORTE_NOMINA" })
+      .select("id")
+      .single();
+
+    if (documentoError || !documentoCreado) {
+      const respaldo = await supabase
+        .from("gastos_documentos")
+        .insert({ ...registroDocumento, tipo_documento: "FACTURA" })
+        .select("id")
+        .single();
+
+      documentoCreado = respaldo.data;
+      documentoError = respaldo.error;
+    }
+
+    if (documentoError || !documentoCreado) {
+      await supabase.storage.from("gastos-documentos").remove([rutaArchivo]);
+      throw new Error(
+        "No se pudo registrar el soporte de nómina en el expediente del gasto: " +
+          (documentoError?.message || "Documento no creado."),
+      );
+    }
+
+    return {
+      documentoId: Number(documentoCreado.id),
+      rutaArchivo,
+      nominaId,
+    };
+  }
+
   async function generarGasto(s: SolicitudPagoOperativa) {
     if (s.gasto_generado_id || s.gasto_id) {
       alert("Esta solicitud ya tiene un gasto generado.");
@@ -678,6 +966,53 @@ export default function SolicitudesPagoPage() {
         return;
       }
 
+      let soporteNomina:
+        | { documentoId: number; rutaArchivo: string; nominaId: number | null }
+        | null = null;
+
+      if (esSolicitudNomina(s)) {
+        try {
+          soporteNomina = await adjuntarSoporteNomina(
+            s,
+            Number(gastoData.id),
+            condominioGastoId,
+            nombreProveedorVerificado,
+          );
+
+          if (soporteNomina.nominaId) {
+            const { error: nominaUpdateError } = await supabase
+              .from("rh_nomina")
+              .update({
+                gasto_id: Number(gastoData.id),
+                gasto_generado: true,
+              })
+              .eq("id", soporteNomina.nominaId)
+              .eq("condominio_id", condominioGastoId);
+
+            if (nominaUpdateError) {
+              throw new Error(
+                "El soporte fue generado, pero no se pudo sincronizar la nómina con el gasto: " +
+                  nominaUpdateError.message,
+              );
+            }
+          }
+        } catch (soporteError: any) {
+          if (soporteNomina?.documentoId) {
+            await supabase
+              .from("gastos_documentos")
+              .update({ estado: "ANULADO" })
+              .eq("id", soporteNomina.documentoId);
+          }
+          if (soporteNomina?.rutaArchivo) {
+            await supabase.storage
+              .from("gastos-documentos")
+              .remove([soporteNomina.rutaArchivo]);
+          }
+          await supabase.from("gastos").delete().eq("id", gastoData.id);
+          throw soporteError;
+        }
+      }
+
       const datosActualizacionSolicitud = nominaPendienteAprobacion
         ? {
             estado: "Pendiente aprobación tesorero",
@@ -696,6 +1031,27 @@ export default function SolicitudesPagoPage() {
         .eq("id", s.solicitud_id);
 
       if (updateError) {
+        if (soporteNomina?.nominaId) {
+          await supabase
+            .from("rh_nomina")
+            .update({ gasto_id: null, gasto_generado: false })
+            .eq("id", soporteNomina.nominaId)
+            .eq("condominio_id", condominioGastoId);
+        }
+
+        if (soporteNomina?.documentoId) {
+          await supabase
+            .from("gastos_documentos")
+            .update({ estado: "ANULADO" })
+            .eq("id", soporteNomina.documentoId);
+        }
+
+        if (soporteNomina?.rutaArchivo) {
+          await supabase.storage
+            .from("gastos-documentos")
+            .remove([soporteNomina.rutaArchivo]);
+        }
+
         const { error: rollbackError } = await supabase
           .from("gastos")
           .delete()
@@ -715,7 +1071,7 @@ export default function SolicitudesPagoPage() {
 
       alert(
         nominaPendienteAprobacion
-          ? "Gasto de nómina generado correctamente y enviado al tesorero para aprobación."
+          ? "Gasto de nómina generado correctamente con su Soporte de Nómina adjunto y enviado al tesorero para aprobación."
           : "Gasto generado correctamente.",
       );
       cargarSolicitudes();

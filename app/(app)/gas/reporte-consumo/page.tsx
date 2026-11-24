@@ -10,7 +10,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/app/lib/supabaseClient";
 
 const CONDOMINIO_ID = 24;
-const VERSION = "v1.2.0";
+const VERSION = "v1.3.0";
 const NOMBRE = "RESIDENCIAL COLINAS DEL OESTE DON JUAN I";
 const FECHA_DEFECTO = (() => {
   const hoy = new Date();
@@ -237,7 +237,7 @@ export default function ReporteGasDonJuan() {
       const consumoTotal = consumoReal === null ? null : consumoReal + (consumoProyectado ?? 0);
       const compras = fuentes.comprasLegibles && tanqueId !== null ? fuentes.recepciones.filter(r =>
         Number(r.tanque_id) === tanqueId &&
-        texto(r.fecha_recepcion).slice(0,10) >= desde &&
+        texto(r.fecha_recepcion).slice(0,10) > desde &&
         texto(r.fecha_recepcion).slice(0,10) <= hasta &&
         !["ANULADA", "ANULADO", "CANCELADA", "CANCELADO"].includes(normalizar(r.estado)) &&
         abreviaturaGalones(catalogo.get(Number(r.unidad_medida_id)) || "")
@@ -278,7 +278,7 @@ export default function ReporteGasDonJuan() {
       const a: (string | number | null)[][] = [
         title,
         [`${NOMBRE} — ${mesTxt(periodo).toUpperCase()}`, ...Array(9).fill(""), `DESDE ${fechaTxt(desde)} HASTA ${fechaTxt(hasta)}`],
-        ["Importes procedentes de facturación de gas; compras procedentes de recepciones registradas."],
+        ["Importes de facturación de gas; compras: fecha inicial excluida y fecha final incluida."],
         columnas,
       ];
       const merges: any[] = [
@@ -354,7 +354,7 @@ export default function ReporteGasDonJuan() {
         ["VAM — CONTROL DE CONSUMO DE GAS", "Don Juan I"],
         ["Condominio ID",CONDOMINIO_ID],
         ["Período de consumo",periodo],
-        ["Desde", desde], ["Hasta",hasta],
+        ["Desde (compras: excluido)", desde], ["Hasta (compras: incluido)",hasta],
         ["Días proyectados",diasProyeccion],
         ["¿Proyección incluida en total?",incluirProyeccion?"SÍ":"NO"],
         ["Fuente lecturas","gas_lecturas"],
@@ -422,10 +422,10 @@ export default function ReporteGasDonJuan() {
           <label className="text-sm font-bold">Mes del consumo
             <input className="mt-1 block w-full rounded-lg border p-2" type="month" value={periodo} onChange={e=>setPeriodo(e.target.value)}/>
           </label>
-          <label className="text-sm font-bold">Desde (compra de gas)
+          <label className="text-sm font-bold">Desde (compra: fecha excluida)
             <input className="mt-1 block w-full rounded-lg border p-2" type="date" value={desde} onChange={e=>setDesde(e.target.value)}/>
           </label>
-          <label className="text-sm font-bold">Hasta (compra de gas)
+          <label className="text-sm font-bold">Hasta (compra: fecha incluida)
             <input className="mt-1 block w-full rounded-lg border p-2" type="date" value={hasta} onChange={e=>setHasta(e.target.value)}/>
           </label>
           <label className="text-sm font-bold">Tanque
@@ -504,7 +504,7 @@ export default function ReporteGasDonJuan() {
         </div>
         <div className="mt-4 text-xs text-slate-700">
           <p><strong>Fórmulas del cuadro:</strong> Diferencia (m³) = lectura final − lectura inicial. GLS consumido = consumo medido × factor. Promedio diario = GLS ÷ días (conteo inclusivo: fecha inicial y final). Diferencia GLS = compra − consumo total; diferencia RD$ = compra − importe facturado.</p>
-          <p className="mt-1">Las cifras de «pagar por mes» provienen de gas_facturacion_unidades. Las compras usan el total registrado en gas_recepciones dentro de las fechas seleccionadas. La diferencia no mide pérdidas sin considerar inventarios inicial y final del tanque.</p>
+          <p className="mt-1">Las cifras de «pagar por mes» provienen de gas_facturacion_unidades. Las compras usan el total registrado en gas_recepciones, excluyendo la fecha inicial e incluyendo la fecha final. Las compras del día de cierre pertenecen al período que termina ese día. La diferencia no mide pérdidas sin considerar inventarios inicial y final del tanque.</p>
           {!incluirProyeccion && <p className="mt-1">La columna de días adicionales permanece sin cálculo porque la proyección está desactivada, como en la imagen de referencia.</p>}
           {conAlerta.length>0 && <p className="mt-2 font-bold text-amber-800">* Unidades por revisar: {conAlerta.map(x=>`${x.apartamento}: ${x.alerta}`).join("; ")}</p>}
           <p className="mt-2 text-slate-500">VAM CONDOMINIO — Reporte de consulta {VERSION} · Condominio 24 · No es una factura ni sustituye el comprobante fiscal.</p>

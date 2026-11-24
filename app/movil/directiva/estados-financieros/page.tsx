@@ -422,7 +422,7 @@ function esCargoBanco(row: MovimientoBanco): boolean {
 
 function esOrigenDeGasto(row: MovimientoBanco): boolean {
   const origen = normalizarTexto(row.origen).replace(/\s+/g, "_").toUpperCase();
-  return ["CHEQUE", "PAGO_PROVEEDOR", "GASTO", "PAGO_GASTO", "GASTO_OPERATIVO"].includes(origen);
+  return ["CHEQUE", "TRANSFERENCIA", "PAGO_PROVEEDOR", "GASTO", "PAGO_GASTO", "GASTO_OPERATIVO"].includes(origen);
 }
 
 function gastoCoincideMovimiento(row: MovimientoBanco, gasto: GastoRelacionado | undefined): boolean {
@@ -442,7 +442,7 @@ function esGastoOperativo(row: MovimientoBanco): boolean {
   const origen = normalizarTexto(row.origen);
   const texto = normalizarTexto(`${row.descripcion || ""} ${row.beneficiario || ""}`);
   return /(?:gasto|nomina|nómina|solicitud.pago|cheque|proveedor|suplidor|reposicion|reposición)/.test(origen) ||
-    /(?:cheque pagado|nomina|nómina|pago factura|caja chica|pago proveedor|pago suplidor)/.test(texto);
+    /(?:cheque pagado|nomina|nómina|pago solicitud|pago factura|caja chica|pago proveedor|pago suplidor)/.test(texto);
 }
 
 function fechaEfectiva(row: MovimientoBanco): string {
@@ -476,6 +476,8 @@ function esCuotaOrdinaria(cargo: Record<string, any>): boolean | null {
   const concepto = normalizarTexto(cargo.concepto || cargo.descripcion || "").replace(/[_-]/g, " ");
   const texto = `${tipo} ${concepto}`.trim();
   if (!texto) return null;
+  // GAS es un cargo válido independiente y no forma parte de la cuota ordinaria.
+  if (tipo === "gas") return false;
   // Una categoría de exclusión prevalece incluso si otro campo menciona "cuota".
   if (/(extraordin|mora|recargo|multa|reserva|sancion|interes|especial)/.test(texto)) return false;
   if (tipo && /(ordinari|mantenim|mensual|cuota)/.test(tipo)) return true;

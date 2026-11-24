@@ -187,6 +187,7 @@ export default function AdminPagosPage() {
   const [condominioId, setCondominioId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [eliminandoPagoId, setEliminandoPagoId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [mensaje, setMensaje] = useState("");
 
@@ -1249,38 +1250,64 @@ export default function AdminPagosPage() {
   }
 
   async function eliminarPago(p: Pago) {
+    if (saving || eliminandoPagoId !== null) return;
+
     const unidad = p.unidad_id ? unidadMap[p.unidad_id]?.codigo : "";
-    const confirmar = confirm(
+    const confirmar = window.confirm(
       `¿Seguro que desea eliminar este pago?\n\nID: ${p.id}\nUnidad: ${unidad}\nMonto: ${money(
         p.monto
-      )}\n\nSe reversarán cargos, créditos y banco_movimientos.`
+      )}\n\nSe reversarán cargos, créditos, aplicaciones y el movimiento bancario relacionado.`
     );
 
     if (!confirmar) return;
 
-    const confirmarFinal = prompt(
+    const confirmarFinal = window.prompt(
       "Para confirmar escriba ELIMINAR. Esta acción no se puede deshacer."
     );
 
-    if (confirmarFinal !== "ELIMINAR") return;
+    if (confirmarFinal === null) return;
 
-    setSaving(true);
-    setError("");
-
-    const { data, error } = await supabase.rpc("admin_eliminar_pago_seguro", {
-      p_pago_id: p.id,
-    });
-
-    setSaving(false);
-
-    if (error) {
-      setError("Error eliminando pago: " + error.message);
+    if (confirmarFinal.trim().toUpperCase() !== "ELIMINAR") {
+      window.alert(
+        'Confirmación incorrecta. Debe escribir la palabra ELIMINAR para borrar el pago.'
+      );
       return;
     }
 
-    const mensajeEliminado = data?.mensaje || "Pago eliminado correctamente.";
-    await cargarPagos();
-    setMensaje(mensajeEliminado);
+    setSaving(true);
+    setEliminandoPagoId(p.id);
+    setError("");
+    setMensaje("");
+
+    try {
+      const { data, error: rpcError } = await supabase.rpc(
+        "admin_eliminar_pago_seguro",
+        { p_pago_id: p.id }
+      );
+
+      if (rpcError) {
+        throw new Error(rpcError.message);
+      }
+
+      const resultado = data as any;
+      const mensajeEliminado =
+        resultado?.mensaje ||
+        `Pago #${p.id} de ${money(p.monto)} eliminado correctamente.`;
+
+      await cargarPagos();
+      setMensaje(mensajeEliminado);
+      window.alert(mensajeEliminado);
+    } catch (err: any) {
+      const mensajeError =
+        err?.message || "No se pudo eliminar el pago.";
+
+      console.error("Error eliminando pago:", err);
+      setError("Error eliminando pago: " + mensajeError);
+      window.alert(`No se pudo eliminar el pago #${p.id}:\n\n${mensajeError}`);
+    } finally {
+      setSaving(false);
+      setEliminandoPagoId(null);
+    }
   }
 
   return (
@@ -1540,9 +1567,11 @@ export default function AdminPagosPage() {
                           </button>
                           <button
                             onClick={() => eliminarPago(p)}
-                            className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+                            disabled={saving || eliminandoPagoId !== null}
+                            className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            title="Elimina el pago y revierte sus aplicaciones, créditos y movimiento bancario relacionado"
                           >
-                            Borrar
+                            {eliminandoPagoId === p.id ? "Borrando..." : "Borrar"}
                           </button>
                         </div>
                       </td>

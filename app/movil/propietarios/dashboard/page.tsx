@@ -16,6 +16,7 @@ import {
   CreditCard,
   FileBarChart2,
   FileText,
+  Flame,
   FolderOpen,
   ListChecks,
   LogOut,
@@ -86,7 +87,7 @@ type RespuestaComunicaciones = {
 
 const RPC_DASHBOARD_BALANCE = "vam_propietario_dashboard_balance";
 const RPC_LISTAR_COMUNICACIONES = "listar_comunicaciones_propietario";
-const MODULO_VERSION = "2.2";
+const MODULO_VERSION = "2.3";
 
 function normalizarRespuestaBalance(data: unknown): RespuestaBalance {
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -143,6 +144,7 @@ export default function DashboardPropietariosPage() {
 
   const [propietario, setPropietario] =
     useState<PropietarioActual | null>(null);
+  const [gasHabilitado, setGasHabilitado] = useState(false);
   const [balanceActual, setBalanceActual] = useState(0);
   const [cargandoBalance, setCargandoBalance] = useState(true);
   const [mensajeBalance, setMensajeBalance] = useState("");
@@ -195,10 +197,28 @@ export default function DashboardPropietariosPage() {
       await Promise.all([
         cargarBalance(sesion, token),
         cargarComunicaciones(sesion, token),
+        cargarGas(sesion, token),
       ]);
     } catch (error) {
       console.error("Error inicializando dashboard propietario:", error);
       cerrarSesion();
+    }
+  }
+
+  async function cargarGas(prop: PropietarioActual, token: string) {
+    setGasHabilitado(false);
+    try {
+      const { data, error } = await supabase.rpc("vam_propietario_consumo_gas", {
+        p_token: token, p_condominio_id: Number(prop.condominio_id),
+        p_unidad_id: Number(prop.unidad_id), p_periodo: null,
+      });
+      if (error) throw error;
+      const r = Array.isArray(data) ? data[0] : data;
+      if (localStorage.getItem("propietario_token")?.trim() === token) {
+        setGasHabilitado(r?.ok === true && r?.habilitado === true);
+      }
+    } catch (error) {
+      console.warn("No se pudo consultar disponibilidad de gas", error);
     }
   }
 
@@ -375,6 +395,12 @@ export default function DashboardPropietariosPage() {
         icono: CreditCard,
         href: "/movil/propietarios/pagos",
       },
+      ...(gasHabilitado ? [{
+        titulo: "Mi consumo de gas",
+        descripcion: "Consumos, recibos y fotos",
+        icono: Flame,
+        href: "/movil/propietarios/gas",
+      }] : []),
       {
         titulo: "Resumen financiero",
         descripcion: "Reporte mensual",
@@ -444,7 +470,7 @@ export default function DashboardPropietariosPage() {
         href: "/movil/propietarios/perfil",
       },
     ],
-    [comunicacionesPendientes]
+    [comunicacionesPendientes, gasHabilitado]
   );
 
   if (!propietario) {

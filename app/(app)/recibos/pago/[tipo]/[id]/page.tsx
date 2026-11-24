@@ -1558,6 +1558,47 @@ export default function ReciboPagoPage() {
       });
   }, [cargos, fechasPagoPorCargo, fechasPagoPorPeriodo, esDonJuanI, saldosInicialesDJ]);
 
+  // Helpers de clasificación para organizar el estado de cuenta.
+  const tipoDeCargo = (valor?: string | null) =>
+    String(valor || "").trim().toUpperCase();
+  const esCargoGas = (valor?: string | null) => tipoDeCargo(valor) === "GAS";
+  const esCargoMantenimiento = (valor?: string | null) =>
+    ["ORDINARIO", "MANTENIMIENTO"].includes(tipoDeCargo(valor));
+
+  const detalleGas = useMemo(
+    () => detalleMensual.filter((item) => esCargoGas(item.tipo_cargo)),
+    [detalleMensual]
+  );
+
+  const detalleMantenimiento = useMemo(
+    () =>
+      detalleMensual.filter((item) => esCargoMantenimiento(item.tipo_cargo)),
+    [detalleMensual]
+  );
+
+  const detalleOtros = useMemo(
+    () =>
+      detalleMensual.filter(
+        (item) =>
+          !esCargoGas(item.tipo_cargo) &&
+          !esCargoMantenimiento(item.tipo_cargo)
+      ),
+    [detalleMensual]
+  );
+
+  const resumenGrupo = (items: Array<(typeof detalleMensual)[number]>) => ({
+    totalCargo: items.reduce((sum, item) => sum + Number(item.totalCargo || 0), 0),
+    totalAplicado: items.reduce((sum, item) => sum + Number(item.pagoAplicado || 0), 0),
+    totalBalance: items.reduce((sum, item) => sum + Number(item.balance || 0), 0),
+  });
+
+  const resumenGas = useMemo(() => resumenGrupo(detalleGas), [detalleGas]);
+  const resumenMantenimiento = useMemo(
+    () => resumenGrupo(detalleMantenimiento),
+    [detalleMantenimiento]
+  );
+  const resumenOtros = useMemo(() => resumenGrupo(detalleOtros), [detalleOtros]);
+
   const totalCargos = detalleMensual.reduce(
     (sum, item) => sum + item.totalCargo,
     0
@@ -1685,11 +1726,6 @@ export default function ReciboPagoPage() {
   // Modificaciones de presentación aisladas a Don Juan I.
   // Para todos los demás condominios permanece la salida original del recibo.
   // No cambia importes, registros de pagos, conciliación ni asignaciones.
-  const tipoDeCargo = (valor?: string | null) =>
-    String(valor || "").trim().toUpperCase();
-  const esCargoGas = (valor?: string | null) => tipoDeCargo(valor) === "GAS";
-  const esCargoMantenimiento = (valor?: string | null) =>
-    ["ORDINARIO", "MANTENIMIENTO"].includes(tipoDeCargo(valor));
   const incluyeSaldoInicial = esDonJuanI && aplicacionesInicialRecibo.length > 0;
   const incluyeGas = esDonJuanI && aplicacionesPago.some((app) =>
     esCargoGas(app.cargos_periodicos?.tipo_cargo)
@@ -1729,6 +1765,110 @@ export default function ReciboPagoPage() {
     if (esCargoGas(valor)) return "Gas";
     if (esCargoMantenimiento(valor)) return "Mantenimiento";
     return "";
+  };
+
+  const aplicacionesPagoOrdenadas = useMemo(() => {
+    return [...aplicacionesPago].sort((a, b) => {
+      const tipoA = tipoDeCargo(a.cargos_periodicos?.tipo_cargo);
+      const tipoB = tipoDeCargo(b.cargos_periodicos?.tipo_cargo);
+      const ordenTipo = (tipo: string) => {
+        if (tipo === "GAS") return 1;
+        if (["ORDINARIO", "MANTENIMIENTO"].includes(tipo)) return 2;
+        return 3;
+      };
+
+      const difTipo = ordenTipo(tipoA) - ordenTipo(tipoB);
+      if (difTipo !== 0) return difTipo;
+
+      const periodoA = String(a.cargos_periodicos?.periodo || "");
+      const periodoB = String(b.cargos_periodicos?.periodo || "");
+      if (periodoA !== periodoB) return periodoA.localeCompare(periodoB);
+
+      return Number(a.id || 0) - Number(b.id || 0);
+    });
+  }, [aplicacionesPago]);
+
+  const renderFilaEstadoCuenta = (item: (typeof detalleMensual)[number]) => (
+    <tr key={item.id}>
+      <td className="p-2 border font-bold">
+        <div>
+          {esDonJuanI && !item.esSaldoInicial && etiquetaConceptoDonJuan(item.tipo_cargo)
+            ? `${etiquetaConceptoDonJuan(item.tipo_cargo)} - ${item.etiquetaPeriodo}`
+            : item.etiquetaPeriodo}
+        </div>
+        {item.esSaldoInicial && (
+          <div className="mt-0.5 text-[9px] font-normal text-blue-700">
+            Apertura histórica
+          </div>
+        )}
+      </td>
+      <td className="p-2 border text-right">
+        RD$ {dinero(item.totalCargo)}
+      </td>
+      <td className="p-2 border text-right text-green-700 font-bold">
+        RD$ {dinero(item.pagoAplicado)}
+      </td>
+      <td className="p-2 border text-center font-bold text-slate-700 whitespace-nowrap">
+        {item.fechaRealPago ? formatoFecha(item.fechaRealPago) : "-"}
+      </td>
+      <td
+        className={`p-2 border text-right font-black ${
+          item.balance <= 0 ? "text-green-700" : "text-red-700"
+        }`}
+      >
+        RD$ {dinero(item.balance)}
+      </td>
+      <td className="p-2 border text-center font-bold">
+        {item.estadoMes}
+      </td>
+    </tr>
+  );
+
+  const renderFilaTituloGrupo = (
+    titulo: string,
+    color: "cyan" | "indigo" | "slate" = "slate"
+  ) => {
+    const estilos: Record<string, string> = {
+      cyan: "bg-cyan-50 text-cyan-900",
+      indigo: "bg-indigo-50 text-indigo-900",
+      slate: "bg-slate-50 text-slate-800",
+    };
+
+    return (
+      <tr key={`grupo-${titulo}`} className={estilos[color]}>
+        <td className="p-2 border font-black uppercase tracking-wide" colSpan={6}>
+          {titulo}
+        </td>
+      </tr>
+    );
+  };
+
+  const renderFilaSubtotalGrupo = (
+    llave: string,
+    titulo: string,
+    resumen: { totalCargo: number; totalAplicado: number; totalBalance: number },
+    color: "cyan" | "indigo" | "slate" = "slate"
+  ) => {
+    const estilos: Record<string, string> = {
+      cyan: "bg-cyan-100/70 text-cyan-950",
+      indigo: "bg-indigo-100/70 text-indigo-950",
+      slate: "bg-slate-100 text-slate-900",
+    };
+
+    return (
+      <tr key={`subtotal-${llave}`} className={estilos[color]}>
+        <td className="p-2 border font-black uppercase">Subtotal {titulo}</td>
+        <td className="p-2 border text-right font-black">RD$ {dinero(resumen.totalCargo)}</td>
+        <td className="p-2 border text-right font-black text-green-800">RD$ {dinero(resumen.totalAplicado)}</td>
+        <td className="p-2 border text-center font-bold">-</td>
+        <td className={`p-2 border text-right font-black ${resumen.totalBalance <= 0 ? "text-green-700" : "text-red-700"}`}>
+          RD$ {dinero(resumen.totalBalance)}
+        </td>
+        <td className="p-2 border text-center font-black">
+          {resumen.totalBalance <= 0 ? "PAGADO" : "CON BALANCE"}
+        </td>
+      </tr>
+    );
   };
 
   const noRecibo = `${
@@ -1865,9 +2005,23 @@ Tel. 829-792-9292`;
           body {
             margin: 0 !important;
             padding: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
             background: white !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+          }
+
+          main {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            background: white !important;
           }
 
           .no-print {
@@ -1875,13 +2029,19 @@ Tel. 829-792-9292`;
           }
 
           .print-card {
+            display: block !important;
             width: 100% !important;
             max-width: none !important;
+            height: auto !important;
+            min-height: 0 !important;
             margin: 0 !important;
             box-shadow: none !important;
             border: none !important;
             border-radius: 0 !important;
             padding: 0 !important;
+            overflow: visible !important;
+            break-after: auto !important;
+            page-break-after: auto !important;
             font-size: 9px !important;
             line-height: 1.12 !important;
           }
@@ -2081,7 +2241,7 @@ Tel. 829-792-9292`;
             </h2>
 
             <p className="text-xs mt-1">
-              Comprobante de pago recibido y aplicado al estado de cuenta
+              Recibo oficial del pago recibido
             </p>
           </div>
 
@@ -2106,7 +2266,7 @@ Tel. 829-792-9292`;
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4 text-sm page-break-inside-avoid">
           <div className="border rounded-lg p-3">
             <h3 className="font-black uppercase border-b pb-1 mb-2">
-              Propietario
+              Recibido de
             </h3>
 
             <div className="grid grid-cols-2 gap-y-1">
@@ -2130,69 +2290,80 @@ Tel. 829-792-9292`;
               <p className="font-bold">{esDonJuanI ? "Concepto / mes pagado:" : "Mes pagado:"}</p>
               <p>{mesPagadoVisible}</p>
 
-              <p className="font-bold">Método / Banco:</p>
+              <p className="font-bold">Método de pago:</p>
               <p>{pago.metodo_pago || "-"}</p>
 
               <p className="font-bold">Referencia:</p>
               <p>{pago.no_referencia || "-"}</p>
 
-              <p className="font-bold">Estado:</p>
+              <p className="font-bold">Estado del recibo:</p>
               <p>{pago.estado || "-"}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="border rounded-lg mt-4 page-break-inside-avoid overflow-hidden">
-          <div className="bg-slate-900 text-white px-3 py-1.5 font-black uppercase text-[11px]">
-            Resumen del pago
-          </div>
-
-          <div className="grid grid-cols-3 text-center text-[11px]">
-            <div className="border-r p-2 bg-green-50">
-              <p className="font-bold text-slate-600">Monto recibido</p>
-              <p className="text-[15px] font-black text-green-700">
-                RD$ {dinero(pago.monto_pagado)}
-              </p>
-            </div>
-
-            <div className="border-r p-2 bg-blue-50">
-              <p className="font-bold text-slate-600">Monto aplicado</p>
-              <p className="text-[15px] font-black text-blue-700">
-                RD$ {dinero(totalAplicadoPago)}
-              </p>
-            </div>
-
-            <div className="p-2 bg-red-50">
-              <p className="font-bold text-slate-600">Balance pendiente</p>
-              <p
-                className={`text-[15px] font-black ${
-                  balancePendiente <= 0 ? "text-green-700" : "text-red-700"
-                }`}
-              >
-                RD$ {dinero(balancePendiente)}
-              </p>
             </div>
           </div>
         </div>
 
         <div className="mt-4 page-break-inside-avoid">
           <h3 className="font-black uppercase border-b pb-1 mb-2">
-            Detalle aplicado del pago
+            Resumen del recibo
           </h3>
-
-          <div className="mb-2 text-[10px] text-slate-500 page-break-inside-avoid">
-            <strong>Fecha real pago:</strong> fecha bancaria en que el cargo quedó totalmente saldado.
-            Si recibió varios abonos, se muestra la fecha en que el acumulado completó el cargo.
-          </div>
 
           <div className="overflow-auto border rounded-lg">
             <table className="min-w-full text-sm print-table">
               <thead className="bg-slate-100">
                 <tr>
-                  <th className="p-2 border">Período</th>
-                  <th className="p-2 border text-center">Fecha real pago</th>
-                  <th className="p-2 border text-right">Monto aplicado</th>
-                  <th className="p-2 border text-center">Estado</th>
+                  <th className="p-2 border text-left">Detalle</th>
+                  <th className="p-2 border text-right">Valor</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <tr>
+                  <td className="p-2 border font-bold">Monto recibido</td>
+                  <td className="p-2 border text-right font-black text-slate-900">
+                    RD$ {dinero(pago.monto_pagado)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="p-2 border font-bold">Aplicado en este recibo</td>
+                  <td className="p-2 border text-right font-black text-slate-900">
+                    RD$ {dinero(totalAplicadoPago)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="p-2 border font-bold">Balance pendiente luego del pago</td>
+                  <td className={`p-2 border text-right font-black ${balancePendiente > 0 ? "text-red-700" : "text-emerald-700"}`}>
+                    {balancePendiente > 0 ? `RD$ ${dinero(balancePendiente)}` : "AL DÍA"}
+                  </td>
+                </tr>
+                {balanceNoAplicadoRecibo > 0 && (
+                  <tr>
+                    <td className="p-2 border font-bold">Saldo a favor generado</td>
+                    <td className="p-2 border text-right font-black text-emerald-700">
+                      RD$ {dinero(balanceNoAplicadoRecibo)}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="mt-2 text-[11px] text-slate-500">
+            Recibo emitido por VAM Administración de Condominios. Este documento refleja el pago recibido y el balance resultante luego de su aplicación.
+          </p>
+        </div>
+
+        <div className="mt-4 page-break-inside-avoid">
+          <h3 className="font-black uppercase border-b pb-1 mb-2">
+            Detalle del pago aplicado
+          </h3>
+
+          <div className="overflow-auto border rounded-lg">
+            <table className="min-w-full text-sm print-table">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="p-2 border text-left">Concepto</th>
+                  <th className="p-2 border text-center">Fecha</th>
+                  <th className="p-2 border text-right">Monto</th>
                 </tr>
               </thead>
 
@@ -2204,19 +2375,17 @@ Tel. 829-792-9292`;
                       <td className="p-2 border font-bold">
                         Deuda inicial (corte {formatoFecha(saldo?.fecha_corte)})
                       </td>
-                      <td className="p-2 border text-center font-bold">
+                      <td className="p-2 border text-center font-bold whitespace-nowrap">
                         {formatoFecha(app.fecha_aplicacion || pago.fecha_pago)}
                       </td>
                       <td className="p-2 border text-right text-green-700 font-black">
                         RD$ {dinero(app.monto_aplicado)}
                       </td>
-                      <td className="p-2 border text-center font-bold">
-                        {saldo?.estado || "APLICADO"}
-                      </td>
                     </tr>
                   );
                 })}
-                {aplicacionesPago.map((item) => {
+
+                {aplicacionesPagoOrdenadas.map((item) => {
                   const cargo = item.cargos_periodicos;
                   const periodo = cargo?.periodo || "-";
                   const fechaDetalle = cargo?.id
@@ -2228,7 +2397,7 @@ Tel. 829-792-9292`;
                       <td className="p-2 border font-bold">
                         {esDonJuanI && etiquetaConceptoDonJuan(cargo?.tipo_cargo)
                           ? `${etiquetaConceptoDonJuan(cargo?.tipo_cargo)} - ${formatearPeriodo(periodo)}`
-                          : formatearPeriodo(periodo)}
+                          : `${cargo?.concepto || formatearPeriodo(periodo)}`}
                       </td>
                       <td className="p-2 border text-center font-bold text-slate-700 whitespace-nowrap">
                         {fechaDetalle ? formatoFecha(fechaDetalle) : "-"}
@@ -2236,17 +2405,14 @@ Tel. 829-792-9292`;
                       <td className="p-2 border text-right text-green-700 font-black">
                         RD$ {dinero(item.monto_aplicado)}
                       </td>
-                      <td className="p-2 border text-center font-bold">
-                        {cargo?.estado || "-"}
-                      </td>
                     </tr>
                   );
                 })}
 
                 {aplicacionesPago.length === 0 && aplicacionesInicialRecibo.length === 0 && (
                   <tr>
-                    <td className="p-3 border text-center" colSpan={4}>
-                      Este pago no tiene aplicaciones registradas en pagos_aplicaciones.
+                    <td className="p-3 border text-center" colSpan={3}>
+                      Este pago no tiene aplicaciones registradas.
                     </td>
                   </tr>
                 )}
@@ -2261,9 +2427,6 @@ Tel. 829-792-9292`;
                     <td className="p-2 border text-right">
                       RD$ {dinero(totalAplicadoPago)}
                     </td>
-                    <td className="p-2 border text-center">
-                      No aplicado: RD$ {dinero(balanceNoAplicadoRecibo)}
-                    </td>
                   </tr>
                 </tfoot>
               )}
@@ -2274,7 +2437,7 @@ Tel. 829-792-9292`;
         {pago.descripcion && (
           <div className="border rounded-lg p-3 mt-4">
             <h3 className="font-black uppercase border-b pb-1 mb-2">
-              Observación del pago
+              Observaciones
             </h3>
 
             {esDonJuanI && (incluyeGas || incluyeSaldoInicial) ? (
@@ -2306,230 +2469,6 @@ Tel. 829-792-9292`;
             </a>
           </div>
         )}
-
-        <div className="mt-5">
-          <h3 className="font-black uppercase border-b pb-1 mb-2">
-            Estado de cuenta de cargos del año {anioActual}
-          </h3>
-
-          <div className="mb-3 grid gap-2 sm:grid-cols-3 page-break-inside-avoid">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="text-[10px] font-black uppercase text-slate-500">
-                Total recibido {anioActual}
-              </p>
-              <p className="mt-1 text-base font-black text-slate-900">
-                RD$ {dinero(totalRecibidoAnio)}
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-              <p className="text-[10px] font-black uppercase text-emerald-700">
-                Aplicado a cargos generados
-              </p>
-              <p className="mt-1 text-base font-black text-emerald-900">
-                RD$ {dinero(totalPagosAplicadosAnio)}
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-              <p className="text-[10px] font-black uppercase text-blue-700">
-                Saldo a favor disponible
-              </p>
-              <p className="mt-1 text-base font-black text-blue-900">
-                RD$ {dinero(saldoFavorDisponible)}
-              </p>
-            </div>
-            {esDonJuanI && saldosInicialesDJ.length > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                <p className="text-[10px] font-black uppercase text-amber-800">Aplicado a deuda inicial (acumulado)</p>
-                <p className="mt-1 text-base font-black text-amber-900">RD$ {dinero(deudaInicialPagada)}</p>
-              </div>
-            )}
-          </div>
-
-          {saldoFavorDisponible > 0 && (
-            <div className="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-950 page-break-inside-avoid">
-              <p className="font-black">
-                Saldo a favor disponible: RD$ {dinero(saldoFavorDisponible)}
-              </p>
-
-              {saldoFavorDelPago > 0 && (
-                <p className="mt-1">
-                  De este recibo permanecen RD$ {dinero(saldoFavorDelPago)} disponibles
-                  como saldo a favor.
-                </p>
-              )}
-
-              <p className="mt-1 text-xs">
-                Este saldo no representa un cargo futuro pagado. Permanecerá disponible
-                y VAM lo aplicará automáticamente cuando se genere el próximo cargo de
-                mantenimiento.
-              </p>
-            </div>
-          )}
-
-          {esDonJuanI && saldosInicialesDJ.length > 0 && (
-            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 page-break-inside-avoid">
-              <p className="font-black uppercase">Deuda inicial verificada (corte de apertura)</p>
-              <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1">
-                <span>Original: <strong>RD$ {dinero(deudaInicialOriginal)}</strong></span>
-                <span>Aplicado a deuda inicial: <strong>RD$ {dinero(deudaInicialPagada)}</strong></span>
-                <span>Pendiente: <strong>RD$ {dinero(deudaInicialPendiente)}</strong></span>
-              </div>
-              <p className="mt-1">La deuda inicial proviene de saldos_iniciales_propietarios y no se duplica en cargos mensuales.</p>
-            </div>
-          )}
-
-          {detalleMensual.some((item) => item.esSaldoInicial) && (
-            <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 page-break-inside-avoid">
-              <strong>Saldo inicial:</strong> corresponde a una obligación anterior al
-              inicio operativo de VAM (01/01/2026). Se presenta separada del cargo
-              ordinario de enero y conserva la fecha real del pago aplicado.
-            </div>
-          )}
-
-          <div className="overflow-auto border rounded-lg">
-            <table className="min-w-full text-sm print-table">
-              <thead className="bg-slate-100">
-                <tr>
-                  <th className="p-2 border">Período / concepto</th>
-                  <th className="p-2 border">Cargo total</th>
-                  <th className="p-2 border">Pago aplicado</th>
-                  <th className="p-2 border">Fecha real pago</th>
-                  <th className="p-2 border">Balance</th>
-                  <th className="p-2 border">Estado</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {esDonJuanI && saldosInicialesDJ.map((saldo) => (
-                  <tr key={`deuda-inicial-${saldo.id}`} className="bg-amber-50">
-                    <td className="p-2 border font-bold">
-                      <div>Deuda inicial (corte {formatoFecha(saldo.fecha_corte)})</div>
-                      <div className="text-[9px] font-normal text-slate-600">Saldo histórico oficial, separado de cuotas</div>
-                    </td>
-                    <td className="p-2 border text-right">RD$ {dinero(saldo.monto_original)}</td>
-                    <td className="p-2 border text-right font-bold text-green-700">RD$ {dinero(saldo.monto_pagado)}</td>
-                    <td className="p-2 border text-center">{
-                      aplicacionesInicialDJ.filter((app) => Number(app.saldo_inicial_id) === Number(saldo.id))
-                        .map((app) => formatoFecha(app.fecha_aplicacion))
-                        .filter(Boolean).join(", ") || "-"
-                    }</td>
-                    <td className="p-2 border text-right font-black text-red-700">RD$ {dinero(saldo.balance)}</td>
-                    <td className="p-2 border text-center font-bold">{saldo.estado || "-"}</td>
-                  </tr>
-                ))}
-                {detalleMensual.map((item) => (
-                  <tr key={item.id}>
-                    <td className="p-2 border font-bold">
-                      <div>
-                        {esDonJuanI && !item.esSaldoInicial && etiquetaConceptoDonJuan(item.tipo_cargo)
-                          ? `${etiquetaConceptoDonJuan(item.tipo_cargo)} - ${item.etiquetaPeriodo}`
-                          : item.etiquetaPeriodo}
-                      </div>
-                      {item.esSaldoInicial && (
-                        <div className="mt-0.5 text-[9px] font-normal text-blue-700">
-                          Apertura histórica
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-2 border text-right">
-                      RD$ {dinero(item.totalCargo)}
-                    </td>
-                    <td className="p-2 border text-right text-green-700 font-bold">
-                      RD$ {dinero(item.pagoAplicado)}
-                    </td>
-                    <td className="p-2 border text-center font-bold text-slate-700 whitespace-nowrap">
-                      {item.fechaRealPago ? formatoFecha(item.fechaRealPago) : "-"}
-                    </td>
-                    <td
-                      className={`p-2 border text-right font-black ${
-                        item.balance <= 0 ? "text-green-700" : "text-red-700"
-                      }`}
-                    >
-                      RD$ {dinero(item.balance)}
-                    </td>
-                    <td className="p-2 border text-center font-bold">
-                      {item.estadoMes}
-                    </td>
-                  </tr>
-                ))}
-
-                {detalleMensual.length === 0 && saldosInicialesDJ.length === 0 && (
-                  <tr>
-                    <td className="p-3 border text-center" colSpan={6}>
-                      No hay cargos generados para este apartamento en el año
-                      del pago.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-
-              {(detalleMensual.length > 0 || (esDonJuanI && saldosInicialesDJ.length > 0)) && (
-                <tfoot className="bg-slate-100 font-black">
-                  <tr>
-                    <td className="p-2 border text-right">{esDonJuanI ? "TOTALES DE CARGOS Y APERTURA" : "TOTALES"}</td>
-                    <td className="p-2 border text-right">
-                      RD$ {dinero(totalCargos + deudaInicialOriginal)}
-                    </td>
-                    <td className="p-2 border text-right">
-                      RD$ {dinero(totalPagosAplicadosAnio + deudaInicialPagada)}
-                    </td>
-                    <td className="p-2 border text-center">-</td>
-                    <td className="p-2 border text-right">
-                      RD$ {dinero(balancePendiente)}
-                    </td>
-                    <td className="p-2 border text-center">
-                      {estadoGeneral}
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-
-          {coberturaFutura.length > 0 && (
-            <div className="mt-3 rounded-lg border border-emerald-200 overflow-hidden page-break-inside-avoid">
-              <div className="bg-emerald-50 px-3 py-2 text-xs font-black uppercase text-emerald-900">
-                Cobertura futura estimada con saldo a favor
-              </div>
-              <table className="min-w-full text-xs print-table">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="p-2 border">Mes futuro</th>
-                    <th className="p-2 border text-right">Cuota actual</th>
-                    <th className="p-2 border text-right">Cobertura estimada</th>
-                    <th className="p-2 border text-center">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {coberturaFutura.map((item) => (
-                    <tr key={`cobertura-${item.anio}-${item.mes}`}>
-                      <td className="p-2 border font-bold">
-                        {item.mesNombre} {item.anio}
-                      </td>
-                      <td className="p-2 border text-right">
-                        RD$ {dinero(item.cuota)}
-                      </td>
-                      <td className="p-2 border text-right font-black text-emerald-800">
-                        RD$ {dinero(item.montoCubierto)}
-                      </td>
-                      <td className="p-2 border text-center font-black text-emerald-800">
-                        {item.estado}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="px-3 py-2 text-[10px] text-slate-500">
-                Proyección basada en la cuota ordinaria actual de RD$ {dinero(cuotaMensualCobertura)}.
-                Estos meses todavía no constituyen cargos formales. Saldo a favor restante
-                después de la proyección: RD$ {dinero(saldoFavorLuegoCoberturaAnual)}.
-              </div>
-            </div>
-          )}
-        </div>
-
         <div className="border rounded-lg p-3 mt-5 page-break-inside-avoid">
           <h3 className="font-black uppercase border-b pb-1 mb-2">
             Confirmación

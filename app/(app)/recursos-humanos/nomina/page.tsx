@@ -1267,7 +1267,7 @@ export default function NominaPage() {
         setGuardando(false);
         alert(
           estado === "Aprobada"
-            ? "Nómina modificada y solicitud de pago generada correctamente."
+            ? "Nómina modificada y solicitud de pago generada correctamente. El Soporte de Nómina se generará automáticamente cuando Finanzas cree el gasto."
             : "Nómina modificada correctamente."
         );
         limpiarFormulario();
@@ -1375,7 +1375,7 @@ export default function NominaPage() {
       setGuardando(false);
       alert(
         estado === "Aprobada"
-          ? "Nómina registrada y solicitud de pago generada correctamente."
+          ? "Nómina registrada y solicitud de pago generada correctamente. El Soporte de Nómina se generará automáticamente cuando Finanzas cree el gasto."
           : "Nómina registrada correctamente."
       );
       limpiarFormulario();
@@ -1433,7 +1433,7 @@ export default function NominaPage() {
 
     alert(
       nuevoEstado === "Aprobada"
-        ? "Nómina aprobada y solicitud de pago generada correctamente."
+        ? "Nómina aprobada y solicitud de pago generada correctamente. El Soporte de Nómina se generará automáticamente cuando Finanzas cree el gasto."
         : "Estado actualizado correctamente."
     );
     cargarNominas(condominioId, filtroPeriodo);
